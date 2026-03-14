@@ -332,7 +332,7 @@
     </button>
     <div class="stack-sep"></div>
     <div class="stack-host">
-      Host: <input id="wsHost" value="localhost" onchange="onHostChange()" />
+      Host: <input id="wsHost" autocomplete="off" onchange="onHostChange()" />
     </div>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#475569">
       <span>Ping:</span><span style="color:#60a5fa;font-weight:bold" id="pingVal">—</span>
@@ -377,7 +377,7 @@
   <div id="influxPanel">
 
     <div class="ix-connect-bar">
-      <label>Host</label><input class="ix-w-host" id="ixHost" value="localhost" autocomplete="off"/>
+      <label>Host</label><input class="ix-w-host" id="ixHost" autocomplete="off"/>
       <label>Port</label><input class="ix-w-port" id="ixPort" value="8086"/>
       <label>Token</label><input class="ix-w-token" id="ixToken" value="battery-token-secret" type="password"/>
       <label>Org</label><input class="ix-w-sm" id="ixOrg" value="battery-org"/>
@@ -521,7 +521,7 @@
 
   // ── Stack selector ───────────────────────────────────────────
 
-  function host() { return document.getElementById('wsHost').value.trim() || 'localhost'; }
+  function host() { return document.getElementById('wsHost').value.trim() || window.location.hostname; }
 
   function onHostChange() {
     localStorage.setItem('ds_host', host());
@@ -1290,8 +1290,9 @@ from(bucket: "${ixBkt()}")
 
   // ── Boot ─────────────────────────────────────────────────────
   (function() {
-    const saved = localStorage.getItem('ds_host');
-    if (saved) document.getElementById('wsHost').value = saved;
+    document.getElementById('wsHost').value =
+      localStorage.getItem('ds_host') || window.location.hostname;
+    document.getElementById('ixHost').value = window.location.hostname;
     probeAll();
     setInterval(probeAll, 10000);   // re-probe every 10s
     selectStack(8761);              // default to new stack

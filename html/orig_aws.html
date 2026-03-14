@@ -269,7 +269,7 @@ window.onload = () => {
 };
 
 // ── InfluxDB2 API ─────────────────────────────────────────────────
-const baseUrl   = () => `http://${$('cfgHost').value.trim()||'localhost'}:${$('cfgPort').value.trim()||'8086'}`;
+const baseUrl   = () => `http://${$('cfgHost').value.trim()||window.location.hostname}:${$('cfgPort').value.trim()||'8086'}`;
 const authToken = () => $('cfgToken').value.trim();
 const org       = () => $('cfgOrg').value.trim();
 const bkt       = () => $('cfgBucket').value.trim();

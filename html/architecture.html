@@ -118,7 +118,7 @@ svg.arch { width: 100%; overflow: visible; display: block; }
     <div class="header-sub">Live component status — both stacks</div>
   </div>
   <div class="host-row">
-    Host: <input id="hostInput" value="localhost">
+    Host: <input id="hostInput" autocomplete="off">
     <button onclick="reconnectAll()">Connect</button>
   </div>
 </div>
@@ -375,7 +375,7 @@ function applyStatus(svg, components, arrowDefs) {
 const conns = {};
 
 function connect(port) {
-  const h    = document.getElementById('hostInput').value.trim() || 'localhost';
+  const h    = document.getElementById('hostInput').value.trim() || window.location.hostname;
   const dotEl = document.getElementById(`dot${port}`);
   const lblEl = document.getElementById(`lbl${port}`);
   const svg   = document.getElementById(`svg${port}`);
@@ -422,8 +422,8 @@ function reconnectAll() {
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 (function() {
-  const saved = localStorage.getItem('ds_host');
-  if (saved) document.getElementById('hostInput').value = saved;
+  document.getElementById('hostInput').value =
+    localStorage.getItem('ds_host') || window.location.hostname;
   connect(8760);
   connect(8761);
 })();
