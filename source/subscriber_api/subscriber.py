@@ -222,8 +222,8 @@ async def _nats_subscriber(cfg: dict) -> None:
 
             async def on_msg(msg):
                 try:
-                    data = _flatten(json.loads(msg.data))
-                    await _broadcast({"type": "live", "data": data})
+                    payload = _flatten(json.loads(msg.data))
+                    await _broadcast({"type": "live", "subject": msg.subject, "payload": payload})
                 except Exception:
                     pass
 

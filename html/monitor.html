@@ -494,6 +494,8 @@ async function connectSubscriber() {
     document.getElementById('btnConnect').textContent = 'Disconnect';
     document.getElementById('btnConnect').disabled = false;
     document.getElementById('btnRefresh').disabled = false;
+    // Start live stream immediately
+    subWs.send(JSON.stringify({ type: 'subscribe', subject: 'batteries.>' }));
     restartAutoRefresh();
     doRefresh();
   };
@@ -520,7 +522,7 @@ async function connectSubscriber() {
         pendingSubQuery.reject(new Error(msg.message));
         pendingSubQuery = null;
       } else if (msg.type === 'live') {
-        handleLive(msg.data);
+        handleLive(msg.payload);  // server sends {type:'live', subject, payload}
       }
     } catch(e) {}
   };

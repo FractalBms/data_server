@@ -1,0 +1,27 @@
+# Subscriber API — AWS EC2 production config
+# Run: python subscriber.py --config config.aws.yaml
+
+# NATS is on the same EC2 instance
+nats:
+  url: "nats://localhost:4222"
+  stream_name: BATTERY_DATA
+  subject_filter: "batteries.>"
+
+# Real AWS S3 — no endpoint_url, boto3 uses standard AWS endpoints
+# Option A: IAM instance role (recommended — no keys in config)
+#   Attach an IAM role to the EC2 instance with s3:GetObject / s3:ListBucket
+#   on the bucket, then leave access_key and secret_key unset.
+# Option B: explicit credentials (less preferred)
+#   access_key: AKIA...
+#   secret_key: ...
+s3:
+  bucket: battery-data
+  region: us-east-1
+  prefix: ""
+  # access_key: AKIA...       # omit if using IAM instance role
+  # secret_key: ...
+
+# WebSocket server — listen on all interfaces so the browser can reach it
+server:
+  host: "0.0.0.0"
+  port: 8767
