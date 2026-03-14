@@ -1,0 +1,25 @@
+# NATS JetStream (replaces direct MQTT subscription)
+nats:
+  url: "nats://localhost:4222"
+  stream_name: BATTERY_DATA
+  consumer_name: parquet-writer   # durable — survives restarts, replays on reconnect
+  subject_filter: "batteries.>"
+
+# Buffer — flush to Parquet after this many seconds or messages (whichever first)
+buffer:
+  flush_interval_seconds: 60
+  max_messages: 10000
+  fetch_batch: 500               # messages to pull from NATS per iteration
+
+# S3 / MinIO target
+s3:
+  endpoint_url: "http://localhost:9000"   # MinIO; remove for real AWS S3
+  bucket: battery-data
+  region: us-east-1
+  access_key: minioadmin
+  secret_key: minioadmin
+  prefix: ""
+
+# Parquet
+parquet:
+  compression: snappy             # snappy | zstd | gzip

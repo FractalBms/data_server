@@ -1,0 +1,56 @@
+broker:
+  host: localhost
+  port: 1883
+  username: ""
+  password: ""
+  client_id: battery-data-generator
+
+websocket:
+  host: 0.0.0.0
+  port: 8765
+
+# Hierarchy
+sites: 2
+racks_per_site: 3
+modules_per_rack: 4
+cells_per_module: 6
+
+# How often to publish a sample for each cell (seconds)
+sample_interval_seconds: 1
+
+# Topic structure:
+#   per_cell       — one topic per cell, payload is JSON with all measurements
+#                    e.g. batteries/site=0/rack=1/module=2/cell=3
+#   per_cell_item  — one topic per measurement per cell
+#                    e.g. batteries/site=0/rack=1/module=2/cell=3/voltage
+topic_mode: per_cell
+
+topic_prefix: batteries
+
+# Cell measurements — each generates realistic drifting values
+cell_data:
+  voltage:
+    min: 3.0
+    max: 4.2
+    unit: V
+    nominal: 3.7
+  current:
+    min: -50.0
+    max: 50.0
+    unit: A
+    nominal: 0.0
+  temperature:
+    min: 20.0
+    max: 45.0
+    unit: C
+    nominal: 25.0
+  soc:
+    min: 0.0
+    max: 100.0
+    unit: percent
+    nominal: 80.0
+  internal_resistance:
+    min: 0.001
+    max: 0.05
+    unit: ohm
+    nominal: 0.01

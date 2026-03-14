@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BATTERY DATA SUBSCRIBER</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: #0a0a0a; color: #e5e7eb;
+    }
+    .container {
+      max-width: 1500px; margin: 0 auto;
+      background: #121212;
+      border: 1px solid #1e3a8a;
+      border-radius: 12px;
+      display: flex; flex-direction: column;
+      height: 94vh; overflow: hidden;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: grid; grid-template-columns: 1fr auto;
+      gap: 12px; align-items: center;
+      padding: 14px 20px;
+      background: linear-gradient(135deg, #000, #1e3a8a);
+      border-bottom: 2px solid #2563eb;
+    }
+    .header h2 { margin: 0; font-size: 20px; }
+    .header small { color: #93c5fd; }
+    .header-right { text-align: right; font-size: 12px; line-height: 1.8; }
+
+    .pill {
+      display: inline-block; padding: 2px 8px;
+      border-radius: 999px; font-weight: bold; font-size: 11px;
+    }
+    .pill.ok      { background: #065f46; color: #6ee7b7; }
+    .pill.bad     { background: #7f1d1d; color: #fecaca; }
+    .pill.loading { background: #713f12; color: #fde68a; }
+
+    /* ── Connect bar ── */
+    .connect-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; background: #0f172a;
+      border-bottom: 1px solid #1e3a8a; flex-wrap: wrap;
+    }
+    .connect-bar label { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    .connect-bar input {
+      background: #020617; border: 1px solid #334155; border-radius: 5px;
+      color: #e2e8f0; padding: 4px 8px; font-size: 13px; outline: none;
+      transition: border-color 0.2s;
+    }
+    .connect-bar input:focus { border-color: #2563eb; }
+    .connect-bar input.host { width: 160px; }
+    .connect-bar input.port { width: 70px; }
+    .ping-box {
+      margin-left: auto; display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: #94a3b8;
+    }
+    .ping-value { color: #60a5fa; font-weight: bold; font-variant-numeric: tabular-nums; }
+
+    /* ── Status bar ── */
+    .status-bar {
+      display: grid; grid-template-columns: repeat(5, 1fr);
+      padding: 8px; background: #1a1a1a;
+      border-bottom: 1px solid #1e3a8a;
+    }
+    .status-item { text-align: center; font-size: 12px; }
+    .status-item b { color: #60a5fa; }
+
+    /* ── Main ── */
+    .main { display: grid; grid-template-columns: 260px 1fr; flex: 1; overflow: hidden; }
+
+    .sidebar {
+      background: #0f172a; padding: 12px;
+      border-right: 1px solid #1e3a8a;
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    .content {
+      background: #0f172a; padding: 12px;
+      display: flex; flex-direction: column; gap: 0;
+      overflow: hidden;
+    }
+
+    /* ── Cards / Forms ── */
+    .card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; padding: 12px;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: #64748b; margin-bottom: 12px;
+    }
+    .form-row { margin-bottom: 10px; }
+    .form-row label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 3px; }
+    .form-row input, .form-row select {
+      width: 100%; background: #020617; border: 1px solid #334155;
+      border-radius: 5px; color: #e2e8f0; padding: 5px 8px;
+      font-size: 13px; outline: none; transition: border-color 0.2s;
+    }
+    .form-row input:focus, .form-row select:focus { border-color: #2563eb; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 6px 14px; border-radius: 6px;
+      border: 1px solid #475569; background: #334155;
+      color: #e5e7eb; font-weight: bold; font-size: 13px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #475569; }
+    .btn.primary { background: #2563eb; border-color: #60a5fa; }
+    .btn.primary:hover { background: #1d4ed8; }
+    .btn.danger  { background: #dc2626; border-color: #f87171; }
+    .btn.danger:hover { background: #b91c1c; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-full { width: 100%; padding: 8px; }
+
+    /* ── Tabs ── */
+    .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    .tab {
+      padding: 7px 18px; border-radius: 6px;
+      background: #1e293b; border: 1px solid #334155;
+      cursor: pointer; font-size: 13px; font-weight: 600; color: #94a3b8;
+      transition: background 0.15s, color 0.15s;
+    }
+    .tab.active { background: #2563eb; border-color: #60a5fa; color: #fff; }
+
+    /* ── Tab panes ── */
+    .pane { display: none; flex: 1; flex-direction: column; min-height: 0; }
+    .pane.active { display: flex; }
+
+    /* ── Tables ── */
+    .table-wrap { overflow: auto; flex: 1; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead th {
+      position: sticky; top: 0; background: #1e293b; color: #64748b;
+      text-align: left; padding: 7px 10px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+      border-bottom: 1px solid #334155; white-space: nowrap;
+    }
+    tbody tr { border-bottom: 1px solid #1a2540; }
+    tbody tr:hover { background: #1e293b; }
+    tbody td { padding: 6px 10px; color: #cbd5e1; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
+    .topic  { color: #818cf8; font-family: monospace; font-size: 11px; }
+    .ts     { color: #475569; font-family: monospace; font-size: 11px; }
+    .val    { color: #f8fafc; font-weight: 600; }
+    .empty-msg { padding: 40px; text-align: center; color: #475569; }
+
+    /* ── History result info ── */
+    .result-bar {
+      display: flex; align-items: center; gap: 12px;
+      padding: 6px 0 10px; font-size: 12px; color: #64748b;
+    }
+    .result-bar b { color: #60a5fa; }
+
+    /* ── Query spinner ── */
+    .spinner {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid #334155; border-top-color: #2563eb;
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+      margin-right: 6px; vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h2>BATTERY DATA SUBSCRIBER</h2>
+      <small id="headerAddr">WebSocket: not connected</small>
+    </div>
+    <div class="header-right">
+      Server: <span id="serverPill" class="pill bad">DISCONNECTED</span><br>
+      NATS: <span id="natsPill" class="pill bad">OFFLINE</span>
+      &nbsp;S3: <span id="s3Pill" class="pill bad">OFFLINE</span>
+    </div>
+  </div>
+
+  <!-- Connect bar -->
+  <div class="connect-bar">
+    <label>Host</label>
+    <input class="host" id="wsHost" value="localhost" />
+    <label>Port</label>
+    <input class="port" id="wsPort" value="8767" />
+    <button class="btn primary" id="btnConnect" onclick="toggleConnect()">Connect</button>
+    <div class="ping-box">
+      <span>Ping:</span><span class="ping-value" id="pingVal">—</span>
+      <span>Last msg:</span><span class="ping-value" id="lastMsgVal">—</span>
+    </div>
+    <div style="display:flex;gap:6px;margin-left:8px">
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;text-decoration:none" href="dashboard.html">Dashboard</a>
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;text-decoration:none" href="generator.html">Generator</a>
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;text-decoration:none" href="aws.html">S3 Store</a>
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#2563eb;border:1px solid #60a5fa;color:#fff;text-decoration:none" href="costs.html">Costs</a>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="status-item">TOPIC <b id="sbTopic">—</b></div>
+    <div class="status-item">LIVE MSG/S <b id="sbMps">0</b></div>
+    <div class="status-item">LIVE TOTAL <b id="sbTotal">0</b></div>
+    <div class="status-item">QUERIES <b id="sbQueries">0</b></div>
+    <div class="status-item">HISTORY ROWS <b id="sbHistRows">—</b></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Sidebar: subscription + history query -->
+    <div class="sidebar">
+
+      <div class="card">
+        <div class="card-title">Live Subscription</div>
+        <div class="form-row">
+          <label>Topic filter</label>
+          <input id="subTopic" value="batteries.>" />
+        </div>
+        <div style="display:flex; gap:6px; margin-top:4px">
+          <button class="btn primary btn-full" id="btnSub" disabled onclick="subscribe()">Subscribe</button>
+          <button class="btn danger"           id="btnUnsub" disabled onclick="unsubscribe()">Stop</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">History Query</div>
+        <div class="form-row">
+          <label>Site ID (blank = all)</label>
+          <input id="hSite" placeholder="e.g. 0" />
+        </div>
+        <div class="form-row">
+          <label>From</label>
+          <input type="datetime-local" id="hFrom" />
+        </div>
+        <div class="form-row">
+          <label>To</label>
+          <input type="datetime-local" id="hTo" />
+        </div>
+        <div class="form-row">
+          <label>Limit</label>
+          <input type="number" id="hLimit" value="500" min="1" max="10000" />
+        </div>
+        <button class="btn primary btn-full" id="btnQuery" disabled onclick="queryHistory()" style="margin-top:4px">
+          Run Query
+        </button>
+      </div>
+
+    </div>
+
+    <!-- Content: tabbed live / history -->
+    <div class="content">
+
+      <div class="tabs">
+        <div class="tab active" id="tabLive"    onclick="switchTab('live')">Live Data</div>
+        <div class="tab"        id="tabHistory" onclick="switchTab('history')">History</div>
+      </div>
+
+      <!-- Live pane -->
+      <div class="pane active" id="paneLive">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Time</th><th>Topic</th><th>Site</th><th>Rack</th><th>Module</th><th>Cell</th><th>Field</th><th>Value</th><th>Unit</th></tr>
+            </thead>
+            <tbody id="liveBody">
+              <tr><td colspan="9" class="empty-msg">Subscribe to a topic to see live data</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- History pane -->
+      <div class="pane" id="paneHistory">
+        <div class="result-bar" id="resultBar" style="display:none"></div>
+        <div class="table-wrap">
+          <table id="histTable">
+            <thead><tr id="histThead"></tr></thead>
+            <tbody id="histTbody">
+              <tr><td colspan="3" class="empty-msg">Run a history query to see data</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  const MAX_LIVE_ROWS = 200;
+
+  let ws = null;
+  let connected = false;
+  let liveRows = [];
+  let pingTimer = null;
+  let pingStart = 0;
+  let pingPending = false;
+  let lastMsgTime = null;
+  let lastMsgTimer = null;
+
+  // Pre-populate datetime inputs to last 1 hour
+  (function() {
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    document.getElementById('hTo').value   = fmt(now);
+    const from = new Date(now - 3600000);
+    document.getElementById('hFrom').value = fmt(from);
+  })();
+
+  // ── Connection ──────────────────────────────────────────────
+
+  function wsUrl() {
+    return `ws://${document.getElementById('wsHost').value.trim() || 'localhost'}:${document.getElementById('wsPort').value.trim() || '8767'}`;
+  }
+
+  function toggleConnect() {
+    connected ? disconnect() : connectWs();
+  }
+
+  function connectWs() {
+    const url = wsUrl();
+    setServerPill('loading', 'CONNECTING');
+    document.getElementById('btnConnect').textContent = 'Connecting…';
+    document.getElementById('btnConnect').disabled = true;
+    document.getElementById('headerAddr').textContent = `WebSocket: ${url}`;
+
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      connected = true;
+      setServerPill('ok', 'CONNECTED');
+      document.getElementById('btnConnect').textContent = 'Disconnect';
+      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('btnSub').disabled   = false;
+      document.getElementById('btnUnsub').disabled = false;
+      document.getElementById('btnQuery').disabled = false;
+      ws.send(JSON.stringify({ type: 'get_status' }));
+      startPing();
+      startLastMsgTimer();
+    };
+
+    ws.onclose = () => {
+      connected = false;
+      setServerPill('bad', 'DISCONNECTED');
+      setMqttPill('bad', 'OFFLINE');
+      setS3Pill('bad', 'OFFLINE');
+      document.getElementById('btnConnect').textContent = 'Connect';
+      document.getElementById('btnConnect').disabled = false;
+      ['btnSub','btnUnsub','btnQuery'].forEach(id => document.getElementById(id).disabled = true);
+      document.getElementById('pingVal').textContent = '—';
+      document.getElementById('lastMsgVal').textContent = '—';
+      stopPing(); stopLastMsgTimer();
+    };
+
+    ws.onerror = () => ws.close();
+
+    ws.onmessage = evt => {
+      lastMsgTime = Date.now();
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'status')  handleStatus(msg);
+      if (msg.type === 'stats')   handleStats(msg);
+      if (msg.type === 'live')    handleLive(msg);
+      if (msg.type === 'history') handleHistory(msg);
+      if (msg.type === 'error')   handleError(msg);
+      if (pingPending && msg.type === 'status') {
+        pingPending = false;
+        document.getElementById('pingVal').textContent = `${Date.now() - pingStart} ms`;
+      }
+    };
+  }
+
+  function disconnect() {
+    stopPing(); stopLastMsgTimer();
+    if (ws) ws.close();
+  }
+
+  // ── Ping ────────────────────────────────────────────────────
+
+  function startPing() {
+    pingTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN && !pingPending) {
+        pingPending = true; pingStart = Date.now();
+        ws.send(JSON.stringify({ type: 'get_status' }));
+      }
+    }, 3000);
+  }
+
+  function stopPing() { clearInterval(pingTimer); pingPending = false; }
+
+  function startLastMsgTimer() {
+    lastMsgTimer = setInterval(() => {
+      if (!lastMsgTime) return;
+      const ago = Math.round((Date.now() - lastMsgTime) / 1000);
+      document.getElementById('lastMsgVal').textContent = ago === 0 ? 'now' : `${ago}s ago`;
+    }, 1000);
+  }
+
+  function stopLastMsgTimer() { clearInterval(lastMsgTimer); lastMsgTime = null; }
+
+  // ── Message handlers ────────────────────────────────────────
+
+  function handleStatus(msg) {
+    setNatsPill(msg.nats_connected ? 'ok' : 'bad', msg.nats_connected ? 'ONLINE' : 'OFFLINE');
+    setS3Pill(msg.s3_connected ? 'ok' : 'bad', msg.s3_connected ? 'ONLINE' : 'OFFLINE');
+    const sub = msg.subscribed ? (msg.subject || 'batteries.>') : '—';
+    document.getElementById('sbTopic').textContent = sub;
+    if (msg.subject) document.getElementById('subTopic').value = msg.subject;
+  }
+
+  function handleStats(msg) {
+    document.getElementById('sbMps').textContent     = (msg.live_per_sec  ?? 0).toLocaleString();
+    document.getElementById('sbTotal').textContent   = (msg.live_total    ?? 0).toLocaleString();
+    document.getElementById('sbQueries').textContent = (msg.queries_run   ?? 0).toLocaleString();
+  }
+
+  function handleLive(msg) {
+    const tbody = document.getElementById('liveBody');
+    if (tbody.querySelector('.empty-msg')) tbody.innerHTML = '';
+
+    const ts      = new Date(Date.now()).toISOString().substring(11, 23);
+    const payload = msg.payload ?? {};
+
+    // Flatten measurements — handle both per_cell and per_cell_item payloads
+    const rows = [];
+    const baseFields = { site_id: payload.site_id, rack_id: payload.rack_id, module_id: payload.module_id, cell_id: payload.cell_id };
+
+    // per_cell_item: single value in payload
+    if (payload.value !== undefined) {
+      const field = msg.subject.split('.').pop();
+      rows.push({ ...baseFields, field, value: payload.value, unit: payload.unit ?? '' });
+    } else {
+      // per_cell: multiple measurement objects in payload
+      for (const [key, val] of Object.entries(payload)) {
+        if (val && typeof val === 'object' && 'value' in val) {
+          rows.push({ ...baseFields, field: key, value: val.value, unit: val.unit ?? '' });
+        }
+      }
+    }
+
+    for (const r of rows) {
+      liveRows.unshift({ ts, topic: msg.subject, ...r });
+    }
+    liveRows = liveRows.slice(0, MAX_LIVE_ROWS);
+
+    // Re-render
+    const existing = Array.from(tbody.rows);
+    liveRows.forEach((r, i) => {
+      const cells = [r.ts, r.topic, r.site_id??'', r.rack_id??'', r.module_id??'', r.cell_id??'', r.field??'', r.value??'', r.unit??''];
+      if (i < existing.length) {
+        cells.forEach((v, j) => existing[i].cells[j].textContent = v);
+      } else {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="ts">${cells[0]}</td><td class="topic">${cells[1]}</td>` +
+          cells.slice(2).map((v,j) => `<td${j===4?' class="val"':''}>${v}</td>`).join('');
+        tbody.appendChild(tr);
+      }
+    });
+    while (tbody.rows.length > liveRows.length) tbody.deleteRow(tbody.rows.length - 1);
+  }
+
+  function handleHistory(msg) {
+    document.getElementById('sbHistRows').textContent = (msg.total ?? 0).toLocaleString();
+    const bar = document.getElementById('resultBar');
+    bar.style.display = '';
+    bar.innerHTML = `<b>${(msg.total ?? 0).toLocaleString()}</b> rows &nbsp;·&nbsp; <b>${msg.elapsed_ms ?? 0} ms</b> query time &nbsp;·&nbsp; query: <b>${msg.query_id}</b>`;
+
+    const thead = document.getElementById('histThead');
+    const tbody = document.getElementById('histTbody');
+    const cols  = msg.columns ?? [];
+
+    thead.innerHTML = cols.map(c => `<th>${c}</th>`).join('');
+    tbody.innerHTML = '';
+
+    if (!msg.rows || msg.rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="${Math.max(cols.length,1)}" class="empty-msg">No data found for this query</td></tr>`;
+      return;
+    }
+
+    for (const row of msg.rows) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = row.map(v => `<td>${v ?? ''}</td>`).join('');
+      tbody.appendChild(tr);
+    }
+
+    switchTab('history');
+  }
+
+  function handleError(msg) {
+    const bar = document.getElementById('resultBar');
+    bar.style.display = '';
+    bar.innerHTML = `<span style="color:#ef4444">Query error (${msg.query_id}): ${msg.message}</span>`;
+    switchTab('history');
+  }
+
+  // ── Controls ────────────────────────────────────────────────
+
+  function subscribe() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const subject = document.getElementById('subTopic').value.trim() || 'batteries.>';
+    ws.send(JSON.stringify({ type: 'subscribe', subject }));
+  }
+
+  function unsubscribe() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'unsubscribe' }));
+  }
+
+  function queryHistory() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    const fromVal = document.getElementById('hFrom').value;
+    const toVal   = document.getElementById('hTo').value;
+    const from_ts = fromVal ? new Date(fromVal).getTime() / 1000 : (Date.now() / 1000 - 3600);
+    const to_ts   = toVal   ? new Date(toVal).getTime()   / 1000 : Date.now() / 1000;
+
+    const btn = document.getElementById('btnQuery');
+    btn.innerHTML = '<span class="spinner"></span>Querying…';
+    btn.disabled = true;
+    setTimeout(() => { btn.textContent = 'Run Query'; btn.disabled = false; }, 10000);
+
+    ws.send(JSON.stringify({
+      type:     'query_history',
+      query_id: 'q' + Date.now(),
+      site_id:  document.getElementById('hSite').value.trim(),
+      from_ts,
+      to_ts,
+      limit:    parseInt(document.getElementById('hLimit').value) || 500,
+    }));
+  }
+
+  function switchTab(name) {
+    document.getElementById('tabLive').classList.toggle('active',    name === 'live');
+    document.getElementById('tabHistory').classList.toggle('active', name === 'history');
+    document.getElementById('paneLive').classList.toggle('active',    name === 'live');
+    document.getElementById('paneHistory').classList.toggle('active', name === 'history');
+  }
+
+  // ── Pills ────────────────────────────────────────────────────
+
+  function setServerPill(cls, text) { const e = document.getElementById('serverPill'); e.className=`pill ${cls}`; e.textContent=text; }
+  function setNatsPill(cls, text)   { const e = document.getElementById('natsPill');   e.className=`pill ${cls}`; e.textContent=text; }
+  function setS3Pill(cls, text)     { const e = document.getElementById('s3Pill');     e.className=`pill ${cls}`; e.textContent=text; }
+</script>
+</body>
+</html>

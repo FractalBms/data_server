@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AWS COST ESTIMATOR</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: #0a0a0a; color: #e5e7eb;
+    }
+    .container {
+      max-width: 1600px; margin: 0 auto;
+      background: #121212;
+      border: 1px solid #1e3a8a;
+      border-radius: 12px;
+      display: flex; flex-direction: column;
+      min-height: 96vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: grid; grid-template-columns: 1fr auto;
+      align-items: center; gap: 12px;
+      padding: 14px 20px;
+      background: linear-gradient(135deg, #000, #1e3a8a);
+      border-bottom: 2px solid #2563eb;
+      border-radius: 12px 12px 0 0;
+    }
+    .header h2 { margin: 0; font-size: 20px; }
+    .header small { color: #93c5fd; font-size: 12px; }
+
+    .pill {
+      display: inline-block; padding: 2px 8px;
+      border-radius: 999px; font-weight: bold; font-size: 11px;
+    }
+    .pill.ok      { background: #065f46; color: #6ee7b7; }
+    .pill.bad     { background: #7f1d1d; color: #fecaca; }
+    .pill.loading { background: #713f12; color: #fde68a; }
+    .pill.info    { background: #1e3a8a; color: #93c5fd; }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 16px; background: #1a1a1a;
+      border-bottom: 1px solid #1e3a8a; flex-wrap: wrap;
+    }
+    .toolbar-label { font-size: 12px; color: #64748b; }
+    .nav-links { display: flex; gap: 6px; margin-left: auto; }
+    .nav-link {
+      padding: 4px 10px; border-radius: 5px; font-size: 12px;
+      background: #1e293b; border: 1px solid #334155;
+      color: #94a3b8; cursor: pointer; text-decoration: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-link:hover, .nav-link.active { background: #2563eb; color: #fff; border-color: #60a5fa; }
+
+    /* ── Main layout ── */
+    .main {
+      display: grid; grid-template-columns: 300px 1fr;
+      gap: 0; flex: 1;
+    }
+
+    /* ── Sidebar inputs ── */
+    .sidebar {
+      border-right: 1px solid #1e3a8a;
+      overflow-y: auto;
+      padding-bottom: 20px;
+    }
+    .section-header {
+      padding: 8px 14px; font-size: 11px; font-weight: 700;
+      color: #60a5fa; text-transform: uppercase; letter-spacing: 0.08em;
+      background: #0f172a; border-bottom: 1px solid #1e3a8a;
+      border-top: 1px solid #1e3a8a; margin-top: 2px;
+    }
+    .field { padding: 7px 14px; display: flex; flex-direction: column; gap: 3px; }
+    .field label { font-size: 11px; color: #94a3b8; }
+    .field input, .field select {
+      background: #020617; border: 1px solid #334155; border-radius: 5px;
+      color: #e2e8f0; padding: 5px 8px; font-size: 13px; outline: none; width: 100%;
+    }
+    .field input:focus, .field select:focus { border-color: #2563eb; }
+    .field .hint { font-size: 10px; color: #475569; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 7px 14px; }
+    .field-row .field { padding: 0; }
+
+    /* ── Content panel ── */
+    .content { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+
+    /* ── Summary cards ── */
+    .summary-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    }
+    .summary-card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; padding: 14px 16px;
+    }
+    .summary-card .label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+    .summary-card .value { font-size: 26px; font-weight: 800; margin: 4px 0 2px; }
+    .summary-card .sub   { font-size: 11px; color: #64748b; }
+    .summary-card.highlight { border-color: #166534; background: #052e16; }
+    .summary-card.highlight .value { color: #4ade80; }
+    .summary-card.old { border-color: #7f1d1d; background: #1a0a0a; }
+    .summary-card.old .value { color: #f87171; }
+    .summary-card.new { border-color: #1e3a8a; background: #050e1f; }
+    .summary-card.new .value { color: #60a5fa; }
+    .summary-card.pct .value { color: #a78bfa; }
+
+    /* ── Cost breakdown table ── */
+    .panel {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+    }
+    .panel-header {
+      padding: 10px 14px; font-size: 13px; font-weight: 700;
+      border-bottom: 1px solid #334155; color: #93c5fd;
+      display: flex; align-items: center; gap: 8px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th {
+      padding: 8px 12px; text-align: left; font-size: 11px;
+      color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;
+      border-bottom: 1px solid #1e3a8a;
+    }
+    td { padding: 8px 12px; border-bottom: 1px solid #1a2540; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #0f172a; }
+    .cost-value { text-align: right; font-family: monospace; font-weight: bold; }
+    .cost-old  { color: #f87171; }
+    .cost-new  { color: #60a5fa; }
+    .cost-save { color: #4ade80; }
+    .cost-zero { color: #4ade80; }
+    .cost-inc  { color: #fb923c; }
+    .row-total td { border-top: 2px solid #334155; font-weight: 700; }
+    .row-total .cost-old { font-size: 15px; }
+    .row-total .cost-new { font-size: 15px; }
+
+    /* ── Bar chart ── */
+    .bar-section { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .bar-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+    .bar-label { width: 160px; color: #94a3b8; flex-shrink: 0; text-align: right; }
+    .bar-track {
+      flex: 1; background: #0f172a; border-radius: 4px; height: 22px;
+      overflow: hidden; position: relative;
+    }
+    .bar-fill {
+      height: 100%; border-radius: 4px;
+      transition: width 0.4s ease;
+      display: flex; align-items: center; padding-left: 8px;
+      font-size: 11px; font-weight: bold; white-space: nowrap; overflow: hidden;
+    }
+    .bar-fill.old { background: linear-gradient(90deg, #7f1d1d, #dc2626); color: #fecaca; }
+    .bar-fill.new { background: linear-gradient(90deg, #1e3a8a, #2563eb); color: #bfdbfe; }
+    .bar-amount { width: 90px; text-align: right; font-family: monospace; font-size: 12px; color: #94a3b8; }
+
+    /* ── Data volume stats ── */
+    .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; }
+    .stat-cell {
+      padding: 12px 16px; border-right: 1px solid #1e3a8a;
+    }
+    .stat-cell:last-child { border-right: none; }
+    .stat-cell .lbl { font-size: 10px; color: #64748b; text-transform: uppercase; }
+    .stat-cell .val { font-size: 18px; font-weight: 700; color: #e2e8f0; margin-top: 3px; }
+    .stat-cell .unit { font-size: 11px; color: #475569; }
+
+    /* ── Recommendation ── */
+    .reco {
+      background: #052e16; border: 1px solid #166534;
+      border-radius: 8px; padding: 12px 16px;
+      font-size: 13px; color: #86efac; line-height: 1.6;
+    }
+    .reco strong { color: #4ade80; }
+
+    /* ── Two-col layout inside content ── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ── Header ── -->
+  <div class="header">
+    <div>
+      <h2>AWS COST ESTIMATOR</h2>
+      <small>New Parquet/NATS architecture vs existing system &nbsp;·&nbsp; us-east-1 on-demand pricing</small>
+    </div>
+    <div style="text-align:right; font-size:12px; color:#93c5fd">
+      Baseline: <strong style="color:#f87171">$76,000/mo</strong>
+    </div>
+  </div>
+
+  <!-- ── Toolbar ── -->
+  <div class="toolbar">
+    <span class="toolbar-label">Data Server</span>
+    <div class="nav-links">
+      <a class="nav-link" href="dashboard.html">Dashboard</a>
+      <a class="nav-link" href="generator.html">Generator</a>
+      <a class="nav-link" href="aws.html">S3 Store</a>
+      <a class="nav-link" href="subscriber.html">Subscriber</a>
+      <a class="nav-link active" href="costs.html">Costs</a>
+    </div>
+  </div>
+
+  <!-- ── Main ── -->
+  <div class="main">
+
+    <!-- ── Inputs sidebar ── -->
+    <div class="sidebar">
+
+      <div class="section-header">System Scale</div>
+      <div class="field-row">
+        <div class="field"><label>Sites</label><input id="sites" type="number" value="10" min="1" oninput="recalc()"></div>
+        <div class="field"><label>Racks / site</label><input id="racks" type="number" value="4" min="1" oninput="recalc()"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Modules / rack</label><input id="modules" type="number" value="8" min="1" oninput="recalc()"></div>
+        <div class="field"><label>Cells / module</label><input id="cells_per" type="number" value="12" min="1" oninput="recalc()"></div>
+      </div>
+      <div class="field">
+        <label>Topic mode</label>
+        <select id="topicMode" onchange="recalc()">
+          <option value="per_cell">per_cell (1 msg/cell)</option>
+          <option value="per_cell_item" selected>per_cell_item (1 msg/measurement)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Measurements / cell</label>
+        <input id="measurements" type="number" value="8" min="1" oninput="recalc()">
+        <span class="hint">Only used in per_cell_item mode</span>
+      </div>
+
+      <div class="section-header">Data Rate</div>
+      <div class="field">
+        <label>Publish interval (seconds)</label>
+        <input id="interval" type="number" value="1" min="0.1" step="0.1" oninput="recalc()">
+      </div>
+      <div class="field">
+        <label>Bytes per MQTT message</label>
+        <input id="bytesPerMsg" type="number" value="256" min="16" oninput="recalc()">
+        <span class="hint">Parquet compression ~5:1</span>
+      </div>
+
+      <div class="section-header">Storage &amp; Retention</div>
+      <div class="field">
+        <label>Data retention (months)</label>
+        <input id="retention" type="number" value="12" min="1" oninput="recalc()">
+      </div>
+
+      <div class="section-header">EC2 Deployment Profile</div>
+      <div class="field">
+        <label>Profile</label>
+        <select id="profile" onchange="recalc()">
+          <option value="single_small">Single: t3.medium  ($0.042/hr)</option>
+          <option value="single_large">Single: t3.xlarge  ($0.166/hr)</option>
+          <option value="single_xlarge">Single: m5.xlarge  ($0.192/hr)</option>
+          <option value="minimal" selected>2-node: NATS + Services</option>
+          <option value="production">4-node: Separate roles</option>
+          <option value="ha">HA: 6-node with redundancy</option>
+        </select>
+        <span class="hint" id="profile-hint"></span>
+      </div>
+
+      <div class="section-header">Query &amp; Transfer Load</div>
+      <div class="field">
+        <label>History queries / month</label>
+        <input id="queries" type="number" value="5000" min="0" oninput="recalc()">
+      </div>
+      <div class="field">
+        <label>Data transferred out (GB/mo)</label>
+        <input id="transferGB" type="number" value="50" min="0" oninput="recalc()">
+        <span class="hint">Live stream + query results to clients</span>
+      </div>
+
+      <div class="section-header">Old Architecture (Baseline)</div>
+      <div class="field">
+        <label>EC2 (InfluxDB + EFS)</label>
+        <input id="old_ec2" type="number" value="36000" oninput="recalc()">
+      </div>
+      <div class="field">
+        <label>EFS</label>
+        <input id="old_efs" type="number" value="10000" oninput="recalc()">
+      </div>
+      <div class="field">
+        <label>IoT Core</label>
+        <input id="old_iot" type="number" value="3000" oninput="recalc()">
+      </div>
+      <div class="field">
+        <label>CloudWatch</label>
+        <input id="old_cw" type="number" value="2600" oninput="recalc()">
+      </div>
+      <div class="field">
+        <label>Lambda</label>
+        <input id="old_lambda" type="number" value="2000" oninput="recalc()">
+      </div>
+      <div class="field">
+        <label>S3</label>
+        <input id="old_s3" type="number" value="3000" oninput="recalc()">
+      </div>
+      <div class="field">
+        <label>Data Transfer</label>
+        <input id="old_dt" type="number" value="3600" oninput="recalc()">
+      </div>
+
+    </div><!-- /sidebar -->
+
+    <!-- ── Results ── -->
+    <div class="content">
+
+      <!-- Summary cards -->
+      <div class="summary-grid">
+        <div class="summary-card old">
+          <div class="label">Old Architecture</div>
+          <div class="value" id="sum-old">$76,200</div>
+          <div class="sub">per month (baseline)</div>
+        </div>
+        <div class="summary-card new">
+          <div class="label">New Architecture</div>
+          <div class="value" id="sum-new">—</div>
+          <div class="sub">per month (estimated)</div>
+        </div>
+        <div class="summary-card highlight">
+          <div class="label">Monthly Savings</div>
+          <div class="value" id="sum-save">—</div>
+          <div class="sub" id="sum-save-pct"></div>
+        </div>
+        <div class="summary-card pct" style="border-color:#4c1d95; background:#1a0a2e">
+          <div class="label">Annual Savings</div>
+          <div class="value" id="sum-annual">—</div>
+          <div class="sub">per year</div>
+        </div>
+      </div>
+
+      <!-- Visual comparison bars -->
+      <div class="panel">
+        <div class="panel-header">Cost Comparison by Service</div>
+        <div class="bar-section" id="bar-section"></div>
+      </div>
+
+      <div class="two-col">
+
+        <!-- Breakdown table -->
+        <div class="panel">
+          <div class="panel-header">New Architecture Breakdown</div>
+          <table>
+            <thead><tr>
+              <th>Service</th>
+              <th style="text-align:right">Cost/mo</th>
+              <th style="text-align:right">Notes</th>
+            </tr></thead>
+            <tbody id="breakdown-body"></tbody>
+          </table>
+        </div>
+
+        <!-- Data volume stats -->
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div class="panel">
+            <div class="panel-header">Data Volume</div>
+            <div class="stats-grid" id="data-stats"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header">Old vs New — Line Items</div>
+            <table>
+              <thead><tr>
+                <th>Item</th>
+                <th class="cost-value" style="color:#f87171">Old</th>
+                <th class="cost-value" style="color:#60a5fa">New</th>
+                <th class="cost-value" style="color:#4ade80">Save</th>
+              </tr></thead>
+              <tbody id="compare-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recommendation -->
+      <div class="reco" id="reco"></div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /container -->
+
+<script>
+// ── AWS pricing (us-east-1, on-demand, 2024) ────────────────────────────────
+
+const EC2_PROFILES = {
+  single_small:  { label: 't3.medium × 1',        hourly: 0.0416,  instances: [{type:'t3.medium',  n:1}] },
+  single_large:  { label: 't3.xlarge × 1',        hourly: 0.1664,  instances: [{type:'t3.xlarge',  n:1}] },
+  single_xlarge: { label: 'm5.xlarge × 1',        hourly: 0.192,   instances: [{type:'m5.xlarge',  n:1}] },
+  minimal:       { label: 't3.medium × 2',        hourly: 0.0832,  instances: [{type:'t3.medium',  n:2}] },
+  production:    { label: 't3.medium × 2 + t3.small × 2', hourly: 0.0832+0.0416, instances: [{type:'t3.medium', n:2},{type:'t3.small',n:2}] },
+  ha:            { label: 'm5.large × 3 + t3.medium × 3', hourly: 0.288+0.1248, instances: [{type:'m5.large',n:3},{type:'t3.medium',n:3}] },
+};
+
+const S3_STORAGE_GB  = 0.023;   // per GB-month
+const S3_PUT_K       = 0.005;   // per 1,000 requests
+const S3_GET_K       = 0.0004;  // per 1,000 requests
+const TRANSFER_FIRST = 0.09;    // per GB out (first 10 TB)
+const TRANSFER_NEXT  = 0.085;   // per GB out (next 40 TB)
+const HOURS_PER_MO   = 730;
+const PARQUET_RATIO  = 5;       // compression ratio
+
+function fmt(n) {
+  if (n >= 1e9)  return '$' + (n/1e9).toFixed(2)  + 'B';
+  if (n >= 1e6)  return '$' + (n/1e6).toFixed(2)  + 'M';
+  if (n >= 1000) return '$' + n.toLocaleString('en-US', {maximumFractionDigits:0});
+  return '$' + n.toFixed(2);
+}
+
+function fmtData(gb) {
+  if (gb >= 1024) return (gb/1024).toFixed(2) + ' TB';
+  if (gb >= 1)    return gb.toFixed(2) + ' GB';
+  return (gb*1024).toFixed(1) + ' MB';
+}
+
+function fmtNum(n) {
+  if (n >= 1e9)  return (n/1e9).toFixed(2)  + 'B';
+  if (n >= 1e6)  return (n/1e6).toFixed(2)  + 'M';
+  if (n >= 1e3)  return (n/1e3).toFixed(1)  + 'K';
+  return n.toFixed(0);
+}
+
+function get(id) { return parseFloat(document.getElementById(id).value) || 0; }
+function geti(id) { return parseInt(document.getElementById(id).value) || 0; }
+
+function recalc() {
+  // ── System scale ────────────────────────────────────────────────────────
+  const sites      = geti('sites')      || 1;
+  const racks      = geti('racks')      || 4;
+  const modules    = geti('modules')    || 8;
+  const cellsPer   = geti('cells_per')  || 12;
+  const meas       = geti('measurements') || 8;
+  const topicMode  = document.getElementById('topicMode').value;
+  const interval   = get('interval')   || 1;
+  const bytesPerMsg = geti('bytesPerMsg') || 256;
+  const retMonths  = geti('retention') || 12;
+
+  const totalCells  = sites * racks * modules * cellsPer;
+  const msgsPerCell = topicMode === 'per_cell' ? 1 : meas;
+  const totalTopics = totalCells * msgsPerCell;
+
+  const msgsPerSec  = totalTopics / interval;
+  const msgsPerMin  = msgsPerSec * 60;
+  const msgsPerHour = msgsPerSec * 3600;
+  const msgsPerDay  = msgsPerSec * 86400;
+  const msgsPerMonth = msgsPerDay * 30;
+
+  // Raw data volume (uncompressed MQTT payloads)
+  const rawGBPerMonth = (msgsPerMonth * bytesPerMsg) / 1e9;
+  // Parquet (compressed, columnar)
+  const parquetGBPerMonth = rawGBPerMonth / PARQUET_RATIO;
+  // Total storage at retention
+  const totalStorageGB = parquetGBPerMonth * retMonths;
+
+  // ── S3 costs ─────────────────────────────────────────────────────────────
+  const s3StorageCost = totalStorageGB * S3_STORAGE_GB;
+
+  // Parquet writes: 1 file per hour per site (batched by writer)
+  const parquetFilesPerMonth = sites * 24 * 30;
+  const s3PutCost = (parquetFilesPerMonth / 1000) * S3_PUT_K;
+
+  // Reads: each history query scans ~24 files (1 day default range)
+  const queriesPerMonth = geti('queries');
+  const filesPerQuery = 24;
+  const s3GetRequests = queriesPerMonth * filesPerQuery;
+  const s3GetCost = (s3GetRequests / 1000) * S3_GET_K;
+
+  const s3Total = s3StorageCost + s3PutCost + s3GetCost;
+
+  // ── Data transfer ─────────────────────────────────────────────────────────
+  const transferGB = get('transferGB');
+  let transferCost = 0;
+  if (transferGB <= 10240) {
+    transferCost = transferGB * TRANSFER_FIRST;
+  } else {
+    transferCost = 10240 * TRANSFER_FIRST + (transferGB - 10240) * TRANSFER_NEXT;
+  }
+
+  // ── EC2 ───────────────────────────────────────────────────────────────────
+  const profileKey = document.getElementById('profile').value;
+  const profile    = EC2_PROFILES[profileKey];
+  const ec2Cost    = profile.hourly * HOURS_PER_MO;
+
+  document.getElementById('profile-hint').textContent = profile.label;
+
+  // ── CloudWatch (minimal — just basic metrics) ─────────────────────────────
+  const cwCost = 10; // near-zero with self-managed stack
+
+  // ── New total ─────────────────────────────────────────────────────────────
+  const newTotal = s3Total + transferCost + ec2Cost + cwCost;
+
+  // ── Old costs ─────────────────────────────────────────────────────────────
+  const oldEc2     = get('old_ec2');
+  const oldEfs     = get('old_efs');
+  const oldIot     = get('old_iot');
+  const oldCw      = get('old_cw');
+  const oldLambda  = get('old_lambda');
+  const oldS3      = get('old_s3');
+  const oldDt      = get('old_dt');
+  const oldTotal   = oldEc2 + oldEfs + oldIot + oldCw + oldLambda + oldS3 + oldDt;
+
+  const savings    = oldTotal - newTotal;
+  const savingsPct = oldTotal > 0 ? (savings / oldTotal * 100) : 0;
+
+  // ── Update summary cards ──────────────────────────────────────────────────
+  document.getElementById('sum-old').textContent   = fmt(oldTotal);
+  document.getElementById('sum-new').textContent   = fmt(newTotal);
+  document.getElementById('sum-save').textContent  = fmt(savings);
+  document.getElementById('sum-save-pct').textContent = savingsPct.toFixed(1) + '% reduction';
+  document.getElementById('sum-annual').textContent = fmt(savings * 12);
+
+  // ── Bar chart ─────────────────────────────────────────────────────────────
+  const bars = [
+    { label: 'EC2 / Compute', old: oldEc2,   newVal: ec2Cost        },
+    { label: 'EFS / Storage',  old: oldEfs,   newVal: 0              },
+    { label: 'S3',             old: oldS3,    newVal: s3Total        },
+    { label: 'IoT Core',       old: oldIot,   newVal: 0              },
+    { label: 'CloudWatch',     old: oldCw,    newVal: cwCost         },
+    { label: 'Lambda',         old: oldLambda,newVal: 0              },
+    { label: 'Data Transfer',  old: oldDt,    newVal: transferCost   },
+  ];
+
+  const maxVal = Math.max(...bars.map(b => Math.max(b.old, b.newVal)));
+  const barHtml = bars.map(b => {
+    const oldW = maxVal > 0 ? (b.old / maxVal * 100).toFixed(1) : 0;
+    const newW = maxVal > 0 ? (b.newVal / maxVal * 100).toFixed(1) : 0;
+    return `
+      <div>
+        <div class="bar-row">
+          <div class="bar-label">${b.label}</div>
+          <div class="bar-track" title="Old: ${fmt(b.old)}">
+            <div class="bar-fill old" style="width:${oldW}%">${b.old > 0 ? fmt(b.old) : ''}</div>
+          </div>
+          <div class="bar-amount" style="color:#f87171">${fmt(b.old)}</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label" style="color:#1e3a8a">▸</div>
+          <div class="bar-track" title="New: ${fmt(b.newVal)}">
+            <div class="bar-fill new" style="width:${newW}%">${b.newVal > 0 ? fmt(b.newVal) : 'ELIMINATED'}</div>
+          </div>
+          <div class="bar-amount" style="color:#60a5fa">${b.newVal > 0 ? fmt(b.newVal) : '—'}</div>
+        </div>
+        <div style="height:6px"></div>
+      </div>`;
+  }).join('');
+  document.getElementById('bar-section').innerHTML = barHtml;
+
+  // ── New architecture breakdown table ─────────────────────────────────────
+  const breakdownRows = [
+    { service: 'EC2 — ' + profile.label,     cost: ec2Cost,       note: `${HOURS_PER_MO}h × $${profile.hourly.toFixed(4)}/hr` },
+    { service: 'S3 — Storage',               cost: s3StorageCost, note: fmtData(totalStorageGB) + ' @ $0.023/GB-mo' },
+    { service: 'S3 — PUT requests',          cost: s3PutCost,     note: fmtNum(parquetFilesPerMonth) + ' files/mo' },
+    { service: 'S3 — GET requests',          cost: s3GetCost,     note: fmtNum(s3GetRequests) + ' requests/mo' },
+    { service: 'Data Transfer Out',          cost: transferCost,  note: fmtData(transferGB) + '/mo' },
+    { service: 'CloudWatch (basic metrics)', cost: cwCost,        note: 'Near-zero — no custom metrics' },
+  ];
+
+  let bdHtml = breakdownRows.map(r => `
+    <tr>
+      <td>${r.service}</td>
+      <td class="cost-value cost-new">${fmt(r.cost)}</td>
+      <td style="text-align:right; font-size:11px; color:#475569">${r.note}</td>
+    </tr>`).join('');
+  bdHtml += `<tr class="row-total">
+    <td><strong>TOTAL</strong></td>
+    <td class="cost-value cost-new" style="font-size:15px">${fmt(newTotal)}</td>
+    <td></td>
+  </tr>`;
+  document.getElementById('breakdown-body').innerHTML = bdHtml;
+
+  // ── Data volume stats ─────────────────────────────────────────────────────
+  document.getElementById('data-stats').innerHTML = `
+    <div class="stat-cell">
+      <div class="lbl">Total Cells</div>
+      <div class="val">${fmtNum(totalCells)}</div>
+      <div class="unit">${sites} sites</div>
+    </div>
+    <div class="stat-cell">
+      <div class="lbl">Messages/sec</div>
+      <div class="val">${fmtNum(msgsPerSec)}</div>
+      <div class="unit">${fmtNum(msgsPerMonth)}/mo</div>
+    </div>
+    <div class="stat-cell">
+      <div class="lbl">Raw Data/mo</div>
+      <div class="val">${fmtData(rawGBPerMonth)}</div>
+      <div class="unit">uncompressed</div>
+    </div>
+    <div class="stat-cell">
+      <div class="lbl">Parquet/mo</div>
+      <div class="val">${fmtData(parquetGBPerMonth)}</div>
+      <div class="unit">${PARQUET_RATIO}× compression</div>
+    </div>
+    <div class="stat-cell">
+      <div class="lbl">Total S3 (${retMonths}mo)</div>
+      <div class="val">${fmtData(totalStorageGB)}</div>
+      <div class="unit">at retention</div>
+    </div>
+    <div class="stat-cell">
+      <div class="lbl">Parquet Files/mo</div>
+      <div class="val">${fmtNum(parquetFilesPerMonth)}</div>
+      <div class="unit">1/hr/site</div>
+    </div>`;
+
+  // ── Old vs new comparison table ───────────────────────────────────────────
+  const compareRows = [
+    { item: 'EC2 / Compute',  old: oldEc2,    newV: ec2Cost },
+    { item: 'EFS',            old: oldEfs,    newV: 0,      note: 'Eliminated' },
+    { item: 'IoT Core',       old: oldIot,    newV: 0,      note: 'Eliminated' },
+    { item: 'CloudWatch',     old: oldCw,     newV: cwCost  },
+    { item: 'Lambda',         old: oldLambda, newV: 0,      note: 'Eliminated' },
+    { item: 'S3',             old: oldS3,     newV: s3Total },
+    { item: 'Data Transfer',  old: oldDt,     newV: transferCost },
+  ];
+
+  let compHtml = compareRows.map(r => {
+    const s = r.old - r.newV;
+    const saveClass = s > 0 ? 'cost-save' : (s < 0 ? 'cost-inc' : 'cost-zero');
+    const saveStr   = s === 0 ? '—' : (s > 0 ? fmt(s) : '-' + fmt(-s));
+    const newStr    = r.newV === 0 ? '<span class="cost-zero">FREE</span>' : `<span class="cost-new">${fmt(r.newV)}</span>`;
+    return `<tr>
+      <td>${r.item}${r.note ? ` <span style="font-size:10px;color:#4ade80">(${r.note})</span>` : ''}</td>
+      <td class="cost-value cost-old">${fmt(r.old)}</td>
+      <td class="cost-value">${newStr}</td>
+      <td class="cost-value ${saveClass}">${saveStr}</td>
+    </tr>`;
+  }).join('');
+  compHtml += `<tr class="row-total">
+    <td><strong>TOTAL</strong></td>
+    <td class="cost-value cost-old" style="font-size:15px">${fmt(oldTotal)}</td>
+    <td class="cost-value cost-new" style="font-size:15px">${fmt(newTotal)}</td>
+    <td class="cost-value cost-save" style="font-size:15px">${fmt(savings)}</td>
+  </tr>`;
+  document.getElementById('compare-body').innerHTML = compHtml;
+
+  // ── Recommendation ────────────────────────────────────────────────────────
+  let recoText = '';
+  if (msgsPerSec < 1000) {
+    recoText = `<strong>Single t3.medium</strong> can handle ${fmtNum(msgsPerSec)} msg/s comfortably — all components fit on one instance.`;
+  } else if (msgsPerSec < 10000) {
+    recoText = `<strong>2-node minimal profile</strong> recommended: dedicate one t3.large to NATS JetStream, run bridge + writer + subscriber API on a second t3.medium.`;
+  } else {
+    recoText = `<strong>4-node production profile</strong> recommended at ${fmtNum(msgsPerSec)} msg/s: separate instances for NATS, MQTT broker, writers, and subscriber API.`;
+  }
+
+  const savingsNote = savings > 0
+    ? `At <strong>${fmt(savings)}/month</strong> savings, the new architecture pays for a full year's EC2 costs in ${(ec2Cost / savings * 30).toFixed(1)} days.`
+    : `New architecture cost <strong>${fmt(newTotal)}</strong> exceeds baseline — review retention period or deployment profile.`;
+
+  document.getElementById('reco').innerHTML = `
+    <strong>Deployment recommendation:</strong> ${recoText}<br>
+    ${savingsNote}<br>
+    S3 storage of <strong>${fmtData(totalStorageGB)}</strong> at ${retMonths}-month retention
+    costs <strong>${fmt(s3StorageCost)}/mo</strong> — ${(s3StorageCost/newTotal*100).toFixed(0)}% of new architecture spend.
+    Parquet compression reduces raw ${fmtData(rawGBPerMonth)}/mo to ${fmtData(parquetGBPerMonth)}/mo.
+  `;
+}
+
+// Run on load
+recalc();
+</script>
+</body>
+</html>

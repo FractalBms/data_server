@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AWS DATA STORE</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: #0a0a0a;
+      color: #e5e7eb;
+    }
+    .container {
+      max-width: 1500px; margin: 0 auto;
+      background: #121212;
+      border: 1px solid #1e3a8a;
+      border-radius: 12px;
+      display: flex; flex-direction: column;
+      height: 94vh; overflow: hidden;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: grid; grid-template-columns: 1fr auto;
+      gap: 12px; align-items: center;
+      padding: 14px 20px;
+      background: linear-gradient(135deg, #000, #1e3a8a);
+      border-bottom: 2px solid #2563eb;
+    }
+    .header h2 { margin: 0; font-size: 20px; }
+    .header small { color: #93c5fd; }
+    .header-right { text-align: right; font-size: 12px; line-height: 1.8; }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px; border-radius: 999px;
+      font-weight: bold; font-size: 11px;
+    }
+    .pill.ok      { background: #065f46; color: #6ee7b7; }
+    .pill.bad     { background: #7f1d1d; color: #fecaca; }
+    .pill.loading { background: #713f12; color: #fde68a; }
+
+    /* ── Connect bar ── */
+    .connect-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px;
+      background: #0f172a;
+      border-bottom: 1px solid #1e3a8a;
+      flex-wrap: wrap;
+    }
+    .connect-bar label { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    .connect-bar input {
+      background: #020617; border: 1px solid #334155; border-radius: 5px;
+      color: #e2e8f0; padding: 4px 8px; font-size: 13px; outline: none;
+      transition: border-color 0.2s;
+    }
+    .connect-bar input:focus { border-color: #2563eb; }
+    .connect-bar input.host { width: 160px; }
+    .connect-bar input.port { width: 70px; }
+    .connect-bar input.interval { width: 60px; }
+
+    .ping-box {
+      margin-left: auto; display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: #94a3b8;
+    }
+    .ping-value { color: #60a5fa; font-weight: bold; font-variant-numeric: tabular-nums; }
+
+    /* ── Status bar ── */
+    .status-bar {
+      display: grid; grid-template-columns: repeat(5, 1fr);
+      padding: 8px; background: #1a1a1a;
+      border-bottom: 1px solid #1e3a8a;
+    }
+    .status-item { text-align: center; font-size: 12px; }
+    .status-item b { color: #60a5fa; }
+
+    /* ── Main ── */
+    .main { display: grid; grid-template-columns: 300px 1fr; flex: 1; overflow: hidden; }
+
+    .sidebar {
+      background: #0f172a; padding: 12px;
+      border-right: 1px solid #1e3a8a;
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    .content {
+      background: #0f172a; padding: 12px;
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    /* ── Cards ── */
+    .card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; padding: 12px;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: #64748b; margin-bottom: 12px;
+    }
+
+    /* ── Stats ── */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .stat-card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; padding: 12px;
+    }
+    .stat-label { font-size: 11px; color: #94a3b8; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .stat-value { font-size: 22px; font-weight: 700; color: #60a5fa; font-variant-numeric: tabular-nums; }
+    .stat-value.green { color: #22c55e; }
+
+    /* ── File list (sidebar) ── */
+    .file-item {
+      background: #0f172a; border: 1px solid #334155;
+      border-radius: 6px; padding: 8px 10px;
+      cursor: pointer; font-size: 12px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .file-item:hover { background: #1e293b; border-color: #475569; }
+    .file-item.active { background: #1e3a8a; border-color: #2563eb; }
+    .file-key  { color: #818cf8; font-family: monospace; font-size: 11px; word-break: break-all; }
+    .file-meta { color: #64748b; font-size: 11px; margin-top: 3px; }
+    .file-badge {
+      display: inline-block; padding: 1px 6px;
+      border-radius: 999px; font-size: 10px; font-weight: bold;
+      background: #065f46; color: #6ee7b7; margin-left: 4px;
+    }
+
+    /* ── Detail panel ── */
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    .detail-item { font-size: 12px; }
+    .detail-label { color: #64748b; margin-bottom: 2px; font-size: 11px; }
+    .detail-value { color: #e2e8f0; font-family: monospace; }
+
+    .col-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+    .col-tag {
+      padding: 2px 8px; border-radius: 999px; font-size: 11px;
+      background: #1e3a5f; color: #60a5fa; border: 1px solid #2563eb;
+    }
+
+    /* ── Sample table ── */
+    .table-wrap { overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead th {
+      position: sticky; top: 0;
+      background: #1e293b; color: #64748b;
+      text-align: left; padding: 7px 10px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+      border-bottom: 1px solid #334155; white-space: nowrap;
+    }
+    tbody tr { border-bottom: 1px solid #1a2540; }
+    tbody tr:hover { background: #1e293b; }
+    tbody td { padding: 6px 10px; color: #cbd5e1; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
+    .empty-msg { padding: 40px; text-align: center; color: #475569; }
+
+    /* ── Button ── */
+    .btn {
+      padding: 6px 14px; border-radius: 6px;
+      border: 1px solid #475569;
+      background: #334155; color: #e5e7eb;
+      font-weight: bold; font-size: 13px; cursor: pointer;
+    }
+    .btn.primary { background: #2563eb; border-color: #60a5fa; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .form-row label { display:block; font-size:11px; color:#94a3b8; margin-bottom:3px; }
+    .form-row input {
+      width:100%; background:#020617; border:1px solid #334155;
+      border-radius:5px; color:#e2e8f0; padding:5px 8px; font-size:13px; outline:none;
+    }
+    .form-row input:focus { border-color:#2563eb; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h2>AWS DATA STORE</h2>
+      <small id="headerAddr">WebSocket: not connected</small>
+    </div>
+    <div class="header-right">
+      Server: <span id="serverPill" class="pill bad">DISCONNECTED</span><br>
+      S3 / MinIO: <span id="s3Pill" class="pill bad">OFFLINE</span>
+    </div>
+  </div>
+
+  <!-- Connect bar -->
+  <div class="connect-bar">
+    <label>Host</label>
+    <input class="host" id="wsHost" value="localhost" placeholder="localhost" />
+    <label>Port</label>
+    <input class="port" id="wsPort" value="8766" placeholder="8766" />
+    <button class="btn primary" id="btnConnect" onclick="toggleConnect()">Connect</button>
+    <label style="margin-left:12px">Poll (s)</label>
+    <input class="interval" id="pollInterval" type="number" min="1" max="60" value="10" onchange="setInterval_()"/>
+    <div class="ping-box">
+      <span>Ping:</span>
+      <span class="ping-value" id="pingVal">—</span>
+      <span>Last msg:</span>
+      <span class="ping-value" id="lastMsgVal">—</span>
+    </div>
+    <div style="display:flex;gap:6px;margin-left:8px">
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;text-decoration:none" href="dashboard.html">Dashboard</a>
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;text-decoration:none" href="generator.html">Generator</a>
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;text-decoration:none" href="subscriber.html">Subscriber</a>
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#2563eb;border:1px solid #60a5fa;color:#fff;text-decoration:none" href="costs.html">Costs</a>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="status-item">FILES <b id="sbFiles">0</b></div>
+    <div class="status-item">ROWS <b id="sbRows">0</b></div>
+    <div class="status-item">BYTES <b id="sbBytes">0</b></div>
+    <div class="status-item">BUCKET <b id="sbBucket">—</b></div>
+    <div class="status-item">POLL <b id="sbPoll">—</b></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Sidebar: file list -->
+    <div class="sidebar">
+      <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.08em; padding: 0 2px 4px">
+        Received Files
+      </div>
+      <div id="fileList">
+        <div class="empty-msg" style="padding:20px; font-size:12px">No files yet</div>
+      </div>
+
+      <!-- Generate panel -->
+      <div class="card" style="margin-top:auto; padding-top:14px">
+        <div class="card-title">Generate Test Data</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px">
+          <div class="form-row" style="margin:0"><label>Sites</label>
+            <input type="number" id="genSites" value="2" min="1" max="20"></div>
+          <div class="form-row" style="margin:0"><label>Racks/site</label>
+            <input type="number" id="genRacks" value="3" min="1" max="20"></div>
+          <div class="form-row" style="margin:0"><label>Modules/rack</label>
+            <input type="number" id="genModules" value="4" min="1" max="20"></div>
+          <div class="form-row" style="margin:0"><label>Cells/module</label>
+            <input type="number" id="genCells" value="6" min="1" max="20"></div>
+          <div class="form-row" style="margin:0"><label>Rows/file</label>
+            <input type="number" id="genRows" value="500" min="10" max="10000"></div>
+          <div class="form-row" style="margin:0"><label>Files/site</label>
+            <input type="number" id="genFiles" value="1" min="1" max="24"></div>
+          <div class="form-row" style="margin:0; grid-column:1/-1"><label>Data starts N hours ago</label>
+            <input type="number" id="genHoursAgo" value="1" min="0" max="720" step="0.5"></div>
+        </div>
+        <button class="btn primary" id="btnGenerate" style="width:100%" disabled onclick="generateData()">
+          Generate Parquet Files
+        </button>
+        <div id="genProgress" style="display:none; margin-top:8px">
+          <div style="font-size:11px; color:#94a3b8; margin-bottom:4px" id="genProgressLabel">Generating…</div>
+          <div style="background:#020617; border-radius:4px; height:6px; overflow:hidden">
+            <div id="genProgressBar" style="height:100%; background:#2563eb; width:0; transition:width 0.3s"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Content: stats + file detail -->
+    <div class="content">
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Files received</div>
+          <div class="stat-value green" id="statFiles">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total rows</div>
+          <div class="stat-value" id="statRows">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total size</div>
+          <div class="stat-value" id="statBytes">0 B</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Last arrived</div>
+          <div class="stat-value" id="statLast">—</div>
+        </div>
+      </div>
+
+      <!-- File detail -->
+      <div class="card" id="detailPanel" style="display:none">
+        <div class="card-title">File Detail — <span id="detailKey" style="color:#818cf8;font-family:monospace;text-transform:none;letter-spacing:0"></span></div>
+
+        <div class="detail-grid">
+          <div class="detail-item"><div class="detail-label">Rows</div><div class="detail-value" id="detailRows">—</div></div>
+          <div class="detail-item"><div class="detail-label">Size</div><div class="detail-value" id="detailSize">—</div></div>
+          <div class="detail-item"><div class="detail-label">Arrived</div><div class="detail-value" id="detailArrived">—</div></div>
+          <div class="detail-item"><div class="detail-label">Columns</div><div class="detail-value" id="detailColCount">—</div></div>
+        </div>
+
+        <div class="card-title" style="margin-bottom:8px">Columns</div>
+        <div class="col-list" id="detailCols"></div>
+
+        <div class="card-title" style="margin-bottom:8px">Sample rows</div>
+        <div class="table-wrap">
+          <table id="detailTable">
+            <thead><tr id="detailThead"></tr></thead>
+            <tbody id="detailTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="detailEmpty" class="card">
+        <div class="empty-msg">Connect and wait for Parquet files to arrive from the source</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  let ws = null;
+  let connected = false;
+  let pingTimer = null;
+  let pingStart = 0;
+  let pingPending = false;
+  let lastMsgTime = null;
+  let lastMsgTimer = null;
+
+  // files: key → {key, size, rows, columns, sample, arrived_at}
+  const files = new Map();
+  let activeKey = null;
+
+  // ── Connection ──────────────────────────────────────────────
+
+  function wsUrl() {
+    const host = document.getElementById('wsHost').value.trim() || 'localhost';
+    const port = document.getElementById('wsPort').value.trim() || '8766';
+    return `ws://${host}:${port}`;
+  }
+
+  function toggleConnect() {
+    connected ? disconnect() : connectWs();
+  }
+
+  function connectWs() {
+    const url = wsUrl();
+    setServerPill('loading', 'CONNECTING');
+    document.getElementById('btnConnect').textContent = 'Connecting…';
+    document.getElementById('btnConnect').disabled = true;
+    document.getElementById('headerAddr').textContent = `WebSocket: ${url}`;
+
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      connected = true;
+      setServerPill('ok', 'CONNECTED');
+      document.getElementById('btnConnect').textContent = 'Disconnect';
+      document.getElementById('btnConnect').disabled = false;
+      ws.send(JSON.stringify({ type: 'get_status' }));
+      startPing();
+      startLastMsgTimer();
+    };
+
+    ws.onclose = () => {
+      connected = false;
+      setServerPill('bad', 'DISCONNECTED');
+      setS3Pill('bad', 'OFFLINE');
+      document.getElementById('btnConnect').textContent = 'Connect';
+      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('pingVal').textContent = '—';
+      document.getElementById('lastMsgVal').textContent = '—';
+      stopPing();
+      stopLastMsgTimer();
+    };
+
+    ws.onerror = () => ws.close();
+
+    ws.onmessage = (evt) => {
+      lastMsgTime = Date.now();
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'status') handleStatus(msg);
+      if (msg.type === 'stats')  handleStats(msg);
+      if (msg.type === 'file')              handleFile(msg);
+      if (msg.type === 'generate_progress') handleGenProgress(msg);
+      if (msg.type === 'generate_done')     handleGenDone(msg);
+      if (pingPending && msg.type === 'status') {
+        pingPending = false;
+        document.getElementById('pingVal').textContent = `${Date.now() - pingStart} ms`;
+      }
+    };
+  }
+
+  function disconnect() {
+    stopPing(); stopLastMsgTimer();
+    if (ws) ws.close();
+  }
+
+  // ── Ping ────────────────────────────────────────────────────
+
+  function startPing() {
+    pingTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN && !pingPending) {
+        pingPending = true;
+        pingStart = Date.now();
+        ws.send(JSON.stringify({ type: 'get_status' }));
+      }
+    }, 3000);
+  }
+
+  function stopPing() { clearInterval(pingTimer); pingPending = false; }
+
+  function startLastMsgTimer() {
+    lastMsgTimer = setInterval(() => {
+      if (lastMsgTime === null) return;
+      const ago = Math.round((Date.now() - lastMsgTime) / 1000);
+      document.getElementById('lastMsgVal').textContent = ago === 0 ? 'now' : `${ago}s ago`;
+    }, 1000);
+  }
+
+  function stopLastMsgTimer() { clearInterval(lastMsgTimer); lastMsgTime = null; }
+
+  // ── Message handlers ────────────────────────────────────────
+
+  function handleStatus(msg) {
+    setS3Pill(msg.s3_connected ? 'ok' : 'bad', msg.s3_connected ? 'ONLINE' : 'OFFLINE');
+    document.getElementById('sbBucket').textContent = msg.bucket ?? '—';
+    document.getElementById('sbPoll').textContent   = (msg.poll_interval ?? '—') + 's';
+    if (msg.poll_interval) document.getElementById('pollInterval').value = msg.poll_interval;
+    document.getElementById('btnGenerate').disabled = !msg.s3_connected;
+  }
+
+  function handleStats(msg) {
+    const files  = (msg.file_count  ?? 0).toLocaleString();
+    const rows   = (msg.total_rows  ?? 0).toLocaleString();
+    const bytes  = fmtBytes(msg.total_bytes ?? 0);
+    document.getElementById('statFiles').textContent = files;
+    document.getElementById('statRows').textContent  = rows;
+    document.getElementById('statBytes').textContent = bytes;
+    document.getElementById('sbFiles').textContent   = files;
+    document.getElementById('sbRows').textContent    = rows;
+    document.getElementById('sbBytes').textContent   = bytes;
+  }
+
+  function handleFile(msg) {
+    files.set(msg.key, msg);
+    document.getElementById('statLast').textContent = msg.arrived_at ?? '—';
+    renderFileList();
+    // Auto-select the latest file
+    selectFile(msg.key);
+  }
+
+  // ── File list ────────────────────────────────────────────────
+
+  function renderFileList() {
+    const el = document.getElementById('fileList');
+    el.innerHTML = '';
+    // newest first
+    const sorted = [...files.values()].reverse();
+    for (const f of sorted) {
+      const div = document.createElement('div');
+      div.className = 'file-item' + (f.key === activeKey ? ' active' : '');
+      div.onclick = () => selectFile(f.key);
+      div.innerHTML = `
+        <div class="file-key">${f.key}</div>
+        <div class="file-meta">
+          ${fmtBytes(f.size)} &nbsp;·&nbsp; ${(f.rows ?? 0).toLocaleString()} rows
+          <span class="file-badge">${f.arrived_at ?? ''}</span>
+        </div>`;
+      el.appendChild(div);
+    }
+  }
+
+  function selectFile(key) {
+    activeKey = key;
+    renderFileList();
+
+    const f = files.get(key);
+    if (!f) return;
+
+    document.getElementById('detailPanel').style.display = '';
+    document.getElementById('detailEmpty').style.display = 'none';
+    document.getElementById('detailKey').textContent     = f.key;
+    document.getElementById('detailRows').textContent    = (f.rows ?? 0).toLocaleString();
+    document.getElementById('detailSize').textContent    = fmtBytes(f.size);
+    document.getElementById('detailArrived').textContent = f.arrived_at ?? '—';
+    document.getElementById('detailColCount').textContent = (f.columns ?? []).length;
+
+    // Columns
+    const colEl = document.getElementById('detailCols');
+    colEl.innerHTML = (f.columns ?? []).map(c => `<span class="col-tag">${c}</span>`).join('');
+
+    // Sample table
+    const thead = document.getElementById('detailThead');
+    const tbody = document.getElementById('detailTbody');
+    const cols  = f.columns ?? [];
+    const sample = f.sample ?? {};
+
+    thead.innerHTML = cols.map(c => `<th>${c}</th>`).join('');
+
+    const rowCount = cols.length > 0 ? (sample[cols[0]] ?? []).length : 0;
+    tbody.innerHTML = '';
+    for (let i = 0; i < rowCount; i++) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = cols.map(c => `<td>${sample[c]?.[i] ?? ''}</td>`).join('');
+      tbody.appendChild(tr);
+    }
+  }
+
+  // ── Controls ────────────────────────────────────────────────
+
+  function setInterval_() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const s = parseInt(document.getElementById('pollInterval').value);
+    ws.send(JSON.stringify({ type: 'set_interval', seconds: s }));
+  }
+
+  // ── Helpers ────────────────────────────────────────────────
+
+  function fmtBytes(b) {
+    if (b === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(b) / Math.log(1024));
+    return (b / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+  }
+
+  function setServerPill(cls, text) {
+    const el = document.getElementById('serverPill');
+    el.className = `pill ${cls}`; el.textContent = text;
+  }
+  function setS3Pill(cls, text) {
+    const el = document.getElementById('s3Pill');
+    el.className = `pill ${cls}`; el.textContent = text;
+  }
+
+  // ── Generate ────────────────────────────────────────────────
+
+  function generateData() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const totalFiles = parseInt(document.getElementById('genSites').value) *
+                       parseInt(document.getElementById('genFiles').value);
+    document.getElementById('btnGenerate').disabled = true;
+    document.getElementById('genProgress').style.display = '';
+    document.getElementById('genProgressLabel').textContent = `Generating 0 / ${totalFiles} files…`;
+    document.getElementById('genProgressBar').style.width = '0%';
+
+    ws.send(JSON.stringify({
+      type:           'generate',
+      sites:           parseInt(document.getElementById('genSites').value),
+      racks_per_site:  parseInt(document.getElementById('genRacks').value),
+      modules_per_rack:parseInt(document.getElementById('genModules').value),
+      cells_per_module:parseInt(document.getElementById('genCells').value),
+      rows_per_file:   parseInt(document.getElementById('genRows').value),
+      num_files:       parseInt(document.getElementById('genFiles').value),
+      hours_ago:       parseFloat(document.getElementById('genHoursAgo').value),
+    }));
+  }
+
+  function handleGenProgress(msg) {
+    const pct = Math.round((msg.done / msg.total) * 100);
+    document.getElementById('genProgressLabel').textContent =
+      `Generating ${msg.done} / ${msg.total} files… ${msg.key.split('/').pop()}`;
+    document.getElementById('genProgressBar').style.width = pct + '%';
+  }
+
+  function handleGenDone(msg) {
+    document.getElementById('btnGenerate').disabled = false;
+    if (msg.error) {
+      document.getElementById('genProgressLabel').textContent = `Error: ${msg.error}`;
+      document.getElementById('genProgressBar').style.background = '#dc2626';
+    } else {
+      document.getElementById('genProgressLabel').textContent =
+        `Done — ${msg.files_written} file(s), ${(msg.total_rows).toLocaleString()} rows written`;
+      document.getElementById('genProgressBar').style.width = '100%';
+      document.getElementById('genProgressBar').style.background = '#16a34a';
+    }
+    setTimeout(() => {
+      document.getElementById('genProgress').style.display = 'none';
+      document.getElementById('genProgressBar').style.background = '#2563eb';
+    }, 4000);
+  }
+</script>
+</body>
+</html>

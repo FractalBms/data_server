@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Binaries (downloaded by setup.sh)
+manager/nats-server
+aws/data_store/minio
+
+# Data directories
+manager/nats-data/
+aws/data_store/minio-data/
+
+# Temp / OS
+*.swp
+*.swo
+.DS_Store

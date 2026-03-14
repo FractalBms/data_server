@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DATA SERVER DASHBOARD</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: #0a0a0a; color: #e5e7eb;
+    }
+    .container {
+      max-width: 1600px; margin: 0 auto;
+      background: #121212;
+      border: 1px solid #1e3a8a;
+      border-radius: 12px;
+      display: flex; flex-direction: column;
+      height: 96vh; overflow: hidden;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: grid; grid-template-columns: 1fr auto;
+      align-items: center; gap: 12px;
+      padding: 14px 20px;
+      background: linear-gradient(135deg, #000, #1e3a8a);
+      border-bottom: 2px solid #2563eb;
+    }
+    .header h2 { margin: 0; font-size: 20px; }
+    .header small { color: #93c5fd; }
+    .header-right { text-align: right; font-size: 12px; }
+
+    .pill {
+      display: inline-block; padding: 2px 8px;
+      border-radius: 999px; font-weight: bold; font-size: 11px;
+    }
+    .pill.ok      { background: #065f46; color: #6ee7b7; }
+    .pill.bad     { background: #7f1d1d; color: #fecaca; }
+    .pill.loading { background: #713f12; color: #fde68a; }
+    .pill.warn    { background: #78350f; color: #fde68a; }
+
+    /* ── Connect bar ── */
+    .connect-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; background: #0f172a;
+      border-bottom: 1px solid #1e3a8a; flex-wrap: wrap;
+    }
+    .connect-bar label { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    .connect-bar input {
+      background: #020617; border: 1px solid #334155; border-radius: 5px;
+      color: #e2e8f0; padding: 4px 8px; font-size: 13px; outline: none;
+    }
+    .connect-bar input.host { width: 160px; }
+    .connect-bar input.port { width: 70px; }
+    .ping-box { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #94a3b8; }
+    .ping-value { color: #60a5fa; font-weight: bold; }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 16px; background: #1a1a1a;
+      border-bottom: 1px solid #1e3a8a;
+    }
+    .toolbar span { font-size: 12px; color: #64748b; margin-right: 4px; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 5px 14px; border-radius: 6px;
+      border: 1px solid #475569; background: #334155;
+      color: #e5e7eb; font-weight: bold; font-size: 12px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #475569; }
+    .btn.primary { background: #2563eb; border-color: #60a5fa; }
+    .btn.primary:hover { background: #1d4ed8; }
+    .btn.danger { background: #dc2626; border-color: #f87171; }
+    .btn.danger:hover { background: #b91c1c; }
+    .btn.sm { padding: 3px 10px; font-size: 11px; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Nav links ── */
+    .nav-links { display: flex; gap: 6px; margin-left: auto; }
+    .nav-link {
+      padding: 4px 10px; border-radius: 5px; font-size: 12px;
+      background: #1e293b; border: 1px solid #334155;
+      color: #94a3b8; cursor: pointer; text-decoration: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-link:hover { background: #2563eb; color: #fff; border-color: #60a5fa; }
+
+    /* ── Component grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px; padding: 12px;
+      overflow-y: auto; flex: 1;
+    }
+
+    .comp-card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; display: flex; flex-direction: column;
+      min-height: 260px;
+    }
+    .comp-card.running { border-color: #166534; }
+    .comp-card.error   { border-color: #991b1b; }
+
+    .comp-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid #334155;
+    }
+    .comp-name { font-size: 13px; font-weight: 700; flex: 1; }
+    .comp-pid  { font-size: 11px; color: #475569; font-family: monospace; }
+
+    /* ── Terminal log ── */
+    .comp-log {
+      flex: 1; overflow-y: auto;
+      padding: 8px 10px;
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 11px; line-height: 1.5;
+      background: #020617;
+      border-radius: 0 0 8px 8px;
+    }
+    .log-line { white-space: pre-wrap; word-break: break-all; color: #86efac; }
+    .log-line.err { color: #fca5a5; }
+    .log-line.sys { color: #60a5fa; font-style: italic; }
+    .log-empty { color: #1e3a5f; font-style: italic; }
+
+    /* ── Status summary bar ── */
+    .summary-bar {
+      display: flex; gap: 16px; align-items: center;
+      padding: 6px 16px; background: #0f172a;
+      border-top: 1px solid #1e3a8a;
+      font-size: 12px; color: #64748b;
+    }
+    .summary-bar b { color: #60a5fa; }
+
+    /* ── Spinner ── */
+    .dot {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; background: #334155;
+      transition: background 0.3s;
+    }
+    .dot.running { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+    .dot.error   { background: #ef4444; }
+    .dot.starting{ background: #f59e0b; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h2>DATA SERVER DASHBOARD</h2>
+      <small id="headerAddr">Manager: not connected</small>
+    </div>
+    <div class="header-right">
+      Manager: <span id="serverPill" class="pill bad">DISCONNECTED</span>
+    </div>
+  </div>
+
+  <!-- Connect bar -->
+  <div class="connect-bar">
+    <label>Host</label>
+    <input class="host" id="wsHost" value="localhost" />
+    <label>Port</label>
+    <input class="port" id="wsPort" value="8760" />
+    <button class="btn primary" id="btnConnect" onclick="toggleConnect()">Connect</button>
+    <div class="ping-box">
+      <span>Ping:</span><span class="ping-value" id="pingVal">—</span>
+      <span>Last msg:</span><span class="ping-value" id="lastMsgVal">—</span>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <span>Pipeline:</span>
+    <button class="btn primary" id="btnStartAll" disabled onclick="startAll()">▶ Start All</button>
+    <button class="btn danger"  id="btnStopAll"  disabled onclick="stopAll()">■ Stop All</button>
+    <div class="nav-links">
+      <a class="nav-link" href="generator.html">Generator</a>
+      <a class="nav-link" href="aws.html">AWS Store</a>
+      <a class="nav-link" href="subscriber.html">Subscriber</a>
+      <a class="nav-link" href="costs.html">Costs</a>
+    </div>
+  </div>
+
+  <!-- Component grid -->
+  <div class="grid" id="compGrid">
+    <div style="grid-column:1/-1; text-align:center; color:#1e3a5f; padding:60px; font-size:14px">
+      Connect to the manager to see components
+    </div>
+  </div>
+
+  <!-- Summary bar -->
+  <div class="summary-bar">
+    <span>Running: <b id="sumRunning">0</b></span>
+    <span>Stopped: <b id="sumStopped">0</b></span>
+    <span>Error:   <b id="sumError">0</b></span>
+  </div>
+
+</div>
+
+<script>
+  let ws = null;
+  let connected = false;
+  let pingTimer = null;
+  let pingStart = 0;
+  let pingPending = false;
+  let lastMsgTime = null;
+  let lastMsgTimer = null;
+
+  // component state: name → {status, pid, label}
+  const components = {};
+  // log buffers: name → string[]
+  const logBuffers = {};
+  const MAX_LOG_LINES = 200;
+
+  // ── Connection ──────────────────────────────────────────────
+
+  function wsUrl() {
+    return `ws://${document.getElementById('wsHost').value.trim()||'localhost'}:${document.getElementById('wsPort').value.trim()||'8760'}`;
+  }
+
+  function toggleConnect() { connected ? disconnect() : connectWs(); }
+
+  function connectWs() {
+    const url = wsUrl();
+    setServerPill('loading', 'CONNECTING');
+    document.getElementById('btnConnect').textContent = 'Connecting…';
+    document.getElementById('btnConnect').disabled = true;
+    document.getElementById('headerAddr').textContent = `Manager: ${url}`;
+
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      connected = true;
+      setServerPill('ok', 'CONNECTED');
+      document.getElementById('btnConnect').textContent = 'Disconnect';
+      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('btnStartAll').disabled = false;
+      document.getElementById('btnStopAll').disabled  = false;
+      ws.send(JSON.stringify({ type: 'get_status' }));
+      startPing(); startLastMsgTimer();
+    };
+    ws.onclose = () => {
+      connected = false;
+      setServerPill('bad', 'DISCONNECTED');
+      document.getElementById('btnConnect').textContent = 'Connect';
+      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('btnStartAll').disabled = true;
+      document.getElementById('btnStopAll').disabled  = true;
+      document.getElementById('pingVal').textContent = '—';
+      document.getElementById('lastMsgVal').textContent = '—';
+      stopPing(); stopLastMsgTimer();
+    };
+    ws.onerror = () => ws.close();
+    ws.onmessage = evt => {
+      lastMsgTime = Date.now();
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'status') handleStatus(msg);
+      if (msg.type === 'log')    handleLog(msg);
+      if (pingPending && msg.type === 'status') {
+        pingPending = false;
+        document.getElementById('pingVal').textContent = `${Date.now() - pingStart} ms`;
+      }
+    };
+  }
+
+  function disconnect() { stopPing(); stopLastMsgTimer(); if (ws) ws.close(); }
+
+  // ── Ping ────────────────────────────────────────────────────
+
+  function startPing() {
+    pingTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN && !pingPending) {
+        pingPending = true; pingStart = Date.now();
+        ws.send(JSON.stringify({ type: 'get_status' }));
+      }
+    }, 3000);
+  }
+  function stopPing() { clearInterval(pingTimer); pingPending = false; }
+  function startLastMsgTimer() {
+    lastMsgTimer = setInterval(() => {
+      if (!lastMsgTime) return;
+      const ago = Math.round((Date.now() - lastMsgTime) / 1000);
+      document.getElementById('lastMsgVal').textContent = ago === 0 ? 'now' : `${ago}s ago`;
+    }, 1000);
+  }
+  function stopLastMsgTimer() { clearInterval(lastMsgTimer); lastMsgTime = null; }
+
+  // ── Message handlers ────────────────────────────────────────
+
+  function handleStatus(msg) {
+    const comps = msg.components ?? {};
+    let needRebuild = false;
+
+    for (const [name, info] of Object.entries(comps)) {
+      if (!components[name]) {
+        components[name] = { ...info };
+        logBuffers[name] = [];
+        needRebuild = true;
+      } else {
+        components[name] = { ...components[name], ...info };
+        updateCardStatus(name);
+      }
+    }
+
+    if (needRebuild) rebuildGrid();
+    updateSummary();
+  }
+
+  function handleLog(msg) {
+    const { component: name, line, stream } = msg;
+    if (!logBuffers[name]) logBuffers[name] = [];
+    logBuffers[name].push({ line, stream });
+    if (logBuffers[name].length > MAX_LOG_LINES) logBuffers[name].shift();
+    appendLogLine(name, line, stream);
+  }
+
+  // ── Grid rendering ──────────────────────────────────────────
+
+  function rebuildGrid() {
+    const grid = document.getElementById('compGrid');
+    grid.innerHTML = '';
+    for (const name of Object.keys(components)) {
+      grid.appendChild(makeCard(name));
+    }
+  }
+
+  function makeCard(name) {
+    const info = components[name];
+    const div  = document.createElement('div');
+    div.id        = `card-${name}`;
+    div.className = `comp-card ${info.status}`;
+    div.innerHTML = `
+      <div class="comp-header">
+        <span class="dot ${info.status}" id="dot-${name}"></span>
+        <span class="comp-name">${info.label || name}</span>
+        <span class="comp-pid" id="pid-${name}">${info.pid ? 'pid ' + info.pid : ''}</span>
+        <span id="pill-${name}" class="pill ${statusPillClass(info.status)}">${info.status.toUpperCase()}</span>
+        <button class="btn sm primary" id="btn-start-${name}" onclick="startComp('${name}')"
+          ${info.status === 'running' ? 'disabled' : ''}>▶</button>
+        <button class="btn sm danger"  id="btn-stop-${name}"  onclick="stopComp('${name}')"
+          ${info.status !== 'running' ? 'disabled' : ''}>■</button>
+      </div>
+      <div class="comp-log" id="log-${name}">
+        <span class="log-empty">No output yet</span>
+      </div>`;
+
+    // Replay existing log lines
+    const logEl = div.querySelector(`#log-${name}`);
+    if (logBuffers[name] && logBuffers[name].length) {
+      logEl.innerHTML = '';
+      for (const { line, stream } of logBuffers[name]) {
+        appendLogLineEl(logEl, line, stream);
+      }
+    }
+    return div;
+  }
+
+  function updateCardStatus(name) {
+    const info = components[name];
+    const card = document.getElementById(`card-${name}`);
+    if (!card) return;
+
+    card.className = `comp-card ${info.status}`;
+    document.getElementById(`dot-${name}`).className  = `dot ${info.status}`;
+    document.getElementById(`pid-${name}`).textContent = info.pid ? 'pid ' + info.pid : '';
+
+    const pill = document.getElementById(`pill-${name}`);
+    pill.className   = `pill ${statusPillClass(info.status)}`;
+    pill.textContent = info.status.toUpperCase();
+
+    document.getElementById(`btn-start-${name}`).disabled = (info.status === 'running');
+    document.getElementById(`btn-stop-${name}`).disabled  = (info.status !== 'running');
+  }
+
+  function appendLogLine(name, line, stream) {
+    const logEl = document.getElementById(`log-${name}`);
+    if (!logEl) return;
+    const empty = logEl.querySelector('.log-empty');
+    if (empty) logEl.innerHTML = '';
+    appendLogLineEl(logEl, line, stream);
+    // Keep scrolled to bottom
+    logEl.scrollTop = logEl.scrollHeight;
+    // Trim DOM lines
+    while (logEl.childElementCount > MAX_LOG_LINES) logEl.removeChild(logEl.firstChild);
+  }
+
+  function appendLogLineEl(logEl, line, stream) {
+    const span = document.createElement('div');
+    span.className = 'log-line' + (stream === 'stderr' ? ' err' : line.startsWith('[') ? ' sys' : '');
+    span.textContent = line;
+    logEl.appendChild(span);
+  }
+
+  function updateSummary() {
+    const counts = { running: 0, stopped: 0, error: 0 };
+    for (const c of Object.values(components)) {
+      if (counts[c.status] !== undefined) counts[c.status]++;
+    }
+    document.getElementById('sumRunning').textContent = counts.running;
+    document.getElementById('sumStopped').textContent = counts.stopped;
+    document.getElementById('sumError').textContent   = counts.error;
+  }
+
+  // ── Controls ────────────────────────────────────────────────
+
+  function startComp(name) {
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ type: 'start', component: name }));
+  }
+
+  function stopComp(name) {
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ type: 'stop', component: name }));
+  }
+
+  function startAll() {
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ type: 'start_all' }));
+  }
+
+  function stopAll() {
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ type: 'stop_all' }));
+  }
+
+  // ── Helpers ────────────────────────────────────────────────
+
+  function statusPillClass(s) {
+    return { running: 'ok', stopped: 'bad', error: 'warn', starting: 'loading' }[s] ?? 'bad';
+  }
+
+  function setServerPill(cls, text) {
+    const e = document.getElementById('serverPill');
+    e.className = `pill ${cls}`; e.textContent = text;
+  }
+</script>
+</body>
+</html>

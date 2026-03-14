@@ -1,0 +1,24 @@
+# NATS JetStream (live data source — replaces direct MQTT)
+nats:
+  url: "nats://localhost:4222"
+  stream_name: BATTERY_DATA
+  default_subject: "batteries.>"   # default topic for live subscription
+
+# S3 / MinIO (historical data source)
+s3:
+  endpoint_url: "http://localhost:9000"
+  bucket: battery-data
+  region: us-east-1
+  access_key: minioadmin
+  secret_key: minioadmin
+  prefix: ""
+
+# WebSocket server
+websocket:
+  host: 0.0.0.0
+  port: 8767
+
+# History query limits
+history:
+  default_limit: 1000
+  max_limit: 10000

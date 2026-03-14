@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BATTERY DATA GENERATOR</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: #0a0a0a;
+      color: #e5e7eb;
+    }
+    .container {
+      max-width: 1500px; margin: 0 auto;
+      background: #121212;
+      border: 1px solid #1e3a8a;
+      border-radius: 12px;
+      display: flex; flex-direction: column;
+      height: 94vh; overflow: hidden;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: grid; grid-template-columns: 1fr auto;
+      gap: 12px; align-items: center;
+      padding: 14px 20px;
+      background: linear-gradient(135deg, #000, #1e3a8a);
+      border-bottom: 2px solid #2563eb;
+    }
+    .header h2 { margin: 0; font-size: 20px; }
+    .header small { color: #93c5fd; }
+    .header-right { text-align: right; font-size: 12px; line-height: 1.8; }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px; border-radius: 999px;
+      font-weight: bold; font-size: 11px;
+    }
+    .pill.ok      { background: #065f46; color: #6ee7b7; }
+    .pill.bad     { background: #7f1d1d; color: #fecaca; }
+    .pill.loading { background: #713f12; color: #fde68a; }
+
+    /* ── Connect bar ── */
+    .connect-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px;
+      background: #0f172a;
+      border-bottom: 1px solid #1e3a8a;
+      flex-wrap: wrap;
+    }
+    .connect-bar label { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    .connect-bar input {
+      background: #020617; border: 1px solid #334155; border-radius: 5px;
+      color: #e2e8f0; padding: 4px 8px; font-size: 13px; outline: none;
+      transition: border-color 0.2s;
+    }
+    .connect-bar input:focus { border-color: #2563eb; }
+    .connect-bar input.host { width: 160px; }
+    .connect-bar input.port { width: 70px; }
+
+    .ping-box {
+      margin-left: auto; display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: #94a3b8;
+    }
+    .ping-value { color: #60a5fa; font-weight: bold; font-variant-numeric: tabular-nums; }
+
+    /* ── Status bar ── */
+    .status-bar {
+      display: grid; grid-template-columns: repeat(5, 1fr);
+      padding: 8px; background: #1a1a1a;
+      border-bottom: 1px solid #1e3a8a;
+    }
+    .status-item { text-align: center; font-size: 12px; }
+    .status-item b { color: #60a5fa; }
+
+    /* ── Main layout ── */
+    .main { display: grid; grid-template-columns: 280px 1fr; flex: 1; overflow: hidden; }
+
+    .sidebar {
+      background: #0f172a; padding: 12px;
+      border-right: 1px solid #1e3a8a;
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    .content {
+      background: #0f172a;
+      padding: 12px;
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    /* ── Cards ── */
+    .card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; padding: 12px;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: #64748b; margin-bottom: 12px;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 6px 14px; border-radius: 6px;
+      border: 1px solid #475569;
+      background: #334155; color: #e5e7eb;
+      font-weight: bold; font-size: 13px; cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .btn:hover { background: #475569; }
+    .btn.primary { background: #2563eb; border-color: #60a5fa; }
+    .btn.primary:hover { background: #1d4ed8; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-run {
+      width: 100%; padding: 9px;
+      border-radius: 6px; border: none;
+      font-size: 14px; font-weight: 700; cursor: pointer;
+      transition: background 0.2s;
+      background: #16a34a; color: #fff;
+    }
+    .btn-run.running { background: #dc2626; }
+    .btn-run:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Form ── */
+    .form-row { margin-bottom: 10px; }
+    .form-row:last-of-type { margin-bottom: 0; }
+    .form-row label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 3px; }
+    .form-row input, .form-row select {
+      width: 100%;
+      background: #020617; border: 1px solid #334155; border-radius: 5px;
+      color: #e2e8f0; padding: 5px 8px; font-size: 13px; outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-row input:focus, .form-row select:focus { border-color: #2563eb; }
+
+    /* ── Stats ── */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .stat-card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; padding: 12px;
+    }
+    .stat-label { font-size: 11px; color: #94a3b8; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .stat-value { font-size: 22px; font-weight: 700; color: #60a5fa; font-variant-numeric: tabular-nums; }
+    .stat-value.green { color: #22c55e; }
+    .stat-value.red   { color: #ef4444; }
+
+    /* ── Sample table ── */
+    .table-wrap { overflow: auto; flex: 1; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead th {
+      position: sticky; top: 0;
+      background: #1e293b; color: #64748b;
+      text-align: left; padding: 7px 10px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+      border-bottom: 1px solid #334155; white-space: nowrap;
+    }
+    tbody tr { border-bottom: 1px solid #1a2540; }
+    tbody tr:hover { background: #1e293b; }
+    tbody td { padding: 6px 10px; color: #cbd5e1; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .cell-path { color: #818cf8; font-family: monospace; }
+    .mname { color: #38bdf8; }
+    .mval  { color: #f8fafc; font-weight: 600; }
+    .munit { color: #475569; }
+    .ts    { color: #475569; font-family: monospace; font-size: 11px; }
+    .empty-msg { padding: 40px; text-align: center; color: #475569; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h2>BATTERY DATA GENERATOR</h2>
+      <small id="headerAddr">WebSocket: not connected</small>
+    </div>
+    <div class="header-right">
+      Server: <span id="serverPill" class="pill bad">DISCONNECTED</span><br>
+      Generator: <span id="genPill" class="pill bad">STOPPED</span>
+    </div>
+  </div>
+
+  <!-- Connect bar -->
+  <div class="connect-bar">
+    <label>Host</label>
+    <input class="host" id="wsHost" value="localhost" placeholder="localhost" />
+    <label>Port</label>
+    <input class="port" id="wsPort" value="8765" placeholder="8765" />
+    <button class="btn primary" id="btnConnect" onclick="toggleConnect()">Connect</button>
+    <div class="ping-box">
+      <span>Ping:</span>
+      <span class="ping-value" id="pingVal">—</span>
+      <span>Last msg:</span>
+      <span class="ping-value" id="lastMsgVal">—</span>
+    </div>
+    <div style="display:flex;gap:6px;margin-left:8px">
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;text-decoration:none" href="dashboard.html">Dashboard</a>
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;text-decoration:none" href="aws.html">S3 Store</a>
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;text-decoration:none" href="subscriber.html">Subscriber</a>
+      <a style="padding:4px 10px;border-radius:5px;font-size:12px;background:#2563eb;border:1px solid #60a5fa;color:#fff;text-decoration:none" href="costs.html">Costs</a>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="status-item">CELLS <b id="sbCells">—</b></div>
+    <div class="status-item">MSG/SEC <b id="sbMps">0</b></div>
+    <div class="status-item">TOTAL <b id="sbTotal">0</b></div>
+    <div class="status-item">LOOP <b id="sbLoop">— ms</b></div>
+    <div class="status-item">MODE <b id="sbMode">—</b></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+
+      <div class="card">
+        <div class="card-title">Control</div>
+        <button class="btn-run" id="btnRun" disabled onclick="toggleRun()">START</button>
+        <div style="margin-top:8px; font-size:11px; color:#475569; text-align:center">
+          <span id="cellCountLabel">— cells configured</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Configuration</div>
+        <div class="form-row"><label>Sites</label>
+          <input type="number" id="cfgSites" min="1" max="200" value="2"></div>
+        <div class="form-row"><label>Racks per site</label>
+          <input type="number" id="cfgRacks" min="1" max="100" value="3"></div>
+        <div class="form-row"><label>Modules per rack</label>
+          <input type="number" id="cfgModules" min="1" max="100" value="4"></div>
+        <div class="form-row"><label>Cells per module</label>
+          <input type="number" id="cfgCells" min="1" max="100" value="6"></div>
+        <div class="form-row"><label>Sample interval (s)</label>
+          <input type="number" id="cfgInterval" min="0.1" max="60" step="0.1" value="1"></div>
+        <div class="form-row"><label>Topic mode</label>
+          <select id="cfgTopicMode">
+            <option value="per_cell">per_cell — one topic per cell</option>
+            <option value="per_cell_item">per_cell_item — one topic per measurement</option>
+          </select>
+        </div>
+        <div style="margin-top:12px">
+          <button class="btn primary" style="width:100%" onclick="applyConfig()">Apply Config</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Status</div>
+          <div class="stat-value red" id="statStatus">STOPPED</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Messages / sec</div>
+          <div class="stat-value green" id="statMps">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total published</div>
+          <div class="stat-value" id="statTotal">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Loop time</div>
+          <div class="stat-value" id="statLoop">— ms</div>
+        </div>
+      </div>
+
+      <div class="card" style="flex:1; display:flex; flex-direction:column; min-height:0">
+        <div class="card-title">Live Sample Data (last 60 rows)</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Cell</th>
+                <th>Measurement</th>
+                <th>Value</th>
+                <th>Unit</th>
+              </tr>
+            </thead>
+            <tbody id="sampleBody">
+              <tr><td colspan="5" class="empty-msg">Connect and start the generator to see data</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  const MAX_ROWS = 60;
+  let ws = null;
+  let running = false;
+  let connected = false;
+  let rows = [];
+  let pingTimer = null;
+  let pingStart = 0;
+  let pingPending = false;
+  let lastMsgTime = null;
+  let lastMsgTimer = null;
+
+  // ── Connection ──────────────────────────────────────────────
+
+  function wsUrl() {
+    const host = document.getElementById('wsHost').value.trim() || 'localhost';
+    const port = document.getElementById('wsPort').value.trim() || '8765';
+    return `ws://${host}:${port}`;
+  }
+
+  function toggleConnect() {
+    connected ? disconnect() : connectWs();
+  }
+
+  function connectWs() {
+    const url = wsUrl();
+    setServerPill('loading', 'CONNECTING');
+    document.getElementById('btnConnect').textContent = 'Connecting…';
+    document.getElementById('btnConnect').disabled = true;
+    document.getElementById('headerAddr').textContent = `WebSocket: ${url}`;
+
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      connected = true;
+      setServerPill('ok', 'CONNECTED');
+      document.getElementById('btnConnect').textContent = 'Disconnect';
+      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('btnRun').disabled = false;
+      ws.send(JSON.stringify({ type: 'get_status' }));
+      startPing();
+      startLastMsgTimer();
+    };
+
+    ws.onclose = () => {
+      connected = false;
+      running = false;
+      setServerPill('bad', 'DISCONNECTED');
+      setGenPill('bad', 'STOPPED');
+      document.getElementById('btnConnect').textContent = 'Connect';
+      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('btnRun').disabled = true;
+      document.getElementById('btnRun').textContent = 'START';
+      document.getElementById('btnRun').classList.remove('running');
+      document.getElementById('pingVal').textContent = '—';
+      document.getElementById('lastMsgVal').textContent = '—';
+      document.getElementById('statStatus').textContent = 'STOPPED';
+      document.getElementById('statStatus').className = 'stat-value red';
+      stopPing();
+      stopLastMsgTimer();
+    };
+
+    ws.onerror = () => ws.close();
+
+    ws.onmessage = (evt) => {
+      lastMsgTime = Date.now();
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'status')  handleStatus(msg);
+      if (msg.type === 'stats')   handleStats(msg);
+      if (msg.type === 'samples') handleSamples(msg);
+      if (pingPending && msg.type === 'status') {
+        pingPending = false;
+        document.getElementById('pingVal').textContent = `${Date.now() - pingStart} ms`;
+      }
+    };
+  }
+
+  function disconnect() {
+    stopPing();
+    stopLastMsgTimer();
+    if (ws) ws.close();
+  }
+
+  // ── Ping ────────────────────────────────────────────────────
+
+  function startPing() {
+    pingTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN && !pingPending) {
+        pingPending = true;
+        pingStart = Date.now();
+        ws.send(JSON.stringify({ type: 'get_status' }));
+      }
+    }, 3000);
+  }
+
+  function stopPing() { clearInterval(pingTimer); pingPending = false; }
+
+  function startLastMsgTimer() {
+    lastMsgTimer = setInterval(() => {
+      if (lastMsgTime === null) return;
+      const ago = Math.round((Date.now() - lastMsgTime) / 1000);
+      document.getElementById('lastMsgVal').textContent = ago === 0 ? 'now' : `${ago}s ago`;
+    }, 1000);
+  }
+
+  function stopLastMsgTimer() { clearInterval(lastMsgTimer); lastMsgTime = null; }
+
+  // ── Message handlers ────────────────────────────────────────
+
+  function handleStatus(msg) {
+    running = msg.running;
+    const btn = document.getElementById('btnRun');
+    btn.textContent = running ? 'STOP' : 'START';
+    btn.classList.toggle('running', running);
+    setGenPill(running ? 'ok' : 'bad', running ? 'RUNNING' : 'STOPPED');
+    document.getElementById('statStatus').textContent = running ? 'RUNNING' : 'STOPPED';
+    document.getElementById('statStatus').className = 'stat-value ' + (running ? 'green' : 'red');
+
+    if (msg.cell_count !== undefined) {
+      const n = msg.cell_count.toLocaleString();
+      document.getElementById('sbCells').textContent = n;
+      document.getElementById('cellCountLabel').textContent = `${n} cells configured`;
+    }
+    if (msg.config) {
+      document.getElementById('cfgSites').value     = msg.config.sites;
+      document.getElementById('cfgRacks').value     = msg.config.racks_per_site;
+      document.getElementById('cfgModules').value   = msg.config.modules_per_rack;
+      document.getElementById('cfgCells').value     = msg.config.cells_per_module;
+      document.getElementById('cfgInterval').value  = msg.config.sample_interval_seconds;
+      document.getElementById('cfgTopicMode').value = msg.config.topic_mode;
+      document.getElementById('sbMode').textContent = msg.config.topic_mode;
+    }
+  }
+
+  function handleStats(msg) {
+    const mps   = (msg.mps   ?? 0).toLocaleString();
+    const total = (msg.total_published ?? 0).toLocaleString();
+    const loop  = (msg.last_loop_ms ?? 0) + ' ms';
+    document.getElementById('statMps').textContent   = mps;
+    document.getElementById('statTotal').textContent = total;
+    document.getElementById('statLoop').textContent  = loop;
+    document.getElementById('sbMps').textContent     = mps;
+    document.getElementById('sbTotal').textContent   = total;
+    document.getElementById('sbLoop').textContent    = loop;
+  }
+
+  function handleSamples(msg) {
+    const tbody = document.getElementById('sampleBody');
+    const newRows = [];
+    for (const sample of msg.samples) {
+      const ts = new Date(sample.timestamp * 1000).toISOString().substring(11, 23);
+      for (const [name, m] of Object.entries(sample.measurements)) {
+        newRows.push({ ts, path: sample.cell_path, name, value: m.value, unit: m.unit });
+      }
+    }
+    rows = [...newRows, ...rows].slice(0, MAX_ROWS);
+    if (tbody.querySelector('.empty-msg')) tbody.innerHTML = '';
+    const existing = Array.from(tbody.rows);
+    rows.forEach((r, i) => {
+      if (i < existing.length) {
+        existing[i].cells[0].textContent = r.ts;
+        existing[i].cells[1].textContent = r.path;
+        existing[i].cells[2].textContent = r.name;
+        existing[i].cells[3].textContent = r.value;
+        existing[i].cells[4].textContent = r.unit;
+      } else {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="ts">${r.ts}</td><td class="cell-path">${r.path}</td><td class="mname">${r.name}</td><td class="mval">${r.value}</td><td class="munit">${r.unit}</td>`;
+        tbody.appendChild(tr);
+      }
+    });
+    while (tbody.rows.length > rows.length) tbody.deleteRow(tbody.rows.length - 1);
+  }
+
+  // ── Controls ────────────────────────────────────────────────
+
+  function toggleRun() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: running ? 'stop' : 'start' }));
+  }
+
+  function applyConfig() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      type: 'update_config',
+      config: {
+        sites:                   parseInt(document.getElementById('cfgSites').value),
+        racks_per_site:          parseInt(document.getElementById('cfgRacks').value),
+        modules_per_rack:        parseInt(document.getElementById('cfgModules').value),
+        cells_per_module:        parseInt(document.getElementById('cfgCells').value),
+        sample_interval_seconds: parseFloat(document.getElementById('cfgInterval').value),
+        topic_mode:              document.getElementById('cfgTopicMode').value,
+      }
+    }));
+  }
+
+  // ── Pills ────────────────────────────────────────────────────
+
+  function setServerPill(cls, text) {
+    const el = document.getElementById('serverPill');
+    el.className = `pill ${cls}`; el.textContent = text;
+  }
+  function setGenPill(cls, text) {
+    const el = document.getElementById('genPill');
+    el.className = `pill ${cls}`; el.textContent = text;
+  }
+</script>
+</body>
+</html>

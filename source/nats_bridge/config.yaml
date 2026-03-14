@@ -1,0 +1,22 @@
+# MQTT broker (FlashMQ)
+mqtt:
+  host: localhost
+  port: 1883
+  username: ""
+  password: ""
+  client_id: nats-bridge
+  topic: "batteries/#"
+  qos: 1
+
+# NATS JetStream
+nats:
+  url: "nats://localhost:4222"
+  stream_name: BATTERY_DATA
+  stream_subjects:
+    - "batteries.>"
+  # Retain messages for 48 hours as a safety buffer
+  max_age_hours: 48
+
+# MQTT topic → NATS subject conversion:
+#   batteries/site=0/rack=1/module=2/cell=3
+#   → batteries.site=0.rack=1.module=2.cell=3  (replace / with .)

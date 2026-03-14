@@ -1,0 +1,15 @@
+# S3 / MinIO connection
+# These match the source/parquet_writer/config.yaml settings
+s3:
+  endpoint_url: "http://localhost:9000"   # MinIO; remove for real AWS S3
+  bucket: battery-data
+  region: us-east-1
+  access_key: minioadmin
+  secret_key: minioadmin
+  prefix: ""                              # optional key prefix to monitor
+
+poll_interval_seconds: 10
+
+websocket:
+  host: 0.0.0.0
+  port: 8766
