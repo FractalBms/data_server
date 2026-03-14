@@ -86,12 +86,13 @@ def rows_to_parquet(rows: list[dict], compression: str) -> bytes:
     return buf.getvalue()
 
 
-def s3_key(prefix: str, site_id, now: datetime) -> str:
+def s3_key(prefix: str, proj_id, site_id, now: datetime) -> str:
     parts = [p for p in [
         prefix.strip("/"),
         now.strftime('%Y'),
         now.strftime('%m'),
         now.strftime('%d'),
+        f"proj={proj_id}",
         f"site={site_id}",
         f"{now.strftime('%Y%m%dT%H%M%SZ')}.parquet",
     ] if p]
@@ -126,6 +127,7 @@ async def run(cfg: dict) -> None:
     compression    = cfg["parquet"].get("compression", "snappy")
     bucket         = cfg["s3"]["bucket"]
     prefix         = cfg["s3"].get("prefix", "")
+    proj_id        = cfg["s3"].get("project_id", 0)
 
     s3 = build_s3_client(cfg)
 
@@ -192,7 +194,7 @@ async def run(cfg: dict) -> None:
 
         now = datetime.now(timezone.utc)
         for site_id, site_rows in by_site.items():
-            key  = s3_key(prefix, site_id, now)
+            key  = s3_key(prefix, proj_id, site_id, now)
             data = rows_to_parquet(list(site_rows), compression)
             await upload_with_retry(s3, bucket, key, data)
             log.info("Uploaded %d rows → s3://%s/%s (%d bytes)",

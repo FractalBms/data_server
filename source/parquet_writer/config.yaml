@@ -19,6 +19,7 @@ s3:
   access_key: minioadmin
   secret_key: minioadmin
   prefix: ""
+  project_id: 0                  # written as proj={project_id} in the S3 path
 
 # Parquet
 parquet:

@@ -159,12 +159,13 @@ def _make_parquet_bytes(rows: list[dict], compression: str = "snappy") -> bytes:
     return buf.getvalue()
 
 
-def _s3_key(prefix: str, site_id: int, ts: datetime) -> str:
+def _s3_key(prefix: str, proj_id, site_id: int, ts: datetime) -> str:
     parts = [p for p in [
         prefix.strip("/"),
         ts.strftime('%Y'),
         ts.strftime('%m'),
         ts.strftime('%d'),
+        f"proj={proj_id}",
         f"site={site_id}",
         f"{ts.strftime('%Y%m%dT%H%M%SZ')}.parquet",
     ] if p]
@@ -179,6 +180,7 @@ def generate_parquet_files(s3, cfg: dict, gen_cfg: dict, progress_cb=None) -> di
     """
     bucket         = cfg["s3"]["bucket"]
     prefix         = cfg["s3"].get("prefix", "")
+    proj_id        = cfg["s3"].get("project_id", 0)
     sites          = int(gen_cfg.get("sites", 2))
     racks          = int(gen_cfg.get("racks_per_site", 3))
     modules        = int(gen_cfg.get("modules_per_rack", 4))
@@ -228,7 +230,7 @@ def generate_parquet_files(s3, cfg: dict, gen_cfg: dict, progress_cb=None) -> di
                 rows.append(row)
 
             data = _make_parquet_bytes(rows)
-            key  = _s3_key(prefix, site_id, file_ts)
+            key  = _s3_key(prefix, proj_id, site_id, file_ts)
 
             s3.put_object(Bucket=bucket, Key=key, Body=data)
             files_written += 1

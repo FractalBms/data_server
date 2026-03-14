@@ -14,6 +14,7 @@ WebSocket API (ws://localhost:8767):
     {"type": "unsubscribe"}                              # stop live stream
     {"type": "query_history",
        "query_id": "q1",
+       "proj_id":  "0",          # omit for all projects
        "site_id":  "0",          # omit for all sites
        "from_ts":  1700000000.0, # unix timestamp, omit for last 1 hour
        "to_ts":    1700003600.0, # unix timestamp, omit for now
@@ -111,12 +112,18 @@ def check_s3(cfg: dict) -> bool:
         return False
 
 
-def run_history_query(cfg: dict, site_id: str, from_ts: float, to_ts: float, limit: int) -> dict:
+def run_history_query(cfg: dict, proj_id: str, site_id: str, from_ts: float, to_ts: float, limit: int) -> dict:
     bucket = cfg["s3"]["bucket"]
     prefix = cfg["s3"].get("prefix", "").strip("/")
-    path   = (f"s3://{bucket}/{prefix + '/' if prefix else ''}**/site={site_id}/*.parquet"
-              if site_id else
-              f"s3://{bucket}/{prefix + '/' if prefix else ''}**/*.parquet")
+    base   = f"s3://{bucket}/{prefix + '/' if prefix else ''}"
+    if proj_id and site_id:
+        path = f"{base}**/proj={proj_id}/site={site_id}/*.parquet"
+    elif proj_id:
+        path = f"{base}**/proj={proj_id}/**/*.parquet"
+    elif site_id:
+        path = f"{base}**/site={site_id}/*.parquet"
+    else:
+        path = f"{base}**/*.parquet"
 
     sql = f"""
         SELECT *
@@ -271,7 +278,8 @@ async def ws_handler(websocket) -> None:
 
             elif t == "query_history":
                 query_id = msg.get("query_id", "q")
-                site_id  = msg.get("site_id", "")
+                proj_id  = msg.get("proj_id",  "")
+                site_id  = msg.get("site_id",  "")
                 now      = time.time()
                 from_ts  = float(msg.get("from_ts", now - 3600))
                 to_ts    = float(msg.get("to_ts",   now))
@@ -280,7 +288,7 @@ async def ws_handler(websocket) -> None:
                 g_stats["queries_run"] += 1
                 try:
                     result = await asyncio.get_event_loop().run_in_executor(
-                        None, run_history_query, g_config, site_id, from_ts, to_ts, limit
+                        None, run_history_query, g_config, proj_id, site_id, from_ts, to_ts, limit
                     )
                     await websocket.send(json.dumps({"type": "history", "query_id": query_id, **result}, default=str))
                 except Exception as exc:
