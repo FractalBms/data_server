@@ -103,7 +103,7 @@
 
   <!-- Connect bar -->
   <div class="connect-bar">
-    <label>Host</label><input class="w-host" id="cfgHost" value="localhost" autocomplete="off"/>
+    <label>Host</label><input class="w-host" id="cfgHost" autocomplete="off"/>
     <label>Port</label><input class="w-port" id="cfgPort" value="8086"/>
     <label>Token</label><input class="w-token" id="cfgToken" value="battery-token-secret" type="password"/>
     <label>Org</label><input class="w-sm" id="cfgOrg" value="battery-org"/>
@@ -274,8 +274,9 @@ const authToken = () => $('cfgToken').value.trim();
 const org       = () => $('cfgOrg').value.trim();
 const bkt       = () => $('cfgBucket').value.trim();
 
-async function influxGet(path) {
-  return fetch(baseUrl() + path, { headers: { 'Authorization': `Token ${authToken()}` } });
+async function influxGet(path, auth = true) {
+  const headers = auth ? { 'Authorization': `Token ${authToken()}` } : {};
+  return fetch(baseUrl() + path, { headers });
 }
 
 async function influxQuery(flux) {
@@ -312,7 +313,7 @@ async function doConnect() {
   setPill('influxPill', 'loading', 'CONNECTING');
   $('btnConnect').disabled = true;
   try {
-    const res = await influxGet('/ping');
+    const res = await influxGet('/ping', false);
     if (res.ok || res.status === 204) {
       connected = true;
       setPill('influxPill', 'ok', 'ONLINE');
@@ -643,12 +644,10 @@ const $ = id => document.getElementById(id);
 const sel = (...ids) => ids.map(id => $(id).value);
 const setPill = (id, cls, txt) => { const e=$(id); e.className=`pill ${cls}`; e.textContent=txt; };
 
-// ── Host persistence + auto-connect ──────────────────────────────
+// ── Auto-connect ──────────────────────────────────────────────────
 (function() {
-  const el = document.getElementById('cfgHost');
-  const saved = localStorage.getItem('ds_host');
-  if (saved) el.value = saved;
-  el.addEventListener('change', () => localStorage.setItem('ds_host', el.value.trim()));
+  localStorage.removeItem('ds_host');
+  document.getElementById('cfgHost').value = window.location.hostname;
   doConnect();
 })();
 </script>

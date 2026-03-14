@@ -124,7 +124,7 @@
 
   <!-- Connect bar -->
   <div class="connect-bar">
-    <label>Host</label><input class="w-host" id="cfgHost" value="localhost" autocomplete="off" onchange="saveHost()"/>
+    <label>Host</label><input class="w-host" id="cfgHost" autocomplete="off" onchange="saveHost()"/>
     <span class="influx-only" id="influxFields">
       <label>Port</label><input class="w-port" id="cfgPort" value="8086"/>
       <label>Token</label><input class="w-token" id="cfgToken" value="battery-token-secret" type="password"/>
@@ -274,9 +274,8 @@ window.onload = () => {
     for (let i = 0; i < n; i++) { const o = document.createElement('option'); o.value = o.textContent = i; sel.appendChild(o); }
   };
   fill('selSite', SITES); fill('selRack', RACKS); fill('selModule', MODULES); fill('selCell', CELLS);
-  const saved = localStorage.getItem('mon_host');
-  if (saved) document.getElementById('cfgHost').value = saved;
-  localStorage.removeItem('mon_host');  // don't persist host across sessions
+  localStorage.removeItem('mon_host');
+  document.getElementById('cfgHost').value = window.location.hostname;
   setInterval(() => {
     if (!lastQueryMs) return;
     document.getElementById('qAgo').textContent = ((Date.now() - lastQueryMs) / 1000).toFixed(1) + 's';
@@ -365,8 +364,9 @@ const influxToken   = () => document.getElementById('cfgToken').value.trim();
 const influxOrg     = () => document.getElementById('cfgOrg').value.trim();
 const influxBkt     = () => document.getElementById('cfgBucket').value.trim();
 
-async function influxFetch(path) {
-  return fetch(influxBaseUrl() + path, { headers: { 'Authorization': `Token ${influxToken()}` } });
+async function influxFetch(path, auth = true) {
+  const headers = auth ? { 'Authorization': `Token ${influxToken()}` } : {};
+  return fetch(influxBaseUrl() + path, { headers });
 }
 async function influxQuery(flux) {
   const res = await fetch(`${influxBaseUrl()}/api/v2/query?org=${encodeURIComponent(influxOrg())}`, {
@@ -382,7 +382,7 @@ async function connectInflux() {
   setBackendPill('loading', 'CONNECTING');
   document.getElementById('btnConnect').disabled = true;
   try {
-    const res = await influxFetch('/ping');
+    const res = await influxFetch('/ping', false);
     if (res.ok || res.status === 204) {
       connected = true;
       setBackendPill('ok', 'ONLINE');
