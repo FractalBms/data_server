@@ -13,6 +13,7 @@ order:
   - parquet_writer
   - aws_server
   - subscriber_api
+  - stress_runner
 
 components:
 
@@ -48,3 +49,8 @@ components:
     label: "Subscriber API (NATS + DuckDB)"
     cmd: [".venv/bin/python", "server.py", "--config", "config.yaml"]
     cwd: "subscriber/api"
+
+  stress_runner:
+    label: "Stress Runner (multi-project 24/7)"
+    cmd: [".venv/bin/python", "stress_runner.py", "--config", "config.spark.yaml"]
+    cwd: "source/stress_runner"

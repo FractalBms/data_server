@@ -198,18 +198,25 @@ async def run(cfg: dict) -> None:
         buffer = []
         last_flush = time.monotonic()
 
-        # Group by site_id
-        by_site: dict[str, list] = defaultdict(list)
+        # Group by (project_id, site_id) — project_id read from payload if present,
+        # falling back to cfg["s3"]["project_id"] so single-project deployments
+        # need no changes.
+        default_proj = cfg["s3"].get("project_id", 0)
+        by_partition: dict[tuple, list] = defaultdict(list)
         for row in rows_to_write:
-            by_site[str(row.get("site_id", "unknown"))].append(row)
+            proj = row.get("project_id", default_proj)
+            site = str(row.get("site_id", "unknown"))
+            by_partition[(str(proj), site)].append(row)
 
         now = datetime.now(timezone.utc)
-        for site_id, site_rows in by_site.items():
-            key  = s3_key(cfg, site_id, now)
-            data = rows_to_parquet(list(site_rows), compression)
+        for (proj_id, site_id), part_rows in by_partition.items():
+            # Override config project_id with the one from the data
+            part_cfg = {**cfg, "s3": {**cfg["s3"], "project_id": proj_id}}
+            key  = s3_key(part_cfg, site_id, now)
+            data = rows_to_parquet(list(part_rows), compression)
             await upload_with_retry(s3, bucket, key, data)
             log.info("Uploaded %d rows → s3://%s/%s (%d bytes)",
-                     len(site_rows), bucket, key, len(data))
+                     len(part_rows), bucket, key, len(data))
 
         # Ack all messages only after successful upload
         for msg in msgs_to_ack:
