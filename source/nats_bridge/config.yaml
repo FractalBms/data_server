@@ -1,7 +1,7 @@
 # MQTT broker (FlashMQ)
 mqtt:
   host: localhost
-  port: 1883
+  port: 1884
   username: ""
   password: ""
   client_id: nats-bridge

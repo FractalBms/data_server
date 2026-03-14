@@ -146,6 +146,161 @@
     .dot.running { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
     .dot.error   { background: #ef4444; }
     .dot.starting{ background: #f59e0b; }
+
+    /* ── Stack selector ── */
+    .stack-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; background: #080e1a;
+      border-bottom: 1px solid #1e3a8a;
+    }
+    .stack-btn {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 16px; border-radius: 7px; cursor: pointer;
+      border: 1px solid #334155; background: #1e293b;
+      color: #64748b; font-size: 12px; font-weight: 600;
+      transition: all 0.15s;
+    }
+    .stack-btn:hover { border-color: #475569; color: #e5e7eb; }
+    .stack-btn.active-old { border-color: #dc6600; background: #2d1a00; color: #fb923c; }
+    .stack-btn.active-new { border-color: #166534; background: #0d2c1e; color: #4ade80; }
+    .stack-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #334155;
+      flex-shrink: 0; transition: background 0.3s;
+    }
+    .stack-dot.up   { background: #22c55e; box-shadow: 0 0 5px #22c55e88; }
+    .stack-dot.down { background: #ef4444; }
+    .stack-sep { width: 1px; height: 20px; background: #1e3a8a; margin: 0 4px; }
+    .stack-host { font-size: 11px; color: #475569; }
+    .stack-host input {
+      background: transparent; border: none; color: #64748b;
+      font-size: 11px; width: 110px; outline: none;
+    }
+
+    /* ── View toggle ── */
+    .view-btn { background: #1e293b; border-color: #334155; color: #64748b; }
+    .view-btn.active { background: #2563eb; border-color: #60a5fa; color: #fff; }
+
+    /* ── Architecture panel ── */
+    #archPanel {
+      display: none; flex: 1; overflow: auto;
+      padding: 20px 24px; background: #0d1117;
+      align-items: flex-start; gap: 32px;
+    }
+    .arch-col { flex: 1; min-width: 0; }
+    .arch-col-title {
+      font-size: 0.85rem; font-weight: 700; margin-bottom: 12px;
+      padding-bottom: 6px; border-bottom: 1px solid #30363d;
+    }
+    svg.pipeline { width: 100%; overflow: visible; }
+
+    /* node states */
+    .pnode rect { stroke-width: 1.5; rx: 7; }
+    .pnode.stopped  rect { fill: #161b22; stroke: #30363d; }
+    .pnode.running  rect { fill: #0d2c1e; stroke: #3fb950; }
+    .pnode.error    rect { fill: #2d1217; stroke: #f85149; }
+    .pnode.starting rect { fill: #1b2030; stroke: #e3b341; }
+    .pnode.external rect { fill: #161b22; stroke: #388bfd; stroke-dasharray: 4 2; }
+    .pnode .nlabel { font-size: 11px; font-weight: 600; fill: #e6edf3; }
+    .pnode .nsub   { font-size: 9px;  fill: #8b949e; }
+    .pnode .nport  { font-size: 9px;  fill: #388bfd; }
+    .pnode .ndot   { transition: fill 0.4s; }
+    .pnode.stopped  .ndot { fill: #484f58; }
+    .pnode.running  .ndot { fill: #3fb950; filter: drop-shadow(0 0 3px #3fb950); }
+    .pnode.error    .ndot { fill: #f85149; }
+    .pnode.starting .ndot { fill: #e3b341; }
+    .pnode.external .ndot { fill: #388bfd; }
+
+    .parrow { stroke: #30363d; stroke-width: 1.5; fill: none; }
+    .parrow.flowing {
+      stroke: #3fb950; stroke-dasharray: 6 4;
+      animation: adash 0.8s linear infinite;
+    }
+    .alabel { font-size: 9px; fill: #8b949e; text-anchor: middle; }
+    .alabel.flowing { fill: #3fb950; }
+    @keyframes adash { to { stroke-dashoffset: -20; } }
+
+    /* ── InfluxDB panel ── */
+    #influxPanel {
+      display: none; flex: 1; overflow: hidden;
+      flex-direction: column;
+    }
+    .ix-connect-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 14px; background: #0f172a;
+      border-bottom: 1px solid #1e3a8a; flex-wrap: wrap; flex-shrink: 0;
+    }
+    .ix-connect-bar label { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    .ix-connect-bar input {
+      background: #020617; border: 1px solid #334155; border-radius: 5px;
+      color: #e2e8f0; padding: 4px 8px; font-size: 12px; outline: none;
+    }
+    .ix-w-host { width: 110px; } .ix-w-port { width: 60px; }
+    .ix-w-token { width: 180px; } .ix-w-sm { width: 100px; }
+    .ix-query-info { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #94a3b8; }
+    .ix-query-info b { color: #60a5fa; font-variant-numeric: tabular-nums; }
+
+    .ix-status-bar {
+      display: grid; grid-template-columns: repeat(5, 1fr);
+      padding: 6px 8px; background: #1a1a1a;
+      border-bottom: 1px solid #1e3a8a; flex-shrink: 0;
+    }
+    .ix-status-item { text-align: center; font-size: 11px; }
+    .ix-status-item b { color: #60a5fa; }
+
+    .ix-main {
+      display: grid; grid-template-columns: 220px 1fr;
+      flex: 1; overflow: hidden;
+    }
+    .ix-sidebar {
+      background: #0f172a; padding: 10px; border-right: 1px solid #1e3a8a;
+      overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+    }
+    .ix-content {
+      background: #0a0f1a; padding: 10px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .ix-card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; padding: 10px;
+    }
+    .ix-card-title {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #64748b; margin-bottom: 8px;
+    }
+    .ix-form-row { margin-bottom: 6px; }
+    .ix-form-row label { display: block; font-size: 10px; color: #94a3b8; margin-bottom: 2px; }
+    .ix-form-row select, .ix-form-row input {
+      width: 100%; background: #020617; border: 1px solid #334155;
+      border-radius: 5px; color: #e2e8f0; padding: 4px 7px;
+      font-size: 12px; outline: none;
+    }
+    .ix-mini-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .ix-mini-stat {
+      background: #0f172a; border: 1px solid #1e3a8a;
+      border-radius: 6px; padding: 6px 7px;
+    }
+    .ix-mini-stat-label { font-size: 9px; color: #64748b; text-transform: uppercase; }
+    .ix-mini-stat-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+    .ix-mini-stat-unit { font-size: 9px; color: #475569; }
+
+    .ix-heatmap-card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; padding: 10px; flex-shrink: 0;
+    }
+    .ix-heatmap-title { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 6px; }
+    .ix-heatmap-wrap { overflow-x: auto; }
+
+    .ix-chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .ix-chart-card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 3px;
+    }
+    .ix-chart-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+    .ix-chart-title { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; }
+    .ix-chart-value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; color: #f8fafc; line-height: 1; }
+    .ix-chart-unit { font-size: 12px; color: #94a3b8; }
+    .ix-chart-range { font-size: 10px; color: #475569; margin-left: auto; font-family: monospace; }
+    .ix-chart-svg { width: 100%; display: block; }
   </style>
 </head>
 <body>
@@ -157,21 +312,31 @@
       <h2>DATA SERVER DASHBOARD</h2>
       <small id="headerAddr">Manager: not connected</small>
     </div>
-    <div class="header-right">
+    <div class="header-right" style="text-align:right;font-size:12px;line-height:2">
+      Stack: <span id="stackLabel" style="color:#60a5fa;font-weight:600">—</span><br>
       Manager: <span id="serverPill" class="pill bad">DISCONNECTED</span>
     </div>
   </div>
 
-  <!-- Connect bar -->
-  <div class="connect-bar">
-    <label>Host</label>
-    <input class="host" id="wsHost" value="localhost" />
-    <label>Port</label>
-    <input class="port" id="wsPort" value="8760" />
-    <button class="btn primary" id="btnConnect" onclick="toggleConnect()">Connect</button>
-    <div class="ping-box">
-      <span>Ping:</span><span class="ping-value" id="pingVal">—</span>
-      <span>Last msg:</span><span class="ping-value" id="lastMsgVal">—</span>
+  <!-- Stack selector bar -->
+  <div class="stack-bar">
+    <button class="stack-btn" id="btnOld" onclick="selectStack(8760)">
+      <span class="stack-dot" id="dot8760"></span>
+      orig_aws — FlashMQ → InfluxDB2
+      <span style="font-size:10px;color:#475569">:8760</span>
+    </button>
+    <button class="stack-btn" id="btnNew" onclick="selectStack(8761)">
+      <span class="stack-dot" id="dot8761"></span>
+      New NATS Stack — Mosquitto → S3
+      <span style="font-size:10px;color:#475569">:8761</span>
+    </button>
+    <div class="stack-sep"></div>
+    <div class="stack-host">
+      Host: <input id="wsHost" value="localhost" onchange="onHostChange()" />
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#475569">
+      <span>Ping:</span><span style="color:#60a5fa;font-weight:bold" id="pingVal">—</span>
+      <span>Last:</span><span style="color:#60a5fa;font-weight:bold" id="lastMsgVal">—</span>
     </div>
   </div>
 
@@ -180,10 +345,14 @@
     <span>Pipeline:</span>
     <button class="btn primary" id="btnStartAll" disabled onclick="startAll()">▶ Start All</button>
     <button class="btn danger"  id="btnStopAll"  disabled onclick="stopAll()">■ Stop All</button>
+    <span style="width:1px;background:#334155;height:18px;margin:0 4px"></span>
+    <button class="btn view-btn active" id="btnViewComps" onclick="setView('components')">Components</button>
+    <button class="btn view-btn"        id="btnViewArch"   onclick="setView('arch')">Architecture</button>
+    <button class="btn view-btn"        id="btnViewInflux" onclick="setView('influx')">InfluxDB Monitor</button>
     <div class="nav-links">
+      <a class="nav-link" href="architecture.html">Full Diagram</a>
+      <a class="nav-link" href="monitor.html">Battery Monitor</a>
       <a class="nav-link" href="generator.html">Generator</a>
-      <a class="nav-link" href="aws.html">AWS Store</a>
-      <a class="nav-link" href="subscriber.html">Subscriber</a>
       <a class="nav-link" href="costs.html">Costs</a>
     </div>
   </div>
@@ -192,6 +361,132 @@
   <div class="grid" id="compGrid">
     <div style="grid-column:1/-1; text-align:center; color:#1e3a5f; padding:60px; font-size:14px">
       Connect to the manager to see components
+    </div>
+  </div>
+
+  <!-- Architecture panel -->
+  <div id="archPanel">
+    <svg id="archSvg" class="pipeline" viewBox="0 0 680 560">
+      <text x="340" y="280" text-anchor="middle" fill="#1e3a5f" font-size="14">
+        Connect to the manager to see the pipeline
+      </text>
+    </svg>
+  </div>
+
+  <!-- InfluxDB Monitor panel -->
+  <div id="influxPanel">
+
+    <div class="ix-connect-bar">
+      <label>Host</label><input class="ix-w-host" id="ixHost" value="localhost"/>
+      <label>Port</label><input class="ix-w-port" id="ixPort" value="8086"/>
+      <label>Token</label><input class="ix-w-token" id="ixToken" value="battery-token-secret" type="password"/>
+      <label>Org</label><input class="ix-w-sm" id="ixOrg" value="battery-org"/>
+      <label>Bucket</label><input class="ix-w-sm" id="ixBucket" value="battery-data"/>
+      <button class="btn primary" id="ixBtnConnect" onclick="ixToggleConnect()">Connect</button>
+      <button class="btn" id="ixBtnRefresh" onclick="ixDoRefresh()" disabled>↻ Refresh</button>
+      <div class="ix-query-info">
+        InfluxDB2: <span id="ixPill" class="pill bad">OFFLINE</span>
+        &nbsp; Query: <b id="ixQTime">—</b>
+        &nbsp; Last: <b id="ixQAgo">—</b>
+      </div>
+    </div>
+
+    <div class="ix-status-bar">
+      <div class="ix-status-item">ACTIVE CELLS <b id="ixCells">—</b></div>
+      <div class="ix-status-item">WRITES/SEC <b id="ixWps">—</b></div>
+      <div class="ix-status-item">LAST WRITE <b id="ixLast">—</b></div>
+      <div class="ix-status-item">BUCKET <b id="ixSbBucket">—</b></div>
+      <div class="ix-status-item">RETENTION <b id="ixRetention">30d</b></div>
+    </div>
+
+    <div class="ix-main">
+
+      <div class="ix-sidebar">
+        <div class="ix-card">
+          <div class="ix-card-title">Cell Selector</div>
+          <div class="ix-form-row"><label>Site</label>
+            <select id="ixSite" onchange="ixDoRefresh()"></select></div>
+          <div class="ix-form-row"><label>Rack</label>
+            <select id="ixRack" onchange="ixDoRefresh()"></select></div>
+          <div class="ix-form-row"><label>Module</label>
+            <select id="ixModule" onchange="ixDoRefresh()"></select></div>
+          <div class="ix-form-row"><label>Cell</label>
+            <select id="ixCell" onchange="ixDoRefresh()"></select></div>
+        </div>
+        <div class="ix-card">
+          <div class="ix-card-title">Query Settings</div>
+          <div class="ix-form-row"><label>Time range</label>
+            <select id="ixRange" onchange="ixDoRefresh()">
+              <option value="-2m">Last 2 min</option>
+              <option value="-5m" selected>Last 5 min</option>
+              <option value="-15m">Last 15 min</option>
+              <option value="-30m">Last 30 min</option>
+              <option value="-1h">Last 1 hour</option>
+            </select>
+          </div>
+          <div class="ix-form-row"><label>Auto-refresh</label>
+            <select id="ixInterval" onchange="ixRestartAutoRefresh()">
+              <option value="0">Off</option>
+              <option value="3" selected>3 s</option>
+              <option value="5">5 s</option>
+              <option value="10">10 s</option>
+              <option value="30">30 s</option>
+            </select>
+          </div>
+        </div>
+        <div class="ix-card">
+          <div class="ix-card-title">Current Values</div>
+          <div class="ix-mini-stats" id="ixMiniStats">
+            <div style="grid-column:1/-1;text-align:center;color:#1e3a5f;font-size:11px">Not connected</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ix-content">
+        <div class="ix-heatmap-card">
+          <div class="ix-heatmap-title" id="ixHeatmapTitle">Voltage Heatmap — connect to load</div>
+          <div class="ix-heatmap-wrap"><svg id="ixHeatmapSvg"></svg></div>
+        </div>
+        <div class="ix-chart-grid">
+          <div class="ix-chart-card">
+            <div class="ix-chart-header">
+              <span class="ix-chart-title">Voltage</span>
+              <span class="ix-chart-value" id="ixCvVoltage">—</span>
+              <span class="ix-chart-unit">V</span>
+              <span class="ix-chart-range" id="ixCrVoltage"></span>
+            </div>
+            <svg class="ix-chart-svg" id="ixSvgVoltage" viewBox="0 0 400 100" height="100"></svg>
+          </div>
+          <div class="ix-chart-card">
+            <div class="ix-chart-header">
+              <span class="ix-chart-title">Temperature</span>
+              <span class="ix-chart-value" id="ixCvTemp">—</span>
+              <span class="ix-chart-unit">°C</span>
+              <span class="ix-chart-range" id="ixCrTemp"></span>
+            </div>
+            <svg class="ix-chart-svg" id="ixSvgTemp" viewBox="0 0 400 100" height="100"></svg>
+          </div>
+          <div class="ix-chart-card">
+            <div class="ix-chart-header">
+              <span class="ix-chart-title">State of Charge</span>
+              <span class="ix-chart-value" id="ixCvSoc">—</span>
+              <span class="ix-chart-unit">%</span>
+              <span class="ix-chart-range" id="ixCrSoc"></span>
+            </div>
+            <svg class="ix-chart-svg" id="ixSvgSoc" viewBox="0 0 400 100" height="100"></svg>
+          </div>
+          <div class="ix-chart-card">
+            <div class="ix-chart-header">
+              <span class="ix-chart-title">Current</span>
+              <span class="ix-chart-value" id="ixCvCurrent">—</span>
+              <span class="ix-chart-unit">A</span>
+              <span class="ix-chart-range" id="ixCrCurrent"></span>
+            </div>
+            <svg class="ix-chart-svg" id="ixSvgCurrent" viewBox="0 0 400 100" height="100"></svg>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -207,39 +502,57 @@
 <script>
   let ws = null;
   let connected = false;
+  let activePort = 8761;
   let pingTimer = null;
   let pingStart = 0;
   let pingPending = false;
   let lastMsgTime = null;
   let lastMsgTimer = null;
 
+  // probe WebSockets for each stack (just for the status dots)
+  const probes = {};
+
+  const STACK_LABELS = { 8760: 'orig_aws', 8761: 'New NATS Stack' };
+
   // component state: name → {status, pid, label}
   const components = {};
-  // log buffers: name → string[]
   const logBuffers = {};
   const MAX_LOG_LINES = 200;
 
-  // ── Connection ──────────────────────────────────────────────
+  // ── Stack selector ───────────────────────────────────────────
 
-  function wsUrl() {
-    return `ws://${document.getElementById('wsHost').value.trim()||'localhost'}:${document.getElementById('wsPort').value.trim()||'8760'}`;
+  function host() { return document.getElementById('wsHost').value.trim() || 'localhost'; }
+
+  function onHostChange() {
+    localStorage.setItem('ds_host', host());
+    probeAll();
+    selectStack(activePort);
   }
 
-  function toggleConnect() { connected ? disconnect() : connectWs(); }
+  function selectStack(port) {
+    if (ws) { ws.onclose = null; ws.close(); ws = null; }
+    stopPing(); stopLastMsgTimer();
+    connected = false;
+    activePort = port;
 
-  function connectWs() {
-    const url = wsUrl();
+    // Clear component state for fresh connection
+    for (const k in components) delete components[k];
+    for (const k in logBuffers)  delete logBuffers[k];
+    archBuilt = false;
+    rebuildGrid();
+
+    document.getElementById('btnOld').className = 'stack-btn' + (port === 8760 ? ' active-old' : '');
+    document.getElementById('btnNew').className = 'stack-btn' + (port === 8761 ? ' active-new' : '');
+    document.getElementById('stackLabel').textContent = STACK_LABELS[port] || port;
     setServerPill('loading', 'CONNECTING');
-    document.getElementById('btnConnect').textContent = 'Connecting…';
-    document.getElementById('btnConnect').disabled = true;
-    document.getElementById('headerAddr').textContent = `Manager: ${url}`;
+    document.getElementById('headerAddr').textContent = `Manager: ws://${host()}:${port}`;
 
-    ws = new WebSocket(url);
+    ws = new WebSocket(`ws://${host()}:${port}`);
+
     ws.onopen = () => {
       connected = true;
       setServerPill('ok', 'CONNECTED');
-      document.getElementById('btnConnect').textContent = 'Disconnect';
-      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('dot' + port).className = 'stack-dot up';
       document.getElementById('btnStartAll').disabled = false;
       document.getElementById('btnStopAll').disabled  = false;
       ws.send(JSON.stringify({ type: 'get_status' }));
@@ -248,13 +561,14 @@
     ws.onclose = () => {
       connected = false;
       setServerPill('bad', 'DISCONNECTED');
-      document.getElementById('btnConnect').textContent = 'Connect';
-      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('dot' + port).className = 'stack-dot down';
       document.getElementById('btnStartAll').disabled = true;
       document.getElementById('btnStopAll').disabled  = true;
       document.getElementById('pingVal').textContent = '—';
       document.getElementById('lastMsgVal').textContent = '—';
       stopPing(); stopLastMsgTimer();
+      // retry after 5s
+      setTimeout(() => { if (activePort === port) selectStack(port); }, 5000);
     };
     ws.onerror = () => ws.close();
     ws.onmessage = evt => {
@@ -269,7 +583,29 @@
     };
   }
 
-  function disconnect() { stopPing(); stopLastMsgTimer(); if (ws) ws.close(); }
+  // Probe both ports just for the status dots (no data, short timeout)
+  function probeStack(port) {
+    if (probes[port]) { try { probes[port].close(); } catch(e){} }
+    const p = new WebSocket(`ws://${host()}:${port}`);
+    probes[port] = p;
+    const t = setTimeout(() => {
+      document.getElementById('dot' + port).className = 'stack-dot down';
+      try { p.close(); } catch(e){}
+    }, 3000);
+    p.onopen  = () => {
+      clearTimeout(t);
+      if (port !== activePort)  // active port dot is handled by main ws
+        document.getElementById('dot' + port).className = 'stack-dot up';
+      p.close();
+    };
+    p.onerror = () => {
+      clearTimeout(t);
+      document.getElementById('dot' + port).className = 'stack-dot down';
+    };
+    p.onclose = () => clearTimeout(t);
+  }
+
+  function probeAll() { probeStack(8760); probeStack(8761); }
 
   // ── Ping ────────────────────────────────────────────────────
 
@@ -310,6 +646,7 @@
 
     if (needRebuild) rebuildGrid();
     updateSummary();
+    if (currentView === 'arch') renderArch();
   }
 
   function handleLog(msg) {
@@ -439,6 +776,524 @@
     const e = document.getElementById('serverPill');
     e.className = `pill ${cls}`; e.textContent = text;
   }
+
+  // ── View toggle ──────────────────────────────────────────────
+  let currentView = 'components';
+
+  function setView(v) {
+    currentView = v;
+    document.getElementById('compGrid').style.display    = v === 'components' ? 'grid'  : 'none';
+    document.getElementById('archPanel').style.display   = v === 'arch'       ? 'flex'  : 'none';
+    document.getElementById('influxPanel').style.display = v === 'influx'     ? 'flex'  : 'none';
+    document.getElementById('btnViewComps').classList.toggle('active',  v === 'components');
+    document.getElementById('btnViewArch').classList.toggle('active',   v === 'arch');
+    document.getElementById('btnViewInflux').classList.toggle('active', v === 'influx');
+    if (v === 'arch') renderArch();
+    if (v === 'influx' && !ixConnected) ixDoConnect();
+  }
+
+  // ── Architecture SVG ─────────────────────────────────────────
+  const PIPELINES = {
+    // detect by presence of component name
+    nats: {
+      detect: ['mosquitto','nats','nats_bridge'],
+      viewBox: '0 0 430 490',
+      nodes: [
+        { id:'generator',     label:'Data Generator',  sub:'Simulates IoT sites · :8765', port:'', x:10, y:10,  w:190, h:48 },
+        { id:'mosquitto',     label:'Mosquitto',        sub:'MQTT Broker · :1884',         port:'', x:10, y:88,  w:190, h:48 },
+        { id:'nats_bridge',   label:'NATS Bridge',      sub:'MQTT → NATS',                 port:'', x:10, y:166, w:190, h:48 },
+        { id:'nats',          label:'NATS JetStream',   sub:'Durable stream · :4222',      port:'', x:10, y:244, w:190, h:48 },
+        { id:'parquet_writer',label:'Parquet Writer',   sub:'ack-after-write',             port:'', x:10, y:322, w:190, h:48 },
+        { id:'minio',         label:'MinIO / S3',       sub:'Parquet store · :9000',       port:'', x:10, y:400, w:190, h:48 },
+        { id:'aws_server',    label:'AWS Store',        sub:'Parquet browser · :8766',     port:'', x:225,y:400, w:145, h:48 },
+        { id:'subscriber_api',label:'Subscriber API',   sub:'DuckDB + live · :8767',       port:'', x:225,y:322, w:145, h:48 },
+      ],
+      arrows: [
+        { id:'gen-mosq',    x1:105,y1:58,  x2:105,y2:88,  label:'MQTT',    flow:['generator','mosquitto'] },
+        { id:'mosq-bridge', x1:105,y1:136, x2:105,y2:166, label:'sub',     flow:['mosquitto','nats_bridge'] },
+        { id:'bridge-nats', x1:105,y1:214, x2:105,y2:244, label:'pub',     flow:['nats_bridge','nats'] },
+        { id:'nats-writer', x1:105,y1:292, x2:105,y2:322, label:'pull',    flow:['nats','parquet_writer'] },
+        { id:'writer-minio',x1:105,y1:370, x2:105,y2:400, label:'PUT',     flow:['parquet_writer','minio'] },
+        { id:'minio-aws',   x1:200,y1:424, x2:225,y2:424, label:'list',    flow:['minio','aws_server'] },
+        { id:'nats-sub',    x1:200,y1:346, x2:225,y2:346, label:'live',    flow:['nats','subscriber_api'] },
+      ],
+    },
+    orig: {
+      detect: ['flashmq','influxdb','telegraf'],
+      viewBox: '0 0 270 420',
+      nodes: [
+        { id:'generator', label:'Data Generator', sub:'Simulates IoT sites',  port:'', x:10, y:10,  w:200, h:48 },
+        { id:'flashmq',   label:'FlashMQ',         sub:'MQTT Broker · :1883', port:'', x:10, y:88,  w:200, h:48 },
+        { id:'telegraf',  label:'Telegraf',         sub:'MQTT → InfluxDB2',   port:'', x:10, y:166, w:200, h:48 },
+        { id:'influxdb',  label:'InfluxDB2',        sub:'Time-series · :8086',port:'', x:10, y:244, w:200, h:48 },
+        { id:'monitor',   label:'orig_aws.html',    sub:'Browser monitor',    port:'', x:10, y:322, w:200, h:48, ext:true },
+      ],
+      arrows: [
+        { id:'gen-flash',  x1:110,y1:58,  x2:110,y2:88,  label:'MQTT pub', flow:['generator','flashmq'] },
+        { id:'flash-tele', x1:110,y1:136, x2:110,y2:166, label:'subscribe',flow:['flashmq','telegraf'] },
+        { id:'tele-infl',  x1:110,y1:214, x2:110,y2:244, label:'write',    flow:['telegraf','influxdb'] },
+        { id:'infl-mon',   x1:110,y1:292, x2:110,y2:322, label:'REST/Flux', flow:['influxdb'] },
+      ],
+    },
+  };
+
+  let archBuilt = false;
+  let activePipeline = null;
+
+  function detectPipeline() {
+    for (const [key, def] of Object.entries(PIPELINES)) {
+      if (def.detect.every(id => components[id])) return key;
+    }
+    return null;
+  }
+
+  function renderArch() {
+    const key = detectPipeline();
+    if (!key) return;
+    const def = PIPELINES[key];
+    const svg = document.getElementById('archSvg');
+
+    // Build on first render or pipeline change
+    if (!archBuilt || activePipeline !== key) {
+      activePipeline = key;
+      archBuilt = true;
+      buildArchSVG(svg, def);
+    }
+    updateArchStatus(svg, def);
+  }
+
+  function ns(tag) { return document.createElementNS('http://www.w3.org/2000/svg', tag); }
+
+  function buildArchSVG(svg, def) {
+    svg.setAttribute('viewBox', def.viewBox);
+    svg.innerHTML = `
+      <defs>
+        <marker id="ag" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#30363d"/></marker>
+        <marker id="ag2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#3fb950"/></marker>
+      </defs>`;
+
+    // Arrows (behind nodes)
+    def.arrows.forEach(a => {
+      const g = ns('g'); g.setAttribute('data-arrow', a.id);
+      const path = ns('path');
+      let d;
+      if (a.curved) {
+        d = `M${a.cx1},${a.cy1} C${a.cx1-30},${a.cy1} ${a.cx2-30},${a.cy2} ${a.cx2},${a.cy2}`;
+      } else {
+        d = `M${a.x1},${a.y1} L${a.x2},${a.y2}`;
+      }
+      path.setAttribute('d', d);
+      path.setAttribute('class', 'parrow');
+      path.setAttribute('marker-end', 'url(#ag)');
+      g.appendChild(path);
+
+      const lx = a.curved ? a.cx1 - 36 : (a.x1 + a.x2) / 2 + 5;
+      const ly = a.curved ? (a.cy1 + a.cy2) / 2 : (a.y1 + a.y2) / 2 - 4;
+      const lbl = ns('text');
+      lbl.setAttribute('x', lx); lbl.setAttribute('y', ly);
+      lbl.setAttribute('class', 'alabel'); lbl.textContent = a.label;
+      g.appendChild(lbl);
+      svg.appendChild(g);
+    });
+
+    // Nodes
+    def.nodes.forEach(n => {
+      const g = ns('g');
+      g.setAttribute('class', `pnode ${n.ext ? 'external' : 'stopped'}`);
+      g.setAttribute('data-node', n.id);
+
+      const rect = ns('rect');
+      rect.setAttribute('x', n.x); rect.setAttribute('y', n.y);
+      rect.setAttribute('width', n.w); rect.setAttribute('height', n.h);
+      rect.setAttribute('rx', 7);
+      g.appendChild(rect);
+
+      const dot = ns('circle');
+      dot.setAttribute('cx', n.x + n.w - 10); dot.setAttribute('cy', n.y + 11);
+      dot.setAttribute('r', 4); dot.setAttribute('class', 'ndot');
+      g.appendChild(dot);
+
+      const rows = [n.label, n.sub, n.port].filter(Boolean);
+      const baseY = n.y + n.h / 2 - (rows.length - 1) * 7 + 4;
+
+      const lbl = ns('text');
+      lbl.setAttribute('x', n.x + 10); lbl.setAttribute('y', baseY);
+      lbl.setAttribute('class', 'nlabel'); lbl.textContent = n.label;
+      g.appendChild(lbl);
+
+      if (n.sub) {
+        const sub = ns('text');
+        sub.setAttribute('x', n.x + 10); sub.setAttribute('y', baseY + 13);
+        sub.setAttribute('class', 'nsub'); sub.textContent = n.sub;
+        g.appendChild(sub);
+      }
+      if (n.port) {
+        const port = ns('text');
+        port.setAttribute('x', n.x + 10); port.setAttribute('y', baseY + (n.sub ? 25 : 13));
+        port.setAttribute('class', 'nport'); port.textContent = n.port;
+        g.appendChild(port);
+      }
+      svg.appendChild(g);
+    });
+  }
+
+  function updateArchStatus(svg, def) {
+    // Update node states
+    svg.querySelectorAll('[data-node]').forEach(g => {
+      const id = g.getAttribute('data-node');
+      const comp = components[id];
+      if (!comp) return;
+      g.setAttribute('class', `pnode ${comp.status}`);
+    });
+
+    // Update arrow flow
+    def.arrows.forEach(a => {
+      const g = svg.querySelector(`[data-arrow="${a.id}"]`);
+      if (!g) return;
+      const flowing = a.flow.every(id => {
+        if (id === 'iot') return true;
+        return components[id] && components[id].status === 'running';
+      });
+      const path = g.querySelector('.parrow');
+      const lbl  = g.querySelector('.alabel');
+      if (path) {
+        path.setAttribute('class', flowing ? 'parrow flowing' : 'parrow');
+        path.setAttribute('marker-end', flowing ? 'url(#ag2)' : 'url(#ag)');
+      }
+      if (lbl) lbl.setAttribute('class', flowing ? 'alabel flowing' : 'alabel');
+    });
+  }
+
+  // ── InfluxDB Monitor ─────────────────────────────────────────
+  const IX_SITES=3, IX_RACKS=4, IX_MODULES=8, IX_CELLS=12;
+
+  const IX_CHART_CFG = {
+    voltage:     { svgId:'ixSvgVoltage', cvId:'ixCvVoltage', crId:'ixCrVoltage', min:3.0, max:4.2, refLine:3.7,  colorFn: ixVoltageColor },
+    temperature: { svgId:'ixSvgTemp',    cvId:'ixCvTemp',    crId:'ixCrTemp',    min:15,  max:45,  refLine:35,   colorFn: ixTempColor    },
+    soc:         { svgId:'ixSvgSoc',     cvId:'ixCvSoc',     crId:'ixCrSoc',     min:10,  max:95,  refLine:20,   colorFn: ixSocColor     },
+    current:     { svgId:'ixSvgCurrent', cvId:'ixCvCurrent', crId:'ixCrCurrent', min:-10, max:10,  refLine:0,    colorFn: ixCurrentColor },
+  };
+  const IX_MINI_FIELDS = [
+    { key:'voltage',     label:'Voltage', unit:'V',  dec:3 },
+    { key:'temperature', label:'Temp',    unit:'°C', dec:1 },
+    { key:'soc',         label:'SOC',     unit:'%',  dec:1 },
+    { key:'current',     label:'Current', unit:'A',  dec:2 },
+    { key:'soh',         label:'SoH',     unit:'%',  dec:1 },
+    { key:'resistance',  label:'Resist',  unit:'Ω',  dec:4 },
+  ];
+
+  let ixConnected = false;
+  let ixRefreshTimer = null;
+  let ixLastQueryMs = null;
+  let ixAgoTimer = null;
+  const ixChartData = {};
+  const ixHeatData  = new Map();
+
+  // Init selects once
+  (function ixInitSelects() {
+    const fill = (id, n) => {
+      const sel = document.getElementById(id);
+      if (sel.options.length) return;  // already filled
+      for (let i = 0; i < n; i++) {
+        const o = document.createElement('option'); o.value = o.textContent = i; sel.appendChild(o);
+      }
+    };
+    fill('ixSite', IX_SITES); fill('ixRack', IX_RACKS);
+    fill('ixModule', IX_MODULES); fill('ixCell', IX_CELLS);
+    ixAgoTimer = setInterval(() => {
+      if (!ixLastQueryMs) return;
+      document.getElementById('ixQAgo').textContent = ((Date.now() - ixLastQueryMs) / 1000).toFixed(1) + 's';
+    }, 500);
+  })();
+
+  const ixBaseUrl   = () => `http://${document.getElementById('ixHost').value.trim()}:${document.getElementById('ixPort').value.trim()}`;
+  const ixToken     = () => document.getElementById('ixToken').value.trim();
+  const ixOrg       = () => document.getElementById('ixOrg').value.trim();
+  const ixBkt       = () => document.getElementById('ixBucket').value.trim();
+  const ixSel       = (...ids) => ids.map(id => document.getElementById(id).value);
+  const ixSetPill   = (cls, txt) => { const e = document.getElementById('ixPill'); e.className = `pill ${cls}`; e.textContent = txt; };
+
+  async function ixFetch(path) {
+    return fetch(ixBaseUrl() + path, { headers: { 'Authorization': `Token ${ixToken()}` } });
+  }
+  async function ixQuery(flux) {
+    const res = await fetch(`${ixBaseUrl()}/api/v2/query?org=${encodeURIComponent(ixOrg())}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Token ${ixToken()}`, 'Content-Type': 'application/vnd.flux', 'Accept': 'application/csv' },
+      body: flux,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  }
+
+  function ixParseCSV(text) {
+    const rows = []; let headers = null, needHeader = true;
+    for (const raw of text.split('\n')) {
+      const line = raw.trimEnd();
+      if (!line.trim() || line.startsWith('#')) { needHeader = true; continue; }
+      const cols = line.split(',');
+      if (needHeader) { headers = cols.map(h => h.trim()); needHeader = false; continue; }
+      if (!headers) continue;
+      const row = {}; headers.forEach((h, i) => { row[h] = (cols[i] ?? '').trim(); });
+      if (row._value !== undefined && row._value !== '') rows.push(row);
+    }
+    return rows;
+  }
+
+  function ixToggleConnect() { ixConnected ? ixDoDisconnect() : ixDoConnect(); }
+
+  async function ixDoConnect() {
+    ixSetPill('loading', 'CONNECTING');
+    document.getElementById('ixBtnConnect').disabled = true;
+    try {
+      const res = await ixFetch('/ping');
+      if (res.ok || res.status === 204) {
+        ixConnected = true;
+        ixSetPill('ok', 'ONLINE');
+        document.getElementById('ixBtnConnect').textContent = 'Disconnect';
+        document.getElementById('ixBtnConnect').disabled = false;
+        document.getElementById('ixBtnRefresh').disabled = false;
+        document.getElementById('ixSbBucket').textContent = ixBkt();
+        ixRestartAutoRefresh();
+        ixDoRefresh();
+      } else { throw new Error('HTTP ' + res.status); }
+    } catch(e) {
+      ixSetPill('bad', 'OFFLINE');
+      document.getElementById('ixBtnConnect').disabled = false;
+      document.getElementById('ixQTime').textContent = 'Error: ' + e.message;
+    }
+  }
+
+  function ixDoDisconnect() {
+    ixConnected = false; ixStopAutoRefresh();
+    ixSetPill('bad', 'OFFLINE');
+    document.getElementById('ixBtnConnect').textContent = 'Connect';
+    document.getElementById('ixBtnRefresh').disabled = true;
+  }
+
+  async function ixDoRefresh() {
+    if (!ixConnected) return;
+    const t0 = Date.now();
+    try {
+      document.getElementById('ixQTime').textContent = '…';
+      await Promise.all([ixQueryTimeSeries(), ixQueryHeatmap(), ixQueryWriteRate()]);
+      ixLastQueryMs = Date.now();
+      document.getElementById('ixQTime').textContent = (Date.now() - t0) + 'ms';
+    } catch(e) {
+      document.getElementById('ixQTime').textContent = 'Error: ' + e.message;
+    }
+  }
+
+  function ixAggWindow() {
+    const map = { '-2m':'5s', '-5m':'10s', '-15m':'30s', '-30m':'1m', '-1h':'2m' };
+    return map[document.getElementById('ixRange').value] || '10s';
+  }
+
+  async function ixQueryTimeSeries() {
+    const [site, rack, mod, cell] = ixSel('ixSite','ixRack','ixModule','ixCell');
+    const range = document.getElementById('ixRange').value;
+    const flux = `
+from(bucket: "${ixBkt()}")
+  |> range(start: ${range})
+  |> filter(fn: (r) => r._measurement == "battery_cell")
+  |> filter(fn: (r) => r.site_id == "${site}" and r.rack_id == "${rack}" and r.module_id == "${mod}" and r.cell_id == "${cell}")
+  |> aggregateWindow(every: ${ixAggWindow()}, fn: mean, createEmpty: false)
+  |> sort(columns: ["_time"])`;
+    const rows = ixParseCSV(await ixQuery(flux));
+    const byField = {};
+    for (const r of rows) {
+      if (!byField[r._field]) byField[r._field] = [];
+      byField[r._field].push({ t: new Date(r._time).getTime(), v: parseFloat(r._value) });
+    }
+    for (const [f, pts] of Object.entries(byField)) ixChartData[f] = pts;
+    ixRenderCharts(); ixRenderMiniStats();
+  }
+
+  async function ixQueryHeatmap() {
+    const [site, rack] = ixSel('ixSite','ixRack');
+    const flux = `
+from(bucket: "${ixBkt()}")
+  |> range(start: -1m)
+  |> filter(fn: (r) => r._measurement == "battery_cell" and r._field == "voltage")
+  |> filter(fn: (r) => r.site_id == "${site}" and r.rack_id == "${rack}")
+  |> group(columns: ["module_id","cell_id"])
+  |> last()`;
+    const rows = ixParseCSV(await ixQuery(flux));
+    ixHeatData.clear(); let latest = 0;
+    for (const r of rows) {
+      ixHeatData.set(`${r.module_id}_${r.cell_id}`, parseFloat(r._value));
+      const t = new Date(r._time).getTime(); if (t > latest) latest = t;
+    }
+    document.getElementById('ixCells').textContent = ixHeatData.size;
+    if (latest) document.getElementById('ixLast').textContent = ((Date.now() - latest) / 1000).toFixed(1) + 's';
+    ixRenderHeatmap(ixSel('ixSite','ixRack')[0], ixSel('ixSite','ixRack')[1]);
+  }
+
+  async function ixQueryWriteRate() {
+    const flux = `
+from(bucket: "${ixBkt()}")
+  |> range(start: -30s)
+  |> filter(fn: (r) => r._measurement == "battery_cell" and r._field == "voltage")
+  |> count() |> sum()`;
+    try {
+      const rows = ixParseCSV(await ixQuery(flux));
+      if (rows.length) {
+        const total = rows.reduce((s, r) => s + parseFloat(r._value || 0), 0);
+        document.getElementById('ixWps').textContent = (total / 30).toFixed(0);
+      }
+    } catch(_) {}
+  }
+
+  function ixRestartAutoRefresh() {
+    ixStopAutoRefresh();
+    const s = parseInt(document.getElementById('ixInterval').value);
+    if (s > 0 && ixConnected) ixRefreshTimer = setInterval(ixDoRefresh, s * 1000);
+  }
+  function ixStopAutoRefresh() { if (ixRefreshTimer) { clearInterval(ixRefreshTimer); ixRefreshTimer = null; } }
+
+  function ixRenderCharts() {
+    for (const [field, cfg] of Object.entries(IX_CHART_CFG)) {
+      const pts = ixChartData[field];
+      if (!pts || pts.length < 2) continue;
+      const last = pts[pts.length - 1].v;
+      const minV = Math.min(...pts.map(p => p.v));
+      const maxV = Math.max(...pts.map(p => p.v));
+      const color = cfg.colorFn(last);
+      const cv = document.getElementById(cfg.cvId);
+      cv.textContent = last.toFixed(field === 'resistance' ? 4 : 2);
+      cv.style.color = color;
+      document.getElementById(cfg.crId).textContent = `↓${minV.toFixed(2)}  ↑${maxV.toFixed(2)}`;
+      ixDrawLineChart(document.getElementById(cfg.svgId), pts, cfg, color);
+    }
+  }
+
+  function ixDrawLineChart(svg, pts, cfg, lineColor) {
+    const W=400, H=100, ML=42, MB=16, MT=6, MR=6;
+    const cW=W-ML-MR, cH=H-MB-MT;
+    const vMin=cfg.min, vMax=cfg.max, vR=vMax-vMin;
+    const tMin=pts[0].t, tMax=pts[pts.length-1].t, tR=tMax-tMin||1;
+    const xS = t => ML + (t-tMin)/tR*cW;
+    const yS = v => MT + cH - (v-vMin)/vR*cH;
+    const uid = cfg.svgId;
+    let out = `<defs>
+      <linearGradient id="ixgr_${uid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.3"/>
+        <stop offset="100%" stop-color="${lineColor}" stop-opacity="0.02"/>
+      </linearGradient>
+      <clipPath id="ixcp_${uid}"><rect x="${ML}" y="${MT}" width="${cW}" height="${cH}"/></clipPath>
+    </defs>`;
+    out += `<rect x="${ML}" y="${MT}" width="${cW}" height="${cH}" fill="#020617" rx="2"/>`;
+    for (let i=0; i<=4; i++) {
+      const v = vMin + (vMax-vMin)*i/4, y = yS(v).toFixed(1);
+      out += `<line x1="${ML}" y1="${y}" x2="${ML+cW}" y2="${y}" stroke="#1e293b" stroke-width="1"/>`;
+      out += `<text x="${ML-3}" y="${parseFloat(y)+3}" fill="#475569" font-size="8" text-anchor="end" font-family="monospace">${v.toFixed(1)}</text>`;
+    }
+    if (cfg.refLine !== undefined) {
+      const ry = yS(cfg.refLine).toFixed(1);
+      if (ry >= MT && ry <= MT+cH)
+        out += `<line x1="${ML}" y1="${ry}" x2="${ML+cW}" y2="${ry}" stroke="#334155" stroke-width="1" stroke-dasharray="4,3"/>`;
+    }
+    const pathPts = pts.map(p => `${xS(p.t).toFixed(1)},${yS(p.v).toFixed(1)}`).join('L');
+    const lx = xS(pts[pts.length-1].t).toFixed(1), ly = yS(pts[pts.length-1].v).toFixed(1);
+    const by = (MT+cH).toFixed(1);
+    out += `<g clip-path="url(#ixcp_${uid})">`;
+    out += `<path d="M${pathPts}L${lx},${by}L${ML},${by}Z" fill="url(#ixgr_${uid})" stroke="none"/>`;
+    out += `<path d="M${pathPts}" fill="none" stroke="${lineColor}" stroke-width="1.5" stroke-linejoin="round"/>`;
+    out += `<circle cx="${lx}" cy="${ly}" r="3" fill="${lineColor}" stroke="#0a0a0a" stroke-width="1.5">
+      <animate attributeName="r" values="3;5;3" dur="2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;0.5;1" dur="2s" repeatCount="indefinite"/>
+    </circle></g>`;
+    out += `<rect x="${ML}" y="${MT}" width="${cW}" height="${cH}" fill="none" stroke="#1e293b" stroke-width="1" rx="2"/>`;
+    const t0l = new Date(tMin).toISOString().substr(11,8), t1l = new Date(tMax).toISOString().substr(11,8);
+    out += `<text x="${ML}" y="${H-3}" fill="#334155" font-size="8" font-family="monospace">${t0l}</text>`;
+    out += `<text x="${ML+cW}" y="${H-3}" fill="#334155" font-size="8" text-anchor="end" font-family="monospace">${t1l}</text>`;
+    svg.innerHTML = out;
+  }
+
+  function ixRenderHeatmap(site, rack) {
+    const svg = document.getElementById('ixHeatmapSvg');
+    document.getElementById('ixHeatmapTitle').textContent = `Voltage Heatmap — Site ${site} · Rack ${rack}`;
+    const cW=22, cH=16, gap=2, labelW=26, labelH=14;
+    const totalW = labelW + IX_CELLS*(cW+gap) - gap + 6;
+    const totalH = labelH + IX_MODULES*(cH+gap) - gap + 18;
+    svg.setAttribute('viewBox', `0 0 ${totalW} ${totalH}`);
+    svg.setAttribute('width', totalW); svg.setAttribute('height', totalH);
+    let out = `<defs><linearGradient id="ixLegGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ef4444"/><stop offset="30%" stop-color="#f97316"/>
+      <stop offset="50%" stop-color="#eab308"/><stop offset="65%" stop-color="#22c55e"/>
+      <stop offset="85%" stop-color="#06b6d4"/><stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient></defs>`;
+    for (let c=0; c<IX_CELLS; c++) {
+      const x = labelW + c*(cW+gap) + cW/2;
+      out += `<text x="${x}" y="10" fill="#475569" font-size="7" text-anchor="middle" font-family="monospace">${c}</text>`;
+    }
+    for (let m=0; m<IX_MODULES; m++) {
+      const y = labelH + m*(cH+gap);
+      out += `<text x="${labelW-3}" y="${y+cH/2+3}" fill="#475569" font-size="7" text-anchor="end" font-family="monospace">M${m}</text>`;
+      for (let c=0; c<IX_CELLS; c++) {
+        const x = labelW + c*(cW+gap);
+        const v = ixHeatData.get(`${m}_${c}`);
+        const fill = v != null ? ixVoltageColor(v) : '#1e293b', op = v != null ? 1 : 0.25;
+        out += `<rect x="${x}" y="${y}" width="${cW}" height="${cH}" rx="2" fill="${fill}" opacity="${op}"><title>M${m} C${c}: ${v != null ? v.toFixed(3)+'V' : 'no data'}</title></rect>`;
+        if (v != null) out += `<text x="${x+cW/2}" y="${y+cH/2+3}" fill="#000a" font-size="6" text-anchor="middle" font-family="monospace" pointer-events="none">${v.toFixed(2)}</text>`;
+      }
+    }
+    const legY=totalH-12, legX=labelW, legW=IX_CELLS*(cW+gap)-gap;
+    out += `<rect x="${legX}" y="${legY}" width="${legW}" height="5" fill="url(#ixLegGrad)" rx="2"/>`;
+    out += `<text x="${legX}" y="${legY-2}" fill="#334155" font-size="6" font-family="monospace">3.0V</text>`;
+    out += `<text x="${legX+legW/2}" y="${legY-2}" fill="#334155" font-size="6" text-anchor="middle" font-family="monospace">3.7V nominal</text>`;
+    out += `<text x="${legX+legW}" y="${legY-2}" fill="#334155" font-size="6" text-anchor="end" font-family="monospace">4.2V</text>`;
+    svg.innerHTML = out;
+  }
+
+  function ixRenderMiniStats() {
+    const el = document.getElementById('ixMiniStats'); el.innerHTML = '';
+    for (const f of IX_MINI_FIELDS) {
+      const pts = ixChartData[f.key], v = pts && pts.length ? pts[pts.length-1].v : null;
+      const color = v != null ? ixGetColor(f.key, v) : '#334155';
+      const div = document.createElement('div'); div.className = 'ix-mini-stat';
+      div.innerHTML = `<div class="ix-mini-stat-label">${f.label}</div>
+        <div class="ix-mini-stat-value" style="color:${color}">${v != null ? v.toFixed(f.dec) : '—'}</div>
+        <div class="ix-mini-stat-unit">${f.unit}</div>`;
+      el.appendChild(div);
+    }
+  }
+
+  function ixVoltageColor(v) { return ixColorStops(v, [[3.0,'#ef4444'],[3.3,'#f97316'],[3.5,'#eab308'],[3.7,'#22c55e'],[4.0,'#06b6d4'],[4.2,'#3b82f6']]); }
+  function ixTempColor(v)    { return ixColorStops(v, [[15,'#3b82f6'],[25,'#22c55e'],[35,'#f59e0b'],[40,'#f97316'],[45,'#ef4444']]); }
+  function ixSocColor(v)     { return ixColorStops(v, [[10,'#ef4444'],[20,'#f97316'],[50,'#22c55e'],[90,'#06b6d4']]); }
+  function ixCurrentColor(v) { return v > 1 ? '#818cf8' : v < -1 ? '#f97316' : '#94a3b8'; }
+  function ixGetColor(field, v) {
+    const map = { voltage: ixVoltageColor, temperature: ixTempColor, soc: ixSocColor, current: ixCurrentColor };
+    return (map[field] || (() => '#60a5fa'))(v);
+  }
+  function ixColorStops(v, stops) {
+    if (v <= stops[0][0]) return stops[0][1];
+    if (v >= stops[stops.length-1][0]) return stops[stops.length-1][1];
+    for (let i=0; i<stops.length-1; i++) {
+      const [v1,c1]=stops[i], [v2,c2]=stops[i+1];
+      if (v>=v1 && v<=v2) return ixLerpHex(c1, c2, (v-v1)/(v2-v1));
+    }
+    return stops[stops.length-1][1];
+  }
+  function ixLerpHex(c1, c2, t) {
+    const h = s => parseInt(s,16);
+    const r = Math.round(h(c1.slice(1,3)) + (h(c2.slice(1,3))-h(c1.slice(1,3)))*t);
+    const g = Math.round(h(c1.slice(3,5)) + (h(c2.slice(3,5))-h(c1.slice(3,5)))*t);
+    const b = Math.round(h(c1.slice(5,7)) + (h(c2.slice(5,7))-h(c1.slice(5,7)))*t);
+    return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
+  }
+
+  // ── Boot ─────────────────────────────────────────────────────
+  (function() {
+    const saved = localStorage.getItem('ds_host');
+    if (saved) document.getElementById('wsHost').value = saved;
+    probeAll();
+    setInterval(probeAll, 10000);   // re-probe every 10s
+    selectStack(8761);              // default to new stack
+  })();
 </script>
 </body>
 </html>

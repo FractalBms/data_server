@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Data Server — Architecture</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #0d1117; color: #e6edf3;
+  min-height: 100vh; display: flex; flex-direction: column;
+}
+
+/* ── Header ── */
+.header {
+  background: linear-gradient(90deg, #161b22, #1c2128);
+  border-bottom: 1px solid #30363d;
+  padding: 10px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
+}
+.header-title { font-size: 1.05rem; font-weight: 700; color: #58a6ff; }
+.header-sub   { font-size: 0.72rem; color: #8b949e; margin-top: 1px; }
+.host-row { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: #8b949e; }
+.host-row input {
+  background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+  color: #e6edf3; padding: 4px 8px; font-size: 0.75rem; width: 120px;
+}
+.host-row button {
+  background: #21262d; border: 1px solid #30363d; border-radius: 4px;
+  color: #58a6ff; padding: 4px 10px; font-size: 0.72rem; cursor: pointer;
+}
+.host-row button:hover { background: #30363d; }
+
+/* ── Cost banner ── */
+.cost-bar {
+  display: flex; border-bottom: 1px solid #30363d; flex-shrink: 0;
+}
+.cost-cell {
+  flex: 1; padding: 6px 16px; text-align: center;
+  font-size: 0.72rem; border-right: 1px solid #30363d;
+}
+.cost-cell:last-child { border-right: none; }
+.cost-cell .lbl { color: #8b949e; }
+.cost-cell .amt { font-size: 1rem; font-weight: 700; margin-top: 1px; }
+.cost-cell.orig .amt { color: #f85149; }
+.cost-cell.new  .amt { color: #3fb950; }
+.cost-cell.save .amt { color: #e3b341; }
+
+/* ── Columns ── */
+.columns {
+  display: grid; grid-template-columns: 1fr 1fr;
+  flex: 1; overflow: hidden;
+}
+.column {
+  padding: 14px 16px; border-right: 1px solid #30363d;
+  overflow: auto; display: flex; flex-direction: column;
+}
+.column:last-child { border-right: none; }
+
+.col-title {
+  font-size: 0.82rem; font-weight: 700; margin-bottom: 3px;
+  display: flex; align-items: center; gap: 8px;
+}
+.col-badge {
+  font-size: 0.62rem; padding: 1px 6px; border-radius: 8px;
+  background: #21262d; border: 1px solid #30363d; color: #8b949e;
+}
+.col-sub { font-size: 0.68rem; color: #8b949e; margin-bottom: 10px; }
+.ws-dot  { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #484f58; }
+.ws-dot.connected { background: #3fb950; box-shadow: 0 0 5px #3fb950; }
+.ws-dot.error     { background: #f85149; }
+
+svg.arch { width: 100%; overflow: visible; display: block; }
+
+/* ── Node styles ── */
+.arch-node rect { stroke-width: 1.5; }
+.arch-node.stopped  rect { fill: #161b22; stroke: #30363d; }
+.arch-node.running  rect { fill: #0d2c1e; stroke: #3fb950; }
+.arch-node.error    rect { fill: #2d1217; stroke: #f85149; }
+.arch-node.starting rect { fill: #1b2030; stroke: #e3b341; }
+.arch-node.external rect { fill: #161b22; stroke: #388bfd; stroke-dasharray: 3 2; }
+
+.arch-node .nlabel { font-size: 10.5px; font-weight: 600; fill: #e6edf3; }
+.arch-node .nsub   { font-size: 9px; fill: #8b949e; }
+.arch-node .nport  { font-size: 8.5px; fill: #388bfd; }
+.arch-node .ndot   { transition: fill 0.4s; }
+.arch-node.stopped  .ndot { fill: #484f58; }
+.arch-node.running  .ndot { fill: #3fb950; filter: drop-shadow(0 0 3px #3fb950); }
+.arch-node.error    .ndot { fill: #f85149; }
+.arch-node.starting .ndot { fill: #e3b341; }
+.arch-node.external .ndot { fill: #388bfd; }
+
+/* ── Arrows ── */
+.arch-arrow { stroke: #30363d; stroke-width: 1.5; fill: none; }
+.arch-arrow.flowing {
+  stroke: #3fb950; stroke-dasharray: 5 4;
+  animation: dash 0.8s linear infinite;
+}
+@keyframes dash { to { stroke-dashoffset: -18; } }
+.arch-lbl         { font-size: 8.5px; fill: #8b949e; text-anchor: middle; }
+.arch-lbl.flowing { fill: #3fb950; }
+
+/* ── Legend ── */
+.legend {
+  display: flex; gap: 14px; margin-top: 10px;
+  font-size: 0.65rem; color: #8b949e; flex-wrap: wrap;
+}
+.legend-item { display: flex; align-items: center; gap: 4px; }
+.legend-dot  { width: 8px; height: 8px; border-radius: 50%; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="header-title">Pipeline Architecture</div>
+    <div class="header-sub">Live component status — both stacks</div>
+  </div>
+  <div class="host-row">
+    Host: <input id="hostInput" value="localhost">
+    <button onclick="reconnectAll()">Connect</button>
+  </div>
+</div>
+
+<div class="cost-bar">
+  <div class="cost-cell orig"><div class="lbl">orig_aws / month</div><div class="amt">$76,200</div></div>
+  <div class="cost-cell new"> <div class="lbl">new NATS / month</div><div class="amt">~$1,000</div></div>
+  <div class="cost-cell save"><div class="lbl">monthly saving</div>  <div class="amt">~$75,200</div></div>
+</div>
+
+<div class="columns">
+
+  <!-- orig_aws -->
+  <div class="column">
+    <div class="col-title" style="color:#fb923c">
+      orig_aws
+      <span class="col-badge">current production</span>
+      <span class="ws-dot" id="dot8760"></span>
+      <span style="font-size:0.65rem;color:#8b949e" id="lbl8760">disconnected</span>
+    </div>
+    <div class="col-sub">FlashMQ → Telegraf → InfluxDB2 &nbsp;·&nbsp; manager :8760</div>
+    <svg class="arch" id="svg8760" viewBox="0 0 300 430"></svg>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>running</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#484f58"></div>stopped</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>error</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#388bfd;border:1px dashed #388bfd"></div>external / monitor</div>
+    </div>
+  </div>
+
+  <!-- new NATS stack -->
+  <div class="column">
+    <div class="col-title" style="color:#3fb950">
+      New NATS Stack
+      <span class="col-badge">~95% cheaper</span>
+      <span class="ws-dot" id="dot8761"></span>
+      <span style="font-size:0.65rem;color:#8b949e" id="lbl8761">disconnected</span>
+    </div>
+    <div class="col-sub">Mosquitto → NATS → Parquet/S3 &nbsp;·&nbsp; manager :8761</div>
+    <svg class="arch" id="svg8761" viewBox="0 0 300 510"></svg>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>running</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#484f58"></div>stopped</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>error</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#388bfd"></div>browser client</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- shared SVG defs -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <marker id="ag"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L7,3 z" fill="#30363d"/></marker>
+    <marker id="ag2" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L7,3 z" fill="#3fb950"/></marker>
+  </defs>
+</svg>
+
+<script>
+// ── Layout constants ────────────────────────────────────────────────────────
+const NW = 200, NH = 46, NX = 50;   // node width, height, left-x (centred in 300px)
+const GAP = 70;                      // vertical gap centre-to-centre
+
+// orig_aws: Generator at top (simulates IoT sites), then FlashMQ, Telegraf, InfluxDB2, Monitor
+const ORIG = {
+  nodes: [
+    { id:'generator', label:'Data Generator',  sub:'Simulates IoT battery sites', port:'',      y:0,   kind:'managed' },
+    { id:'flashmq',   label:'FlashMQ',          sub:'MQTT Broker',                 port:':1883', y:75,  kind:'managed' },
+    { id:'telegraf',  label:'Telegraf',          sub:'MQTT → InfluxDB2',            port:'',      y:150, kind:'managed' },
+    { id:'influxdb',  label:'InfluxDB2',         sub:'Time-series DB',              port:':8086', y:225, kind:'managed' },
+    { id:'monitor',   label:'orig_aws.html',     sub:'Browser monitor',             port:'',      y:300, kind:'external'},
+  ],
+  arrows: [
+    { from:'generator', to:'flashmq',  label:'MQTT publish', flow:['generator','flashmq'] },
+    { from:'flashmq',   to:'telegraf', label:'subscribe',    flow:['flashmq','telegraf'] },
+    { from:'telegraf',  to:'influxdb', label:'write',        flow:['telegraf','influxdb'] },
+    { from:'influxdb',  to:'monitor',  label:'REST / Flux',  flow:['influxdb'] },
+  ],
+};
+
+// new NATS stack: Generator at top, then Mosquitto, NATS Bridge, NATS, Parquet Writer, MinIO
+// Side nodes: AWS Server and Subscriber API branch off MinIO/NATS
+const NATS_MAIN = [
+  { id:'generator',     label:'Data Generator',  sub:'Simulates IoT battery sites', port:':8765', y:0   },
+  { id:'mosquitto',     label:'Mosquitto',        sub:'MQTT Broker',                 port:':1884', y:75  },
+  { id:'nats_bridge',   label:'NATS Bridge',      sub:'MQTT → NATS',                 port:'',      y:150 },
+  { id:'nats',          label:'NATS JetStream',   sub:'Durable stream',              port:':4222', y:225 },
+  { id:'parquet_writer',label:'Parquet Writer',   sub:'ack-after-write to S3',       port:'',      y:300 },
+  { id:'minio',         label:'MinIO / S3',       sub:'Columnar Parquet store',      port:':9000', y:375 },
+];
+// Side nodes sit to the right, beside their related main node
+const NATS_SIDE = [
+  { id:'aws_server',    label:'AWS Store',        sub:'Parquet browser',             port:':8766', mainY:375 },
+  { id:'subscriber_api',label:'Subscriber API',   sub:'DuckDB + live stream',        port:':8767', mainY:300 },
+];
+const NATS_ARROWS_MAIN = [
+  { id:'gen-mosq',    y1:NH,  y2:75,  label:'MQTT',    flow:['generator','mosquitto'] },
+  { id:'mosq-bridge', y1:75+NH, y2:150, label:'sub',   flow:['mosquitto','nats_bridge'] },
+  { id:'bridge-nats', y1:150+NH,y2:225, label:'pub',   flow:['nats_bridge','nats'] },
+  { id:'nats-writer', y1:225+NH,y2:300, label:'pull',  flow:['nats','parquet_writer'] },
+  { id:'writer-minio',y1:300+NH,y2:375, label:'PUT',   flow:['parquet_writer','minio'] },
+];
+const NATS_ARROWS_SIDE = [
+  { id:'minio-aws',   mainY:375, sideId:'aws_server',    label:'list', flow:['minio','aws_server'] },
+  { id:'nats-sub',    mainY:225, sideId:'subscriber_api',label:'live', flow:['nats','subscriber_api'] },
+];
+
+// ── SVG helpers ─────────────────────────────────────────────────────────────
+function $n(tag) { return document.createElementNS('http://www.w3.org/2000/svg', tag); }
+
+function drawNode(svg, id, label, sub, port, x, y, w, h, kind, status) {
+  const g = $n('g');
+  g.setAttribute('class', `arch-node ${status || (kind === 'external' ? 'external' : 'stopped')}`);
+  g.setAttribute('data-node', id);
+
+  const rect = $n('rect');
+  rect.setAttribute('x', x); rect.setAttribute('y', y);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  rect.setAttribute('rx', 6);
+  g.appendChild(rect);
+
+  const dot = $n('circle');
+  dot.setAttribute('cx', x + w - 9); dot.setAttribute('cy', y + 9);
+  dot.setAttribute('r', 4); dot.setAttribute('class', 'ndot');
+  g.appendChild(dot);
+
+  const rows = [label, sub, port].filter(Boolean);
+  const baseY = y + h / 2 - (rows.length - 1) * 6 + 4;
+
+  const t1 = $n('text');
+  t1.setAttribute('x', x + 9); t1.setAttribute('y', baseY);
+  t1.setAttribute('class', 'nlabel'); t1.textContent = label;
+  g.appendChild(t1);
+  if (sub) {
+    const t2 = $n('text');
+    t2.setAttribute('x', x + 9); t2.setAttribute('y', baseY + 12);
+    t2.setAttribute('class', 'nsub'); t2.textContent = sub;
+    g.appendChild(t2);
+  }
+  if (port) {
+    const t3 = $n('text');
+    t3.setAttribute('x', x + 9); t3.setAttribute('y', baseY + (sub ? 23 : 12));
+    t3.setAttribute('class', 'nport'); t3.textContent = port;
+    g.appendChild(t3);
+  }
+  svg.appendChild(g);
+}
+
+function drawArrow(svg, arrowId, x1, y1, x2, y2, label, curved) {
+  const g = $n('g'); g.setAttribute('data-arrow', arrowId);
+  const path = $n('path');
+  const d = curved
+    ? `M${x1},${y1} C${x1-28},${y1} ${x2-28},${y2} ${x2},${y2}`
+    : `M${x1},${y1} L${x2},${y2}`;
+  path.setAttribute('d', d);
+  path.setAttribute('class', 'arch-arrow');
+  path.setAttribute('marker-end', 'url(#ag)');
+  g.appendChild(path);
+  const lx = curved ? x1 - 32 : (x1 + x2) / 2 + 6;
+  const ly = curved ? (y1 + y2) / 2 : (y1 + y2) / 2 - 4;
+  const lbl = $n('text');
+  lbl.setAttribute('x', lx); lbl.setAttribute('y', ly);
+  lbl.setAttribute('class', 'arch-lbl'); lbl.textContent = label;
+  g.appendChild(lbl);
+  svg.appendChild(g);
+}
+
+// ── Build static SVG skeletons ───────────────────────────────────────────────
+function buildOrig(svg) {
+  svg.innerHTML = '';
+  // arrows
+  ORIG.arrows.forEach(a => {
+    const fn = ORIG.nodes.find(n => n.id === a.from);
+    const tn = ORIG.nodes.find(n => n.id === a.to);
+    drawArrow(svg, `${a.from}-${a.to}`,
+      NX + NW/2, fn.y + NH,
+      NX + NW/2, tn.y,
+      a.label);
+  });
+  // nodes
+  ORIG.nodes.forEach(n => {
+    drawNode(svg, n.id, n.label, n.sub, n.port, NX, n.y, NW, NH, n.kind);
+  });
+}
+
+function buildNats(svg, status) {
+  svg.innerHTML = '';
+  const W = 300, MX = 10, MW = 168, SX = 190, SW = 108;
+  const cy = y => y + NH / 2;
+
+  // main chain arrows
+  NATS_ARROWS_MAIN.forEach(a => {
+    drawArrow(svg, a.id, MX + MW/2, a.y1, MX + MW/2, a.y2, a.label);
+  });
+  // side branch arrows (horizontal, from main right edge)
+  NATS_ARROWS_SIDE.forEach(a => {
+    drawArrow(svg, a.id,
+      MX + MW, cy(a.mainY),
+      SX,      cy(a.mainY),
+      a.label);
+  });
+
+  // main nodes
+  NATS_MAIN.forEach(n => {
+    drawNode(svg, n.id, n.label, n.sub, n.port, MX, n.y, MW, NH, 'managed',
+      status[n.id]);
+  });
+  // side nodes (aligned to their mainY)
+  NATS_SIDE.forEach(n => {
+    drawNode(svg, n.id, n.label, n.sub, n.port, SX, n.mainY, SW, NH, 'managed',
+      status[n.id]);
+  });
+}
+
+// ── Apply live status ────────────────────────────────────────────────────────
+function applyStatus(svg, components, arrowDefs) {
+  svg.querySelectorAll('[data-node]').forEach(g => {
+    const id = g.getAttribute('data-node');
+    const comp = components[id];
+    if (!comp) return;
+    g.setAttribute('class', `arch-node ${comp.status}`);
+  });
+  arrowDefs.forEach(a => {
+    const g = svg.querySelector(`[data-arrow="${a.id || a.from+'-'+a.to}"]`);
+    if (!g) return;
+    const flowing = a.flow.every(id => components[id] && components[id].status === 'running');
+    const path = g.querySelector('.arch-arrow');
+    const lbl  = g.querySelector('.arch-lbl');
+    if (path) {
+      path.setAttribute('class', flowing ? 'arch-arrow flowing' : 'arch-arrow');
+      path.setAttribute('marker-end', flowing ? 'url(#ag2)' : 'url(#ag)');
+    }
+    if (lbl) lbl.setAttribute('class', flowing ? 'arch-lbl flowing' : 'arch-lbl');
+  });
+}
+
+// ── WebSocket connections ────────────────────────────────────────────────────
+const conns = {};
+
+function connect(port) {
+  const h    = document.getElementById('hostInput').value.trim() || 'localhost';
+  const dotEl = document.getElementById(`dot${port}`);
+  const lblEl = document.getElementById(`lbl${port}`);
+  const svg   = document.getElementById(`svg${port}`);
+
+  if (conns[port]) { try { conns[port].close(); } catch(e){} }
+
+  if (port === 8760) buildOrig(svg);
+  else               buildNats(svg, {});
+
+  const ws = new WebSocket(`ws://${h}:${port}`);
+  conns[port] = ws;
+
+  ws.onopen = () => {
+    dotEl.className = 'ws-dot connected';
+    lblEl.textContent = `ws://…:${port}`;
+    ws.send(JSON.stringify({ type: 'get_status' }));
+  };
+  ws.onclose = () => {
+    dotEl.className = 'ws-dot error';
+    lblEl.textContent = 'disconnected';
+    setTimeout(() => connect(port), 5000);
+  };
+  ws.onerror = () => {};
+  ws.onmessage = ev => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type !== 'status') return;
+      const comps = msg.components || {};
+      if (port === 8760) {
+        applyStatus(svg, comps, ORIG.arrows.map(a => ({ ...a, id: `${a.from}-${a.to}` })));
+      } else {
+        buildNats(svg, Object.fromEntries(Object.entries(comps).map(([k,v]) => [k, v])));
+        applyStatus(svg, comps,
+          [...NATS_ARROWS_MAIN, ...NATS_ARROWS_SIDE]);
+      }
+    } catch(e) {}
+  };
+}
+
+function reconnectAll() {
+  localStorage.setItem('ds_host', document.getElementById('hostInput').value.trim());
+  connect(8760); connect(8761);
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+(function() {
+  const saved = localStorage.getItem('ds_host');
+  if (saved) document.getElementById('hostInput').value = saved;
+  connect(8760);
+  connect(8761);
+})();
+</script>
+</body>
+</html>

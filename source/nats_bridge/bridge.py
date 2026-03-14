@@ -23,7 +23,7 @@ import yaml
 
 import aiomqtt
 import nats
-from nats.js.api import StreamConfig, RetentionPolicy, StorageType
+from nats.js.api import RetentionPolicy, StorageType, StreamConfig
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -38,10 +38,10 @@ async def ensure_stream(js, cfg: dict) -> None:
     """Create the JetStream stream if it doesn't exist yet."""
     stream_name = cfg["nats"]["stream_name"]
     subjects    = cfg["nats"]["stream_subjects"]
-    max_age_ns  = int(cfg["nats"].get("max_age_hours", 48)) * 3600 * 1_000_000_000
+    max_age_hours = int(cfg["nats"].get("max_age_hours", 48))
 
     try:
-        await js.find_stream(stream_name)
+        await js.stream_info(stream_name)
         log.info("Stream %s already exists", stream_name)
     except nats.js.errors.NotFoundError:
         await js.add_stream(StreamConfig(
@@ -49,10 +49,8 @@ async def ensure_stream(js, cfg: dict) -> None:
             subjects  = subjects,
             storage   = StorageType.FILE,
             retention = RetentionPolicy.LIMITS,
-            max_age   = max_age_ns,
         ))
-        log.info("Created stream %s  subjects=%s  max_age=%dh",
-                 stream_name, subjects, cfg["nats"].get("max_age_hours", 48))
+        log.info("Created stream %s  subjects=%s", stream_name, subjects)
 
 
 async def run(cfg: dict) -> None:

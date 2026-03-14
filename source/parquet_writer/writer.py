@@ -66,9 +66,21 @@ def ensure_bucket(s3, bucket: str) -> None:
             raise
 
 
+def _flatten(row: dict) -> dict:
+    """Flatten generator's {value, unit} measurement objects to plain floats."""
+    out = {}
+    for k, v in row.items():
+        if isinstance(v, dict) and "value" in v:
+            out[k] = v["value"]
+        else:
+            out[k] = v
+    return out
+
+
 def rows_to_parquet(rows: list[dict], compression: str) -> bytes:
-    all_keys = list({k for r in rows for k in r})
-    cols = {k: [r.get(k) for r in rows] for k in all_keys}
+    flat = [_flatten(r) for r in rows]
+    all_keys = list({k for r in flat for k in r})
+    cols = {k: [r.get(k) for r in flat] for k in all_keys}
     buf = BytesIO()
     pq.write_table(pa.table(cols), buf, compression=compression)
     return buf.getvalue()
@@ -115,23 +127,46 @@ async def run(cfg: dict) -> None:
     prefix         = cfg["s3"].get("prefix", "")
 
     s3 = build_s3_client(cfg)
-    await asyncio.get_event_loop().run_in_executor(None, ensure_bucket, s3, bucket)
 
-    nc = await nats.connect(nats_url)
+    # Retry until MinIO/S3 is reachable (may start after us)
+    while True:
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, ensure_bucket, s3, bucket)
+            break
+        except Exception as exc:
+            log.warning("S3 not ready yet (%s) — retrying in 5s ...", exc.__class__.__name__)
+            await asyncio.sleep(5)
+
+    # Retry NATS connect until server is up
+    while True:
+        try:
+            nc = await nats.connect(nats_url)
+            break
+        except Exception as exc:
+            log.warning("NATS not ready yet (%s) — retrying in 5s ...", exc.__class__.__name__)
+            await asyncio.sleep(5)
+
     js = nc.jetstream()
     log.info("Connected to NATS at %s", nats_url)
 
-    # Durable pull consumer — survives restarts, replays from last ack on reconnect
-    sub = await js.pull_subscribe(
-        subject_filter,
-        durable = consumer_name,
-        stream  = stream_name,
-        config  = ConsumerConfig(
-            deliver_policy = DeliverPolicy.ALL,
-            ack_wait       = 60,          # seconds before unacked msg is redelivered
-            max_deliver    = 10,
-        ),
-    )
+    # Retry until the stream exists (created by nats_bridge on its startup)
+    while True:
+        try:
+            sub = await js.pull_subscribe(
+                subject_filter,
+                durable = consumer_name,
+                stream  = stream_name,
+                config  = ConsumerConfig(
+                    deliver_policy = DeliverPolicy.ALL,
+                    ack_wait       = 60,
+                    max_deliver    = 10,
+                ),
+            )
+            break
+        except Exception as exc:
+            log.warning("Stream '%s' not ready yet (%s) — retrying in 5s ...", stream_name, exc.__class__.__name__)
+            await asyncio.sleep(5)
+
     log.info("Durable consumer '%s' on stream '%s' subject '%s'",
              consumer_name, stream_name, subject_filter)
     log.info("Flushing every %ds or every %d messages", flush_interval, max_msgs)

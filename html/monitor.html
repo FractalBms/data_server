@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Battery Monitor</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; font-family: "Segoe UI", Tahoma, sans-serif; background: #0a0a0a; color: #e5e7eb; }
+    .container { max-width: 1600px; margin: 0 auto; background: #121212; border: 1px solid #1e3a8a; border-radius: 12px; display: flex; flex-direction: column; height: 96vh; overflow: hidden; }
+
+    /* ── Header ── */
+    .header { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 12px 20px; background: linear-gradient(135deg, #000, #1e3a8a); border-bottom: 2px solid #2563eb; }
+    .header h2 { margin: 0; font-size: 18px; }
+    .header small { color: #93c5fd; font-size: 12px; }
+    .nav-links { display: flex; gap: 6px; }
+    .nav-link { padding: 4px 10px; border-radius: 5px; font-size: 12px; background: #1e293b; border: 1px solid #334155; color: #94a3b8; text-decoration: none; transition: background 0.15s; }
+    .nav-link:hover { background: #2563eb; color: #fff; border-color: #60a5fa; }
+
+    /* ── Stack selector ── */
+    .stack-bar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #080e1a; border-bottom: 1px solid #1e3a8a; flex-shrink: 0; flex-wrap: wrap; }
+    .stack-btn { display: flex; align-items: center; gap: 8px; padding: 7px 16px; border-radius: 7px; cursor: pointer; border: 1px solid #334155; background: #1e293b; color: #64748b; font-size: 12px; font-weight: 600; transition: all 0.15s; }
+    .stack-btn:hover { border-color: #475569; color: #e5e7eb; }
+    .stack-btn.active-old { border-color: #dc6600; background: #2d1a00; color: #fb923c; }
+    .stack-btn.active-new { border-color: #166534; background: #0d2c1e; color: #4ade80; }
+    .stack-dot { width: 8px; height: 8px; border-radius: 50%; background: #334155; flex-shrink: 0; transition: background 0.3s; }
+    .stack-dot.up   { background: #22c55e; box-shadow: 0 0 5px #22c55e88; }
+    .stack-dot.down { background: #ef4444; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-weight: bold; font-size: 11px; }
+    .pill.ok      { background: #065f46; color: #6ee7b7; }
+    .pill.bad     { background: #7f1d1d; color: #fecaca; }
+    .pill.loading { background: #713f12; color: #fde68a; }
+
+    /* ── Connect bar ── */
+    .connect-bar { display: flex; align-items: center; gap: 8px; padding: 7px 14px; background: #0f172a; border-bottom: 1px solid #1e3a8a; flex-wrap: wrap; flex-shrink: 0; }
+    .connect-bar label { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    .connect-bar input { background: #020617; border: 1px solid #334155; border-radius: 5px; color: #e2e8f0; padding: 4px 8px; font-size: 12px; outline: none; }
+    .w-host { width: 110px; } .w-port { width: 60px; } .w-token { width: 180px; } .w-sm { width: 100px; }
+    .query-info { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #94a3b8; }
+    .query-info b { color: #60a5fa; font-variant-numeric: tabular-nums; }
+
+    /* influxdb-only fields */
+    .influx-only { display: flex; align-items: center; gap: 8px; }
+
+    /* ── Status bar ── */
+    .status-bar { display: grid; grid-template-columns: repeat(5, 1fr); padding: 6px 8px; background: #1a1a1a; border-bottom: 1px solid #1e3a8a; flex-shrink: 0; }
+    .status-item { text-align: center; font-size: 11px; }
+    .status-item b { color: #60a5fa; }
+
+    /* ── Buttons ── */
+    .btn { padding: 5px 14px; border-radius: 6px; border: 1px solid #475569; background: #334155; color: #e5e7eb; font-weight: bold; font-size: 12px; cursor: pointer; transition: background 0.15s; }
+    .btn:hover { background: #475569; }
+    .btn.primary { background: #2563eb; border-color: #60a5fa; }
+    .btn.primary:hover { background: #1d4ed8; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Main layout ── */
+    .main { display: grid; grid-template-columns: 220px 1fr; flex: 1; overflow: hidden; }
+    .sidebar { background: #0f172a; padding: 10px; border-right: 1px solid #1e3a8a; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .content { background: #0a0f1a; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+
+    /* ── Cards ── */
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; }
+    .card-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 8px; }
+    .form-row { margin-bottom: 6px; }
+    .form-row label { display: block; font-size: 10px; color: #94a3b8; margin-bottom: 2px; }
+    .form-row select, .form-row input { width: 100%; background: #020617; border: 1px solid #334155; border-radius: 5px; color: #e2e8f0; padding: 4px 7px; font-size: 12px; outline: none; }
+
+    /* ── Mini stats ── */
+    .mini-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .mini-stat { background: #0f172a; border: 1px solid #1e3a8a; border-radius: 6px; padding: 6px 7px; }
+    .mini-stat-label { font-size: 9px; color: #64748b; text-transform: uppercase; }
+    .mini-stat-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+    .mini-stat-unit { font-size: 9px; color: #475569; }
+
+    /* ── Heatmap ── */
+    .heatmap-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; flex-shrink: 0; }
+    .heatmap-title { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 6px; }
+    .heatmap-wrap { overflow-x: auto; }
+
+    /* ── Charts ── */
+    .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .chart-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 3px; }
+    .chart-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+    .chart-title { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; }
+    .chart-value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; color: #f8fafc; line-height: 1; }
+    .chart-unit { font-size: 12px; color: #94a3b8; }
+    .chart-range { font-size: 10px; color: #475569; margin-left: auto; font-family: monospace; }
+    .chart-svg { width: 100%; display: block; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h2 id="headerTitle">Battery Monitor</h2>
+      <small id="headerSub">Select a stack to connect</small>
+    </div>
+    <div class="nav-links">
+      <a class="nav-link" href="dashboard.html">Dashboard</a>
+      <a class="nav-link" href="architecture.html">Architecture</a>
+      <a class="nav-link" href="costs.html">Costs</a>
+    </div>
+  </div>
+
+  <!-- Stack selector -->
+  <div class="stack-bar">
+    <button class="stack-btn" id="btnOld" onclick="selectStack('influxdb')">
+      <span class="stack-dot" id="dotOld"></span>
+      orig_aws — InfluxDB2
+      <span style="font-size:10px;color:#475569">:8086</span>
+    </button>
+    <button class="stack-btn" id="btnNew" onclick="selectStack('subscriber')">
+      <span class="stack-dot" id="dotNew"></span>
+      New NATS Stack — Subscriber API
+      <span style="font-size:10px;color:#475569">:8767</span>
+    </button>
+    <div style="margin-left:auto;font-size:12px;color:#64748b">
+      Backend: <span id="backendPill" class="pill bad">OFFLINE</span>
+    </div>
+  </div>
+
+  <!-- Connect bar -->
+  <div class="connect-bar">
+    <label>Host</label><input class="w-host" id="cfgHost" value="localhost" onchange="saveHost()"/>
+    <span class="influx-only" id="influxFields">
+      <label>Port</label><input class="w-port" id="cfgPort" value="8086"/>
+      <label>Token</label><input class="w-token" id="cfgToken" value="battery-token-secret" type="password"/>
+      <label>Org</label><input class="w-sm" id="cfgOrg" value="battery-org"/>
+      <label>Bucket</label><input class="w-sm" id="cfgBucket" value="battery-data"/>
+    </span>
+    <span class="influx-only" id="subscriberFields" style="display:none">
+      <label>Port</label><input class="w-port" id="cfgSubPort" value="8767"/>
+    </span>
+    <button class="btn primary" id="btnConnect" onclick="toggleConnect()">Connect</button>
+    <button class="btn" id="btnRefresh" onclick="doRefresh()" disabled>↻ Refresh</button>
+    <div class="query-info">
+      Query: <b id="qTime">—</b> &nbsp; Last: <b id="qAgo">—</b>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="status-item">ACTIVE CELLS <b id="sbCells">—</b></div>
+    <div class="status-item">WRITES/SEC <b id="sbWps">—</b></div>
+    <div class="status-item">LAST WRITE <b id="sbLast">—</b></div>
+    <div class="status-item">SOURCE <b id="sbSource">—</b></div>
+    <div class="status-item">STACK <b id="sbStack">—</b></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="sidebar">
+      <div class="card">
+        <div class="card-title">Cell Selector</div>
+        <div class="form-row"><label>Site</label><select id="selSite" onchange="doRefresh()"></select></div>
+        <div class="form-row"><label>Rack</label><select id="selRack" onchange="doRefresh()"></select></div>
+        <div class="form-row"><label>Module</label><select id="selModule" onchange="doRefresh()"></select></div>
+        <div class="form-row"><label>Cell</label><select id="selCell" onchange="doRefresh()"></select></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Query Settings</div>
+        <div class="form-row"><label>Time range</label>
+          <select id="selRange" onchange="doRefresh()">
+            <option value="-2m">Last 2 min</option>
+            <option value="-5m" selected>Last 5 min</option>
+            <option value="-15m">Last 15 min</option>
+            <option value="-30m">Last 30 min</option>
+            <option value="-1h">Last 1 hour</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Auto-refresh</label>
+          <select id="selInterval" onchange="restartAutoRefresh()">
+            <option value="0">Off</option>
+            <option value="3" selected>3 s</option>
+            <option value="5">5 s</option>
+            <option value="10">10 s</option>
+            <option value="30">30 s</option>
+          </select>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Current Values</div>
+        <div class="mini-stats" id="miniStats">
+          <div style="grid-column:1/-1;text-align:center;color:#1e3a5f;font-size:11px">Not connected</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="heatmap-card">
+        <div class="heatmap-title" id="heatmapTitle">Voltage Heatmap — connect to load</div>
+        <div class="heatmap-wrap"><svg id="heatmapSvg"></svg></div>
+      </div>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="chart-header">
+            <span class="chart-title">Voltage</span>
+            <span class="chart-value" id="cvVoltage">—</span>
+            <span class="chart-unit">V</span>
+            <span class="chart-range" id="crVoltage"></span>
+          </div>
+          <svg class="chart-svg" id="svgVoltage" viewBox="0 0 400 100" height="100"></svg>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <span class="chart-title">Temperature</span>
+            <span class="chart-value" id="cvTemp">—</span>
+            <span class="chart-unit">°C</span>
+            <span class="chart-range" id="crTemp"></span>
+          </div>
+          <svg class="chart-svg" id="svgTemp" viewBox="0 0 400 100" height="100"></svg>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <span class="chart-title">State of Charge</span>
+            <span class="chart-value" id="cvSoc">—</span>
+            <span class="chart-unit">%</span>
+            <span class="chart-range" id="crSoc"></span>
+          </div>
+          <svg class="chart-svg" id="svgSoc" viewBox="0 0 400 100" height="100"></svg>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <span class="chart-title">Current</span>
+            <span class="chart-value" id="cvCurrent">—</span>
+            <span class="chart-unit">A</span>
+            <span class="chart-range" id="crCurrent"></span>
+          </div>
+          <svg class="chart-svg" id="svgCurrent" viewBox="0 0 400 100" height="100"></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────
+const SITES = 3, RACKS = 4, MODULES = 8, CELLS = 12;
+
+const CHART_CFG = {
+  voltage:     { svgId:'svgVoltage', cvId:'cvVoltage', crId:'crVoltage', min:3.0, max:4.2, refLine:3.7,  colorFn: voltageColor },
+  temperature: { svgId:'svgTemp',    cvId:'cvTemp',    crId:'crTemp',    min:15,  max:45,  refLine:35,   colorFn: tempColor    },
+  soc:         { svgId:'svgSoc',     cvId:'cvSoc',     crId:'crSoc',     min:10,  max:95,  refLine:20,   colorFn: socColor     },
+  current:     { svgId:'svgCurrent', cvId:'cvCurrent', crId:'crCurrent', min:-10, max:10,  refLine:0,    colorFn: currentColor },
+};
+const MINI_FIELDS = [
+  { key:'voltage',     label:'Voltage', unit:'V',  dec:3 },
+  { key:'temperature', label:'Temp',    unit:'°C', dec:1 },
+  { key:'soc',         label:'SOC',     unit:'%',  dec:1 },
+  { key:'current',     label:'Current', unit:'A',  dec:2 },
+  { key:'soh',         label:'SoH',     unit:'%',  dec:1 },
+  { key:'resistance',  label:'Resist',  unit:'Ω',  dec:4 },
+];
+
+// ── State ──────────────────────────────────────────────────────
+let activeStack = 'influxdb';  // 'influxdb' | 'subscriber'
+let connected = false;
+let subWs = null;               // WebSocket for subscriber API
+let subQueryId = 0;
+let pendingSubQuery = null;
+let refreshTimer = null;
+let lastQueryMs = null;
+const chartData = {};
+const heatData  = new Map();
+
+// ── Init ───────────────────────────────────────────────────────
+window.onload = () => {
+  const fill = (id, n) => {
+    const sel = document.getElementById(id);
+    for (let i = 0; i < n; i++) { const o = document.createElement('option'); o.value = o.textContent = i; sel.appendChild(o); }
+  };
+  fill('selSite', SITES); fill('selRack', RACKS); fill('selModule', MODULES); fill('selCell', CELLS);
+  const saved = localStorage.getItem('mon_host');
+  if (saved) document.getElementById('cfgHost').value = saved;
+  setInterval(() => {
+    if (!lastQueryMs) return;
+    document.getElementById('qAgo').textContent = ((Date.now() - lastQueryMs) / 1000).toFixed(1) + 's';
+  }, 500);
+  probeAll();
+  setInterval(probeAll, 10000);
+};
+
+function saveHost() { localStorage.setItem('mon_host', document.getElementById('cfgHost').value.trim()); }
+
+// ── Stack selector ─────────────────────────────────────────────
+function selectStack(stack) {
+  doDisconnect();
+  activeStack = stack;
+  document.getElementById('btnOld').className = 'stack-btn' + (stack === 'influxdb'    ? ' active-old' : '');
+  document.getElementById('btnNew').className = 'stack-btn' + (stack === 'subscriber'  ? ' active-new' : '');
+  document.getElementById('influxFields').style.display    = stack === 'influxdb'   ? 'flex' : 'none';
+  document.getElementById('subscriberFields').style.display = stack === 'subscriber' ? 'flex' : 'none';
+  if (stack === 'influxdb') {
+    document.getElementById('headerTitle').textContent = 'Battery Monitor — orig_aws';
+    document.getElementById('headerSub').textContent   = 'FlashMQ → Telegraf → InfluxDB2';
+    document.getElementById('sbStack').textContent     = 'orig_aws';
+    document.getElementById('sbSource').textContent    = 'InfluxDB2';
+  } else {
+    document.getElementById('headerTitle').textContent = 'Battery Monitor — New NATS Stack';
+    document.getElementById('headerSub').textContent   = 'Mosquitto → NATS → Parquet/S3 → Subscriber API';
+    document.getElementById('sbStack').textContent     = 'NATS';
+    document.getElementById('sbSource').textContent    = 'Sub API';
+  }
+  setBackendPill('bad', 'OFFLINE');
+}
+
+// Probe connectivity for each stack dot
+function probeStack(stack) {
+  const dotId = stack === 'influxdb' ? 'dotOld' : 'dotNew';
+  const dot = document.getElementById(dotId);
+  if (stack === 'influxdb') {
+    const host = document.getElementById('cfgHost').value.trim() || 'localhost';
+    const port = document.getElementById('cfgPort').value.trim() || '8086';
+    fetch(`http://${host}:${port}/ping`, { signal: AbortSignal.timeout(2000) })
+      .then(r => { dot.className = (r.ok || r.status === 204) ? 'stack-dot up' : 'stack-dot down'; })
+      .catch(() => { dot.className = 'stack-dot down'; });
+  } else {
+    const host = document.getElementById('cfgHost').value.trim() || 'localhost';
+    const port = document.getElementById('cfgSubPort').value.trim() || '8767';
+    const probe = new WebSocket(`ws://${host}:${port}`);
+    const t = setTimeout(() => { dot.className = 'stack-dot down'; try { probe.close(); } catch(e){} }, 2500);
+    probe.onopen  = () => { clearTimeout(t); dot.className = 'stack-dot up';   probe.close(); };
+    probe.onerror = () => { clearTimeout(t); dot.className = 'stack-dot down'; };
+  }
+}
+function probeAll() { probeStack('influxdb'); probeStack('subscriber'); }
+
+function setBackendPill(cls, txt) {
+  const e = document.getElementById('backendPill'); e.className = `pill ${cls}`; e.textContent = txt;
+}
+
+// ── Connect / Disconnect ───────────────────────────────────────
+function toggleConnect() { connected ? doDisconnect() : doConnect(); }
+
+async function doConnect() {
+  if (activeStack === 'influxdb') {
+    await connectInflux();
+  } else {
+    await connectSubscriber();
+  }
+}
+
+function doDisconnect() {
+  connected = false;
+  stopAutoRefresh();
+  if (subWs) { subWs.onclose = null; subWs.close(); subWs = null; }
+  setBackendPill('bad', 'OFFLINE');
+  document.getElementById('btnConnect').textContent = 'Connect';
+  document.getElementById('btnRefresh').disabled = true;
+}
+
+// ── InfluxDB2 backend ──────────────────────────────────────────
+const influxBaseUrl = () => `http://${document.getElementById('cfgHost').value.trim()}:${document.getElementById('cfgPort').value.trim()}`;
+const influxToken   = () => document.getElementById('cfgToken').value.trim();
+const influxOrg     = () => document.getElementById('cfgOrg').value.trim();
+const influxBkt     = () => document.getElementById('cfgBucket').value.trim();
+
+async function influxFetch(path) {
+  return fetch(influxBaseUrl() + path, { headers: { 'Authorization': `Token ${influxToken()}` } });
+}
+async function influxQuery(flux) {
+  const res = await fetch(`${influxBaseUrl()}/api/v2/query?org=${encodeURIComponent(influxOrg())}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Token ${influxToken()}`, 'Content-Type': 'application/vnd.flux', 'Accept': 'application/csv' },
+    body: flux,
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
+
+async function connectInflux() {
+  setBackendPill('loading', 'CONNECTING');
+  document.getElementById('btnConnect').disabled = true;
+  try {
+    const res = await influxFetch('/ping');
+    if (res.ok || res.status === 204) {
+      connected = true;
+      setBackendPill('ok', 'ONLINE');
+      document.getElementById('btnConnect').textContent = 'Disconnect';
+      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('btnRefresh').disabled = false;
+      restartAutoRefresh();
+      doRefresh();
+    } else { throw new Error('HTTP ' + res.status); }
+  } catch(e) {
+    setBackendPill('bad', 'OFFLINE');
+    document.getElementById('btnConnect').disabled = false;
+    document.getElementById('qTime').textContent = 'Error: ' + e.message;
+  }
+}
+
+function parseCSV(text) {
+  const rows = []; let headers = null, needHeader = true;
+  for (const raw of text.split('\n')) {
+    const line = raw.trimEnd();
+    if (!line.trim() || line.startsWith('#')) { needHeader = true; continue; }
+    const cols = line.split(',');
+    if (needHeader) { headers = cols.map(h => h.trim()); needHeader = false; continue; }
+    if (!headers) continue;
+    const row = {}; headers.forEach((h, i) => { row[h] = (cols[i] ?? '').trim(); });
+    if (row._value !== undefined && row._value !== '') rows.push(row);
+  }
+  return rows;
+}
+
+function aggWindow() {
+  const map = { '-2m':'5s', '-5m':'10s', '-15m':'30s', '-30m':'1m', '-1h':'2m' };
+  return map[document.getElementById('selRange').value] || '10s';
+}
+
+async function influxQueryTimeSeries() {
+  const [site, rack, mod, cell] = selValues('selSite','selRack','selModule','selCell');
+  const range = document.getElementById('selRange').value;
+  const flux = `
+from(bucket: "${influxBkt()}")
+  |> range(start: ${range})
+  |> filter(fn: (r) => r._measurement == "battery_cell")
+  |> filter(fn: (r) => r.site_id == "${site}" and r.rack_id == "${rack}" and r.module_id == "${mod}" and r.cell_id == "${cell}")
+  |> aggregateWindow(every: ${aggWindow()}, fn: mean, createEmpty: false)
+  |> sort(columns: ["_time"])`;
+  const rows = parseCSV(await influxQuery(flux));
+  const byField = {};
+  for (const r of rows) {
+    if (!byField[r._field]) byField[r._field] = [];
+    byField[r._field].push({ t: new Date(r._time).getTime(), v: parseFloat(r._value) });
+  }
+  for (const [f, pts] of Object.entries(byField)) chartData[f] = pts;
+}
+
+async function influxQueryHeatmap() {
+  const [site, rack] = selValues('selSite','selRack');
+  const flux = `
+from(bucket: "${influxBkt()}")
+  |> range(start: -1m)
+  |> filter(fn: (r) => r._measurement == "battery_cell" and r._field == "voltage")
+  |> filter(fn: (r) => r.site_id == "${site}" and r.rack_id == "${rack}")
+  |> group(columns: ["module_id","cell_id"])
+  |> last()`;
+  const rows = parseCSV(await influxQuery(flux));
+  heatData.clear(); let latest = 0;
+  for (const r of rows) {
+    heatData.set(`${r.module_id}_${r.cell_id}`, parseFloat(r._value));
+    const t = new Date(r._time).getTime(); if (t > latest) latest = t;
+  }
+  document.getElementById('sbCells').textContent = heatData.size;
+  if (latest) document.getElementById('sbLast').textContent = ((Date.now() - latest) / 1000).toFixed(1) + 's';
+  const [s, rk] = selValues('selSite','selRack');
+  renderHeatmap(s, rk);
+}
+
+async function influxQueryWriteRate() {
+  const flux = `
+from(bucket: "${influxBkt()}")
+  |> range(start: -30s)
+  |> filter(fn: (r) => r._measurement == "battery_cell" and r._field == "voltage")
+  |> count() |> sum()`;
+  try {
+    const rows = parseCSV(await influxQuery(flux));
+    if (rows.length) {
+      const total = rows.reduce((s, r) => s + parseFloat(r._value || 0), 0);
+      document.getElementById('sbWps').textContent = (total / 30).toFixed(0);
+    }
+  } catch(_) {}
+}
+
+// ── Subscriber API backend ─────────────────────────────────────
+async function connectSubscriber() {
+  setBackendPill('loading', 'CONNECTING');
+  document.getElementById('btnConnect').disabled = true;
+  const host = document.getElementById('cfgHost').value.trim() || 'localhost';
+  const port = document.getElementById('cfgSubPort').value.trim() || '8767';
+  subWs = new WebSocket(`ws://${host}:${port}`);
+  subWs.onopen = () => {
+    connected = true;
+    setBackendPill('ok', 'ONLINE');
+    document.getElementById('btnConnect').textContent = 'Disconnect';
+    document.getElementById('btnConnect').disabled = false;
+    document.getElementById('btnRefresh').disabled = false;
+    restartAutoRefresh();
+    doRefresh();
+  };
+  subWs.onerror = () => {
+    setBackendPill('bad', 'OFFLINE');
+    document.getElementById('btnConnect').disabled = false;
+    document.getElementById('qTime').textContent = 'Connection failed';
+  };
+  subWs.onclose = () => {
+    if (connected) {
+      connected = false;
+      setBackendPill('bad', 'OFFLINE');
+      document.getElementById('btnConnect').textContent = 'Connect';
+      document.getElementById('btnRefresh').disabled = true;
+    }
+  };
+  subWs.onmessage = evt => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'history' && pendingSubQuery && msg.query_id === pendingSubQuery.id) {
+        pendingSubQuery.resolve(msg);
+        pendingSubQuery = null;
+      }
+      if (msg.type === 'error' && pendingSubQuery && msg.query_id === pendingSubQuery.id) {
+        pendingSubQuery.reject(new Error(msg.message));
+        pendingSubQuery = null;
+      }
+    } catch(e) {}
+  };
+}
+
+function subQuery(siteId, fromTs, toTs, limit) {
+  return new Promise((resolve, reject) => {
+    if (!subWs || subWs.readyState !== WebSocket.OPEN) {
+      reject(new Error('Not connected')); return;
+    }
+    const id = String(++subQueryId);
+    const timeout = setTimeout(() => { pendingSubQuery = null; reject(new Error('Query timeout')); }, 15000);
+    pendingSubQuery = {
+      id,
+      resolve: r => { clearTimeout(timeout); resolve(r); },
+      reject:  e => { clearTimeout(timeout); reject(e); },
+    };
+    subWs.send(JSON.stringify({ type: 'query_history', query_id: id, site_id: siteId, from_ts: fromTs, to_ts: toTs, limit }));
+  });
+}
+
+function rangeToSeconds() {
+  const map = { '-2m': 120, '-5m': 300, '-15m': 900, '-30m': 1800, '-1h': 3600 };
+  return map[document.getElementById('selRange').value] || 300;
+}
+
+async function subQueryTimeSeries() {
+  const [site, rack, mod, cell] = selValues('selSite','selRack','selModule','selCell');
+  const toTs = Date.now() / 1000;
+  const fromTs = toTs - rangeToSeconds();
+  const result = await subQuery(site, fromTs, toTs, 2000);
+  // result.columns, result.rows — find column indices
+  const cols = result.columns;
+  const iTime = cols.indexOf('timestamp');
+  const iRack = cols.indexOf('rack_id'), iMod = cols.indexOf('module_id'), iCell = cols.indexOf('cell_id');
+  const fields = ['voltage','temperature','soc','current','soh','resistance'];
+  const byField = {};
+
+  for (const row of result.rows) {
+    // Filter to selected rack/module/cell if indices exist
+    if (iRack >= 0 && String(row[iRack]) !== String(rack)) continue;
+    if (iMod  >= 0 && String(row[iMod])  !== String(mod))  continue;
+    if (iCell >= 0 && String(row[iCell]) !== String(cell))  continue;
+    const t = parseFloat(row[iTime]) * 1000;
+    for (const f of fields) {
+      const idx = cols.indexOf(f);
+      if (idx < 0) continue;
+      const v = parseFloat(row[idx]);
+      if (isNaN(v)) continue;
+      if (!byField[f]) byField[f] = [];
+      byField[f].push({ t, v });
+    }
+  }
+  // Sort by time
+  for (const [f, pts] of Object.entries(byField)) {
+    pts.sort((a, b) => a.t - b.t);
+    chartData[f] = pts;
+  }
+}
+
+async function subQueryHeatmap() {
+  const [site, rack] = selValues('selSite','selRack');
+  const toTs = Date.now() / 1000;
+  const fromTs = toTs - 60;  // last 1 minute
+  const result = await subQuery(site, fromTs, toTs, 5000);
+  const cols = result.columns;
+  const iTime = cols.indexOf('timestamp');
+  const iRack = cols.indexOf('rack_id'), iMod = cols.indexOf('module_id'), iCell = cols.indexOf('cell_id');
+  const iVolt = cols.indexOf('voltage');
+  if (iVolt < 0) return;
+
+  // Keep latest reading per module/cell
+  const latest = new Map();
+  for (const row of result.rows) {
+    if (iRack >= 0 && String(row[iRack]) !== String(rack)) continue;
+    const m = String(row[iMod] ?? ''), c = String(row[iCell] ?? '');
+    const key = `${m}_${c}`;
+    const t = parseFloat(row[iTime]);
+    if (!latest.has(key) || t > latest.get(key).t) {
+      latest.set(key, { t, v: parseFloat(row[iVolt]) });
+    }
+  }
+  heatData.clear();
+  let maxT = 0;
+  for (const [key, { t, v }] of latest) { heatData.set(key, v); if (t > maxT) maxT = t; }
+  document.getElementById('sbCells').textContent = heatData.size;
+  if (maxT) document.getElementById('sbLast').textContent = (Date.now() / 1000 - maxT).toFixed(1) + 's';
+  renderHeatmap(site, rack);
+}
+
+// ── Unified refresh ────────────────────────────────────────────
+async function doRefresh() {
+  if (!connected) return;
+  const t0 = Date.now();
+  try {
+    document.getElementById('qTime').textContent = '…';
+    if (activeStack === 'influxdb') {
+      await Promise.all([influxQueryTimeSeries(), influxQueryHeatmap(), influxQueryWriteRate()]);
+    } else {
+      await subQueryTimeSeries();
+      await subQueryHeatmap();
+    }
+    lastQueryMs = Date.now();
+    document.getElementById('qTime').textContent = (Date.now() - t0) + 'ms';
+    renderCharts();
+    renderMiniStats();
+  } catch(e) {
+    document.getElementById('qTime').textContent = 'Error: ' + e.message;
+    console.error(e);
+  }
+}
+
+function restartAutoRefresh() {
+  stopAutoRefresh();
+  const s = parseInt(document.getElementById('selInterval').value);
+  if (s > 0 && connected) refreshTimer = setInterval(doRefresh, s * 1000);
+}
+function stopAutoRefresh() { if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; } }
+
+// ── Chart rendering ────────────────────────────────────────────
+function renderCharts() {
+  for (const [field, cfg] of Object.entries(CHART_CFG)) {
+    const pts = chartData[field];
+    if (!pts || pts.length < 2) continue;
+    const last = pts[pts.length - 1].v;
+    const minV = Math.min(...pts.map(p => p.v));
+    const maxV = Math.max(...pts.map(p => p.v));
+    const color = cfg.colorFn(last);
+    const cv = document.getElementById(cfg.cvId);
+    cv.textContent = last.toFixed(field === 'resistance' ? 4 : 2);
+    cv.style.color = color;
+    document.getElementById(cfg.crId).textContent = `↓${minV.toFixed(2)}  ↑${maxV.toFixed(2)}`;
+    drawLineChart(document.getElementById(cfg.svgId), pts, cfg, color);
+  }
+}
+
+function drawLineChart(svg, pts, cfg, lineColor) {
+  const W=400, H=100, ML=42, MB=16, MT=6, MR=6;
+  const cW=W-ML-MR, cH=H-MB-MT;
+  const vMin=cfg.min, vMax=cfg.max, vR=vMax-vMin;
+  const tMin=pts[0].t, tMax=pts[pts.length-1].t, tR=tMax-tMin||1;
+  const xS = t => ML + (t-tMin)/tR*cW;
+  const yS = v => MT + cH - (v-vMin)/vR*cH;
+  const uid = cfg.svgId;
+  let out = `<defs>
+    <linearGradient id="gr_${uid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="${lineColor}" stop-opacity="0.02"/>
+    </linearGradient>
+    <clipPath id="cp_${uid}"><rect x="${ML}" y="${MT}" width="${cW}" height="${cH}"/></clipPath>
+  </defs>`;
+  out += `<rect x="${ML}" y="${MT}" width="${cW}" height="${cH}" fill="#020617" rx="2"/>`;
+  for (let i=0; i<=4; i++) {
+    const v = vMin + (vMax-vMin)*i/4, y = yS(v).toFixed(1);
+    out += `<line x1="${ML}" y1="${y}" x2="${ML+cW}" y2="${y}" stroke="#1e293b" stroke-width="1"/>`;
+    out += `<text x="${ML-3}" y="${parseFloat(y)+3}" fill="#475569" font-size="8" text-anchor="end" font-family="monospace">${v.toFixed(1)}</text>`;
+  }
+  if (cfg.refLine !== undefined) {
+    const ry = yS(cfg.refLine).toFixed(1);
+    if (ry >= MT && ry <= MT+cH)
+      out += `<line x1="${ML}" y1="${ry}" x2="${ML+cW}" y2="${ry}" stroke="#334155" stroke-width="1" stroke-dasharray="4,3"/>`;
+  }
+  const pathPts = pts.map(p => `${xS(p.t).toFixed(1)},${yS(p.v).toFixed(1)}`).join('L');
+  const lx = xS(pts[pts.length-1].t).toFixed(1), ly = yS(pts[pts.length-1].v).toFixed(1);
+  const by = (MT+cH).toFixed(1);
+  out += `<g clip-path="url(#cp_${uid})">`;
+  out += `<path d="M${pathPts}L${lx},${by}L${ML},${by}Z" fill="url(#gr_${uid})" stroke="none"/>`;
+  out += `<path d="M${pathPts}" fill="none" stroke="${lineColor}" stroke-width="1.5" stroke-linejoin="round"/>`;
+  out += `<circle cx="${lx}" cy="${ly}" r="3" fill="${lineColor}" stroke="#0a0a0a" stroke-width="1.5">
+    <animate attributeName="r" values="3;5;3" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="1;0.5;1" dur="2s" repeatCount="indefinite"/>
+  </circle></g>`;
+  out += `<rect x="${ML}" y="${MT}" width="${cW}" height="${cH}" fill="none" stroke="#1e293b" stroke-width="1" rx="2"/>`;
+  const t0l = new Date(tMin).toISOString().substr(11,8), t1l = new Date(tMax).toISOString().substr(11,8);
+  out += `<text x="${ML}" y="${H-3}" fill="#334155" font-size="8" font-family="monospace">${t0l}</text>`;
+  out += `<text x="${ML+cW}" y="${H-3}" fill="#334155" font-size="8" text-anchor="end" font-family="monospace">${t1l}</text>`;
+  svg.innerHTML = out;
+}
+
+// ── Heatmap ────────────────────────────────────────────────────
+function renderHeatmap(site, rack) {
+  const svg = document.getElementById('heatmapSvg');
+  document.getElementById('heatmapTitle').textContent = `Voltage Heatmap — Site ${site} · Rack ${rack}`;
+  const cW=22, cH=16, gap=2, labelW=26, labelH=14;
+  const totalW = labelW + CELLS*(cW+gap) - gap + 6;
+  const totalH = labelH + MODULES*(cH+gap) - gap + 18;
+  svg.setAttribute('viewBox', `0 0 ${totalW} ${totalH}`);
+  svg.setAttribute('width', totalW); svg.setAttribute('height', totalH);
+  let out = `<defs><linearGradient id="legGrad" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%" stop-color="#ef4444"/><stop offset="30%" stop-color="#f97316"/>
+    <stop offset="50%" stop-color="#eab308"/><stop offset="65%" stop-color="#22c55e"/>
+    <stop offset="85%" stop-color="#06b6d4"/><stop offset="100%" stop-color="#3b82f6"/>
+  </linearGradient></defs>`;
+  for (let c=0; c<CELLS; c++) {
+    const x = labelW + c*(cW+gap) + cW/2;
+    out += `<text x="${x}" y="10" fill="#475569" font-size="7" text-anchor="middle" font-family="monospace">${c}</text>`;
+  }
+  for (let m=0; m<MODULES; m++) {
+    const y = labelH + m*(cH+gap);
+    out += `<text x="${labelW-3}" y="${y+cH/2+3}" fill="#475569" font-size="7" text-anchor="end" font-family="monospace">M${m}</text>`;
+    for (let c=0; c<CELLS; c++) {
+      const x = labelW + c*(cW+gap);
+      const v = heatData.get(`${m}_${c}`);
+      const fill = v != null ? voltageColor(v) : '#1e293b', op = v != null ? 1 : 0.25;
+      out += `<rect x="${x}" y="${y}" width="${cW}" height="${cH}" rx="2" fill="${fill}" opacity="${op}"><title>M${m} C${c}: ${v != null ? v.toFixed(3)+'V' : 'no data'}</title></rect>`;
+      if (v != null) out += `<text x="${x+cW/2}" y="${y+cH/2+3}" fill="#000a" font-size="6" text-anchor="middle" font-family="monospace" pointer-events="none">${v.toFixed(2)}</text>`;
+    }
+  }
+  const legY=totalH-12, legX=labelW, legW=CELLS*(cW+gap)-gap;
+  out += `<rect x="${legX}" y="${legY}" width="${legW}" height="5" fill="url(#legGrad)" rx="2"/>`;
+  out += `<text x="${legX}" y="${legY-2}" fill="#334155" font-size="6" font-family="monospace">3.0V</text>`;
+  out += `<text x="${legX+legW/2}" y="${legY-2}" fill="#334155" font-size="6" text-anchor="middle" font-family="monospace">3.7V nominal</text>`;
+  out += `<text x="${legX+legW}" y="${legY-2}" fill="#334155" font-size="6" text-anchor="end" font-family="monospace">4.2V</text>`;
+  svg.innerHTML = out;
+}
+
+// ── Mini stats ─────────────────────────────────────────────────
+function renderMiniStats() {
+  const el = document.getElementById('miniStats'); el.innerHTML = '';
+  for (const f of MINI_FIELDS) {
+    const pts = chartData[f.key], v = pts && pts.length ? pts[pts.length-1].v : null;
+    const color = v != null ? getColor(f.key, v) : '#334155';
+    const div = document.createElement('div'); div.className = 'mini-stat';
+    div.innerHTML = `<div class="mini-stat-label">${f.label}</div>
+      <div class="mini-stat-value" style="color:${color}">${v != null ? v.toFixed(f.dec) : '—'}</div>
+      <div class="mini-stat-unit">${f.unit}</div>`;
+    el.appendChild(div);
+  }
+}
+
+// ── Color functions ────────────────────────────────────────────
+function voltageColor(v) { return colorStops(v, [[3.0,'#ef4444'],[3.3,'#f97316'],[3.5,'#eab308'],[3.7,'#22c55e'],[4.0,'#06b6d4'],[4.2,'#3b82f6']]); }
+function tempColor(v)    { return colorStops(v, [[15,'#3b82f6'],[25,'#22c55e'],[35,'#f59e0b'],[40,'#f97316'],[45,'#ef4444']]); }
+function socColor(v)     { return colorStops(v, [[10,'#ef4444'],[20,'#f97316'],[50,'#22c55e'],[90,'#06b6d4']]); }
+function currentColor(v) { return v > 1 ? '#818cf8' : v < -1 ? '#f97316' : '#94a3b8'; }
+function getColor(field, v) {
+  const map = { voltage: voltageColor, temperature: tempColor, soc: socColor, current: currentColor };
+  return (map[field] || (() => '#60a5fa'))(v);
+}
+function colorStops(v, stops) {
+  if (v <= stops[0][0]) return stops[0][1];
+  if (v >= stops[stops.length-1][0]) return stops[stops.length-1][1];
+  for (let i=0; i<stops.length-1; i++) {
+    const [v1,c1]=stops[i], [v2,c2]=stops[i+1];
+    if (v>=v1 && v<=v2) return lerpHex(c1, c2, (v-v1)/(v2-v1));
+  }
+  return stops[stops.length-1][1];
+}
+function lerpHex(c1, c2, t) {
+  const h = s => parseInt(s,16);
+  const r = Math.round(h(c1.slice(1,3)) + (h(c2.slice(1,3))-h(c1.slice(1,3)))*t);
+  const g = Math.round(h(c1.slice(3,5)) + (h(c2.slice(3,5))-h(c1.slice(3,5)))*t);
+  const b = Math.round(h(c1.slice(5,7)) + (h(c2.slice(5,7))-h(c1.slice(5,7)))*t);
+  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
+}
+
+const selValues = (...ids) => ids.map(id => document.getElementById(id).value);
+</script>
+</body>
+</html>

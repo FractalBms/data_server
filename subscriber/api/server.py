@@ -43,7 +43,7 @@ import duckdb
 import nats
 import websockets
 import yaml
-from nats.js.api import ConsumerConfig, DeliverPolicy
+from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -166,7 +166,7 @@ async def start_live_sub(subject: str) -> None:
         stream  = stream_name,
         config  = ConsumerConfig(
             deliver_policy = DeliverPolicy.NEW,
-            ack_policy     = "explicit",
+            ack_policy     = AckPolicy.EXPLICIT,
         ),
         cb = message_handler,
     )
@@ -246,8 +246,14 @@ async def ws_handler(websocket) -> None:
             elif t == "subscribe":
                 subject = msg.get("subject", g_config["nats"].get("default_subject", "batteries.>"))
                 if g_nats_connected:
-                    await start_live_sub(subject)
-                    await broadcast_status()
+                    try:
+                        await start_live_sub(subject)
+                        await broadcast_status()
+                    except Exception as exc:
+                        log.error("Subscribe failed: %s", exc)
+                        await websocket.send(json.dumps({
+                            "type": "error", "query_id": "", "message": str(exc)
+                        }))
                 else:
                     await websocket.send(json.dumps({
                         "type": "error", "query_id": "", "message": "NATS not connected"
@@ -301,9 +307,9 @@ async def nats_connect_loop() -> None:
             if g_nc is None or g_nc.is_closed:
                 g_nc = await nats.connect(
                     nats_url,
-                    disconnected_cb  = lambda: asyncio.create_task(on_nats_disconnect()),
-                    reconnected_cb   = lambda: asyncio.create_task(on_nats_reconnect()),
-                    error_cb         = lambda e: log.warning("NATS error: %s", e),
+                    disconnected_cb = on_nats_disconnect,
+                    reconnected_cb  = on_nats_reconnect,
+                    error_cb        = on_nats_error,
                 )
                 g_nats_connected = True
                 log.info("Connected to NATS at %s", nats_url)
@@ -323,10 +329,22 @@ async def on_nats_disconnect() -> None:
 
 
 async def on_nats_reconnect() -> None:
-    global g_nats_connected
+    global g_nats_connected, g_live_sub
     g_nats_connected = True
     log.info("NATS reconnected")
+    # Re-establish live subscription if one was active
+    if g_live_subject:
+        g_live_sub = None  # old sub is dead
+        try:
+            await start_live_sub(g_live_subject)
+            log.info("Live subscription restored after reconnect: %s", g_live_subject)
+        except Exception as exc:
+            log.warning("Could not restore live subscription: %s", exc)
     await broadcast_status()
+
+
+async def on_nats_error(e) -> None:
+    log.warning("NATS error: %s", e)
 
 
 async def s3_check_loop() -> None:

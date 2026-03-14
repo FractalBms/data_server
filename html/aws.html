@@ -534,6 +534,15 @@
     el.className = `pill ${cls}`; el.textContent = text;
   }
 
+  // ── Host persistence + auto-connect ──────────────────────────
+  (function() {
+    const el = document.getElementById('wsHost');
+    const saved = localStorage.getItem('ds_host');
+    if (saved) el.value = saved;
+    el.addEventListener('change', () => localStorage.setItem('ds_host', el.value.trim()));
+    connectWs();
+  })();
+
   // ── Generate ────────────────────────────────────────────────
 
   function generateData() {

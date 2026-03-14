@@ -1,0 +1,37 @@
+websocket:
+  host: 0.0.0.0
+  port: 8760
+
+# Start order: infra services (log-follow) → generator
+order:
+  - flashmq
+  - influxdb
+  - telegraf
+  - generator
+
+components:
+
+  flashmq:
+    label: "FlashMQ MQTT Broker (port 1883)"
+    # journalctl -f streams live logs; start/stop controls the log tail, not the service
+    cmd: ["journalctl", "-fu", "flashmq", "--no-pager", "--output=short"]
+    cwd: "."
+
+  influxdb:
+    label: "InfluxDB2 (port 8086)"
+    cmd: ["journalctl", "-fu", "influxdb", "--no-pager", "--output=short"]
+    cwd: "."
+
+  telegraf:
+    label: "Telegraf — MQTT → InfluxDB2"
+    cmd: ["journalctl", "-fu", "telegraf", "--no-pager", "--output=short"]
+    cwd: "."
+
+  generator:
+    label: "Battery Data Generator (1152 cells)"
+    cmd:
+      - "orig_aws/.venv/bin/python"
+      - "orig_aws/source/generator.py"
+      - "--config"
+      - "orig_aws/source/config.yaml"
+    cwd: "."

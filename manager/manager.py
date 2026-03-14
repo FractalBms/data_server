@@ -33,6 +33,45 @@ from typing import Dict, Optional, Set
 import websockets
 import yaml
 
+# PID file path (per manager port) — used to kill orphaned processes on restart
+g_pid_file: str = ""
+
+
+def _save_pids() -> None:
+    """Persist {name: pid} for all running components to the PID file."""
+    if not g_pid_file:
+        return
+    pids = {name: c.pid for name, c in g_components.items() if c.pid is not None}
+    try:
+        with open(g_pid_file, "w") as f:
+            json.dump(pids, f)
+    except OSError as e:
+        log.warning("Could not write PID file %s: %s", g_pid_file, e)
+
+
+def _cleanup_orphans() -> None:
+    """On startup, kill any PIDs left over from a previous manager session."""
+    if not g_pid_file or not os.path.exists(g_pid_file):
+        return
+    try:
+        with open(g_pid_file) as f:
+            pids: dict = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        log.warning("Could not read PID file %s: %s", g_pid_file, e)
+        return
+
+    for name, pid in pids.items():
+        try:
+            os.kill(pid, 0)          # check if process still exists
+            log.info("Killing orphaned %s (pid %d)", name, pid)
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass                     # already gone
+        except PermissionError:
+            log.warning("No permission to kill orphaned %s (pid %d)", name, pid)
+
+    os.remove(g_pid_file)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
@@ -45,7 +84,13 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # data_s
 class Component:
     def __init__(self, name: str, cfg: dict):
         self.name    = name
-        self.cmd     = cfg["cmd"]
+        cmd          = list(cfg["cmd"])
+        # Resolve project-root-relative executables (e.g. ".venv/bin/python") against
+        # BASE_DIR. Skip paths starting with "./" — those are intentionally relative
+        # to the component's own cwd (e.g. "./minio").
+        if cmd and not os.path.isabs(cmd[0]) and os.sep in cmd[0] and not cmd[0].startswith('./'):
+            cmd[0] = os.path.join(BASE_DIR, cmd[0])
+        self.cmd     = cmd
         self.cwd     = os.path.join(BASE_DIR, cfg.get("cwd", "."))
         self.env     = cfg.get("env", {})
         self.label   = cfg.get("label", name)
@@ -76,6 +121,7 @@ class Component:
             self.pid    = self.process.pid
             self.status = "running"
             log.info("Started %s (pid %d)", self.name, self.pid)
+            _save_pids()
             await broadcast_fn(self._status_msg())
 
             # Stream stdout and stderr
@@ -106,6 +152,7 @@ class Component:
         self.status  = "stopped"
         self.pid     = None
         self.process = None
+        _save_pids()
         await broadcast_fn(self._status_msg())
 
     async def _stream(self, stream, stream_name: str, broadcast_fn) -> None:
@@ -207,7 +254,7 @@ async def ws_handler(websocket) -> None:
 # ---------------------------------------------------------------------------
 
 async def main_async(cfg: dict) -> None:
-    global g_components
+    global g_components, g_pid_file
 
     order = cfg.get("order", list(cfg["components"].keys()))
     for name in order:
@@ -217,6 +264,9 @@ async def main_async(cfg: dict) -> None:
     ws_cfg  = cfg.get("websocket", {})
     ws_host = ws_cfg.get("host", "0.0.0.0")
     ws_port = ws_cfg.get("port", 8760)
+
+    g_pid_file = f"/tmp/ds_manager_{ws_port}.pids"
+    _cleanup_orphans()
 
     log.info("Manager WebSocket on ws://%s:%d", ws_host, ws_port)
     log.info("Components: %s", ", ".join(g_components.keys()))
