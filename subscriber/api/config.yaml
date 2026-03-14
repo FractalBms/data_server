@@ -13,10 +13,14 @@ s3:
   secret_key: minioadmin
   prefix: ""
 
-# WebSocket server
+# WebSocket server (monitor.html, subscriber.html)
 websocket:
   host: 0.0.0.0
   port: 8767
+
+# Flux-compatible HTTP API (orig_aws.html — point port here instead of 8086)
+flux_http:
+  port: 8768
 
 # History query limits
 history:

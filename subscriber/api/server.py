@@ -45,6 +45,8 @@ import websockets
 import yaml
 from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
 
+from flux_compat import serve_flux_api
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
@@ -381,6 +383,7 @@ async def main_async(cfg: dict) -> None:
             stats_loop(),
             nats_connect_loop(),
             s3_check_loop(),
+            serve_flux_api(cfg, g_duckdb),
         )
 
 
