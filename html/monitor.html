@@ -114,7 +114,12 @@
     </button>
     <button class="stack-btn" id="btnNew" onclick="selectStack('subscriber')">
       <span class="stack-dot" id="dotNew"></span>
-      NATS Stack · Subscriber API · AWS EC2
+      NATS Stack · Subscriber API · phil-dev
+      <span style="font-size:10px;color:#475569">:8767</span>
+    </button>
+    <button class="stack-btn" id="btnSpark" onclick="selectStack('spark')">
+      <span class="stack-dot" id="dotSpark"></span>
+      NATS Stack · Subscriber API · spark-22b6
       <span style="font-size:10px;color:#475569">:8767</span>
     </button>
     <div style="margin-left:auto;font-size:12px;color:#64748b">
@@ -124,7 +129,7 @@
 
   <!-- Connect bar -->
   <div class="connect-bar">
-    <label>Host</label><input class="w-host" id="cfgHost" autocomplete="off" onchange="saveHost()"/>
+    <label id="hostLabel">Host</label><input class="w-host" id="cfgHost" autocomplete="off" onchange="saveHost()"/>
     <span class="influx-only" id="influxFields">
       <label>Port</label><input class="w-port" id="cfgPort" value="8086"/>
       <label>Token</label><input class="w-token" id="cfgToken" value="battery-token-secret" type="password"/>
@@ -280,8 +285,8 @@ window.onload = () => {
     for (let i = 0; i < n; i++) { const o = document.createElement('option'); o.value = o.textContent = i; sel.appendChild(o); }
   };
   fill('selSite', SITES); fill('selRack', RACKS); fill('selModule', MODULES); fill('selCell', CELLS);
-  localStorage.removeItem('mon_host');
-  document.getElementById('cfgHost').value = window.location.hostname;
+  document.getElementById('cfgHost').value =
+    localStorage.getItem('ds_host') || window.location.hostname;
   setInterval(() => {
     if (lastQueryMs)
       document.getElementById('qAgo').textContent = ((Date.now() - lastQueryMs) / 1000).toFixed(1) + 's';
@@ -293,38 +298,52 @@ window.onload = () => {
   selectStack('influxdb');   // pre-select orig_aws on load
 };
 
-function saveHost() { localStorage.setItem('mon_host', document.getElementById('cfgHost').value.trim()); }
+function saveHost() {
+  const key = activeStack === 'spark' ? 'aws_host' : 'ds_host';
+  localStorage.setItem(key, document.getElementById('cfgHost').value.trim());
+}
 
 // ── Stack selector ─────────────────────────────────────────────
 function selectStack(stack) {
   doDisconnect();
   activeStack = stack;
-  document.getElementById('btnOld').className = 'stack-btn' + (stack === 'influxdb'    ? ' active-old' : '');
-  document.getElementById('btnNew').className = 'stack-btn' + (stack === 'subscriber'  ? ' active-new' : '');
-  document.getElementById('influxFields').style.display    = stack === 'influxdb'   ? 'flex' : 'none';
-  document.getElementById('subscriberFields').style.display = stack === 'subscriber' ? 'flex' : 'none';
+  document.getElementById('btnOld').className   = 'stack-btn' + (stack === 'influxdb'   ? ' active-old' : '');
+  document.getElementById('btnNew').className   = 'stack-btn' + (stack === 'subscriber' ? ' active-new' : '');
+  document.getElementById('btnSpark').className = 'stack-btn' + (stack === 'spark'      ? ' active-new' : '');
+  document.getElementById('influxFields').style.display     = stack === 'influxdb'   ? 'flex' : 'none';
+  document.getElementById('subscriberFields').style.display = stack !== 'influxdb'   ? 'flex' : 'none';
+
+  // restore the correct host for this stack
+  const hostKey = stack === 'spark' ? 'aws_host' : 'ds_host';
+  document.getElementById('cfgHost').value = localStorage.getItem(hostKey) || window.location.hostname;
+  document.getElementById('hostLabel').textContent = stack === 'spark' ? 'Spark host' : 'Host';
+
   if (stack === 'influxdb') {
     document.getElementById('headerTitle').textContent = 'Battery Monitor — Orig AWS';
-    document.getElementById('headerSub').textContent   = 'Battery Sites → FlashMQ → Telegraf → InfluxDB2 (AWS EC2) · REST/Flux';
+    document.getElementById('headerSub').textContent   = 'Battery Sites → FlashMQ → Telegraf → InfluxDB2 · REST/Flux';
     document.getElementById('sbStack').textContent     = 'orig_aws';
     document.getElementById('sbSource').textContent    = 'InfluxDB2';
-  } else {
-    document.getElementById('headerTitle').textContent = 'Battery Monitor — NATS Stack';
-    document.getElementById('headerSub').textContent   = 'Battery Sites → FlashMQ → NATS → AWS S3 · Subscriber API (AWS EC2)';
+  } else if (stack === 'subscriber') {
+    document.getElementById('headerTitle').textContent = 'Battery Monitor — NATS Stack (phil-dev)';
+    document.getElementById('headerSub').textContent   = 'Battery Sites → FlashMQ → NATS → S3 · Subscriber API (phil-dev)';
     document.getElementById('sbStack').textContent     = 'NATS';
+    document.getElementById('sbSource').textContent    = 'Sub API';
+  } else {
+    document.getElementById('headerTitle').textContent = 'Battery Monitor — NATS Stack (spark-22b6)';
+    document.getElementById('headerSub').textContent   = 'Battery Sites → FlashMQ → NATS → MinIO · Subscriber API (spark-22b6)';
+    document.getElementById('sbStack').textContent     = 'NATS/spark';
     document.getElementById('sbSource').textContent    = 'Sub API';
   }
   setBackendPill('bad', 'OFFLINE');
-  // auto-connect after stack switch
   doConnect();
 }
 
 // Probe connectivity for each stack dot
 function probeStack(stack) {
-  const dotId = stack === 'influxdb' ? 'dotOld' : 'dotNew';
+  const dotId = stack === 'influxdb' ? 'dotOld' : stack === 'subscriber' ? 'dotNew' : 'dotSpark';
   const dot = document.getElementById(dotId);
   if (stack === 'influxdb') {
-    const host = document.getElementById('cfgHost').value.trim() || window.location.hostname;
+    const host = localStorage.getItem('ds_host') || window.location.hostname;
     const port = document.getElementById('cfgPort').value.trim() || '8086';
     const ctrl = new AbortController();
     setTimeout(() => ctrl.abort(), 2000);
@@ -332,7 +351,9 @@ function probeStack(stack) {
       .then(r => { dot.className = (r.ok || r.type === 'opaque') ? 'stack-dot up' : 'stack-dot down'; })
       .catch(() => { dot.className = 'stack-dot down'; });
   } else {
-    const host = document.getElementById('cfgHost').value.trim() || window.location.hostname;
+    const host = stack === 'spark'
+      ? (localStorage.getItem('aws_host') || window.location.hostname)
+      : (localStorage.getItem('ds_host')  || window.location.hostname);
     const port = document.getElementById('cfgSubPort').value.trim() || '8767';
     const probe = new WebSocket(`ws://${host}:${port}`);
     const t = setTimeout(() => { dot.className = 'stack-dot down'; try { probe.close(); } catch(e){} }, 2500);
@@ -340,7 +361,7 @@ function probeStack(stack) {
     probe.onerror = () => { clearTimeout(t); dot.className = 'stack-dot down'; };
   }
 }
-function probeAll() { probeStack('influxdb'); probeStack('subscriber'); }
+function probeAll() { probeStack('influxdb'); probeStack('subscriber'); probeStack('spark'); }
 
 function setBackendPill(cls, txt) {
   const e = document.getElementById('backendPill'); e.className = `pill ${cls}`; e.textContent = txt;
@@ -356,6 +377,7 @@ async function doConnect() {
     await connectSubscriber();
   }
 }
+
 
 function doDisconnect() {
   connected = false;
@@ -487,7 +509,7 @@ async function connectSubscriber() {
   setBackendPill('loading', 'CONNECTING');
   document.getElementById('btnConnect').disabled = true;
   const host = document.getElementById('cfgHost').value.trim() || window.location.hostname;
-  const port = document.getElementById('cfgSubPort').value.trim() || '8767';
+  const port  = document.getElementById('cfgSubPort').value.trim() || '8767';
   subWs = new WebSocket(`ws://${host}:${port}`);
   subWs.onopen = () => {
     connected = true;
