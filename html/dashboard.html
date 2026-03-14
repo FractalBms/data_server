@@ -517,8 +517,11 @@
   // probe WebSockets for each stack (just for the status dots)
   const probes = {};
 
-  const STACK_LABELS  = { 8760: 'orig_aws', 8761: 'New NATS Stack', 8762: 'spark-22b6' };
-  const STACK_HOSTS   = { 8762: 'spark-22b6' };  // ports that override the host field
+  const STACK_LABELS   = { 8760: 'orig_aws', 8761: 'New NATS Stack', 8762: 'spark-22b6' };
+  const AWS_PORTS      = new Set([8762]);   // ports that use aws_host instead of ds_host
+
+  function hostKeyFor(port) { return AWS_PORTS.has(port) ? 'aws_host' : 'ds_host'; }
+  function savedHost(port)  { return localStorage.getItem(hostKeyFor(port)) || window.location.hostname; }
 
   // component state: name → {status, pid, label}
   const components = {};
@@ -530,7 +533,7 @@
   function host() { return document.getElementById('wsHost').value.trim() || window.location.hostname; }
 
   function onHostChange() {
-    localStorage.setItem('ds_host', host());
+    localStorage.setItem(hostKeyFor(activePort), host());
     probeAll();
     selectStack(activePort);
   }
@@ -541,13 +544,8 @@
     connected = false;
     activePort = port;
 
-    // Override host field for stacks that live on a different machine
-    const hostEl = document.getElementById('wsHost');
-    if (STACK_HOSTS[port]) {
-      hostEl.value = STACK_HOSTS[port];
-    } else {
-      hostEl.value = localStorage.getItem('ds_host') || window.location.hostname;
-    }
+    // Restore the correct host for this stack's host store
+    document.getElementById('wsHost').value = savedHost(port);
 
     // Clear component state for fresh connection
     for (const k in components) delete components[k];
@@ -601,7 +599,7 @@
   // Probe both ports just for the status dots (no data, short timeout)
   function probeStack(port) {
     if (probes[port]) { try { probes[port].close(); } catch(e){} }
-    const probeHost = STACK_HOSTS[port] || host();
+    const probeHost = savedHost(port);
     const p = new WebSocket(`ws://${probeHost}:${port}`);
     probes[port] = p;
     const t = setTimeout(() => {
@@ -1306,12 +1304,10 @@ from(bucket: "${ixBkt()}")
 
   // ── Boot ─────────────────────────────────────────────────────
   (function() {
-    document.getElementById('wsHost').value =
-      localStorage.getItem('ds_host') || window.location.hostname;
     document.getElementById('ixHost').value = window.location.hostname;
     probeAll();
     setInterval(probeAll, 10000);   // re-probe every 10s
-    selectStack(8761);              // default to new stack
+    selectStack(8761);              // default to new stack — host field set by selectStack
   })();
 </script>
 </body>
