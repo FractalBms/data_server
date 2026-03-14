@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SUBSCRIBER API TEST</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: #0f172a; color: #e5e7eb;
+    }
+    .container {
+      max-width: 1400px; margin: 0 auto;
+      background: #0f172a;
+      border: 1px solid #1e3a8a;
+      border-radius: 12px;
+      display: flex; flex-direction: column;
+      min-height: 96vh; overflow: hidden;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 20px;
+      background: linear-gradient(135deg, #000, #1e3a8a);
+      border-bottom: 2px solid #2563eb;
+    }
+    .header h2 { margin: 0; font-size: 18px; flex: 1; }
+    .header small { color: #93c5fd; font-size: 12px; }
+    .nav-links { display: flex; gap: 6px; margin-left: auto; }
+    .nav-link {
+      padding: 4px 10px; border-radius: 5px; font-size: 12px;
+      background: #1e293b; border: 1px solid #334155;
+      color: #94a3b8; cursor: pointer; text-decoration: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-link:hover { background: #2563eb; color: #fff; border-color: #60a5fa; }
+
+    /* ── Connect bar ── */
+    .connect-bar {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 8px 16px; background: #0a1628;
+      border-bottom: 1px solid #1e3a8a;
+    }
+    .connect-bar label { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    .connect-bar input {
+      background: #020617; border: 1px solid #334155; border-radius: 5px;
+      color: #e2e8f0; padding: 4px 8px; font-size: 13px; outline: none;
+    }
+    .w-host { width: 160px; }
+    .w-port { width: 64px; }
+    .probe-group { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; }
+
+    /* ── Stack selector ── */
+    .stack-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 16px; background: #080e1a;
+      border-bottom: 1px solid #1e3a8a; flex-wrap: wrap;
+    }
+    .stack-btn {
+      display: flex; align-items: center; gap: 7px;
+      padding: 6px 14px; border-radius: 7px; cursor: pointer;
+      border: 1px solid #334155; background: #1e293b;
+      color: #64748b; font-size: 12px; font-weight: 600;
+      transition: all 0.15s;
+    }
+    .stack-btn:hover { border-color: #475569; color: #e5e7eb; }
+    .stack-btn.active { border-color: #2563eb; background: #172554; color: #93c5fd; }
+    .stack-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #334155; flex-shrink: 0; transition: background 0.3s;
+    }
+    .stack-dot.up   { background: #22c55e; box-shadow: 0 0 5px #22c55e88; }
+    .stack-dot.down { background: #ef4444; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 5px 14px; border-radius: 6px;
+      border: 1px solid #475569; background: #334155;
+      color: #e5e7eb; font-weight: bold; font-size: 12px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #475569; }
+    .btn.primary { background: #2563eb; border-color: #60a5fa; }
+    .btn.primary:hover { background: #1d4ed8; }
+    .btn.danger { background: #dc2626; border-color: #f87171; }
+    .btn.danger:hover { background: #b91c1c; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Status pill ── */
+    .pill {
+      display: inline-block; padding: 2px 8px;
+      border-radius: 999px; font-weight: bold; font-size: 11px;
+    }
+    .pill.ok      { background: #065f46; color: #6ee7b7; }
+    .pill.bad     { background: #7f1d1d; color: #fecaca; }
+    .pill.loading { background: #713f12; color: #fde68a; }
+
+    /* ── Dot indicator ── */
+    .dot {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; background: #334155; transition: background 0.3s;
+    }
+    .dot.ok  { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+    .dot.bad { background: #ef4444; }
+
+    /* ── Main grid ── */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px; padding: 12px; flex: 1;
+    }
+    @media (max-width: 900px) {
+      .main-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ── Section cards ── */
+    .card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; display: flex; flex-direction: column;
+    }
+    .card-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 12px; border-bottom: 1px solid #334155;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #64748b;
+    }
+    .card-header .badge {
+      margin-left: auto; font-size: 11px; font-weight: bold;
+      color: #60a5fa; font-variant-numeric: tabular-nums;
+    }
+    .card-body { padding: 10px 12px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+
+    /* ── Form rows ── */
+    .form-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .form-row label { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    .form-row input, .form-row textarea {
+      background: #020617; border: 1px solid #334155; border-radius: 5px;
+      color: #e2e8f0; padding: 4px 8px; font-size: 12px; outline: none;
+    }
+    .form-row input:focus, .form-row textarea:focus { border-color: #3b82f6; }
+    .w-subject  { width: 260px; }
+    .w-siteid   { width: 80px; }
+    .w-datetime { width: 190px; }
+    .w-limit    { width: 80px; }
+
+    /* ── JSON log ── */
+    .json-log {
+      flex: 1; overflow-y: auto; max-height: 260px;
+      background: #020617; border: 1px solid #1e3a8a;
+      border-radius: 5px; padding: 6px 8px;
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 11px; line-height: 1.5;
+    }
+    .log-entry { color: #86efac; white-space: pre-wrap; word-break: break-all; border-bottom: 1px solid #0f172a; padding: 2px 0; }
+    .log-entry.err { color: #fca5a5; }
+    .log-entry.sys { color: #60a5fa; font-style: italic; }
+    .log-empty { color: #1e3a5f; font-style: italic; font-size: 11px; }
+
+    /* ── History table ── */
+    .table-wrap { overflow: auto; max-height: 260px; border: 1px solid #1e3a8a; border-radius: 5px; }
+    table { border-collapse: collapse; font-size: 11px; width: 100%; min-width: 600px; }
+    th {
+      background: #0f172a; color: #60a5fa; font-weight: 600;
+      padding: 5px 8px; text-align: left; white-space: nowrap;
+      position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #1e3a8a;
+    }
+    td { padding: 4px 8px; border-bottom: 1px solid #1e293b; color: #cbd5e1; font-family: monospace; }
+    tr:hover td { background: #0f172a; }
+    .table-meta { font-size: 11px; color: #64748b; margin-top: 4px; }
+    .table-meta b { color: #60a5fa; }
+
+    /* ── Status grid ── */
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .stat-cell {
+      background: #0f172a; border: 1px solid #1e3a8a;
+      border-radius: 6px; padding: 8px 10px;
+    }
+    .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-value { font-size: 20px; font-weight: 700; color: #f8fafc; font-variant-numeric: tabular-nums; }
+    .stat-sub   { font-size: 10px; color: #475569; }
+    .conn-row   { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #94a3b8; }
+
+    /* ── Flux section ── */
+    .flux-textarea {
+      width: 100%; height: 120px; resize: vertical;
+      background: #020617; border: 1px solid #334155; border-radius: 5px;
+      color: #e2e8f0; font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 11px; padding: 6px 8px; outline: none; line-height: 1.5;
+    }
+    .flux-textarea:focus { border-color: #3b82f6; }
+    .csv-out {
+      background: #020617; border: 1px solid #1e3a8a; border-radius: 5px;
+      padding: 8px; font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 10px; color: #86efac; white-space: pre; overflow: auto;
+      max-height: 200px; min-height: 48px;
+    }
+    .flux-meta { font-size: 11px; color: #64748b; margin-top: 4px; }
+    .flux-meta b { color: #60a5fa; }
+
+    /* ── Full-width bottom section ── */
+    .full-row { grid-column: 1 / -1; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h2>SUBSCRIBER API TEST</h2>
+      <small>WebSocket :8767 &nbsp;|&nbsp; Flux HTTP :8768</small>
+    </div>
+    <div class="nav-links">
+      <a class="nav-link" href="dashboard.html">Dashboard</a>
+      <a class="nav-link" href="subscriber.html">Subscriber</a>
+    </div>
+  </div>
+
+  <!-- Connect bar -->
+  <div class="connect-bar">
+    <label>Host</label>
+    <input id="hostInput" class="w-host" placeholder="phil-dev" autocomplete="off" />
+    <label>Port</label>
+    <input id="portInput" class="w-port" value="8767" />
+    <button class="btn primary" id="connectBtn" onclick="connect()">Connect</button>
+    <button class="btn danger" id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+    <span id="connPill" class="pill bad" style="margin-left:8px">DISCONNECTED</span>
+
+    <div class="probe-group" style="margin-left:20px">
+      <span class="dot" id="probeDotA"></span>
+      <span id="probeA" style="color:#64748b">phil-dev :8767</span>
+    </div>
+    <div class="probe-group" style="margin-left:8px">
+      <span class="dot" id="probeDotB"></span>
+      <span id="probeB" style="color:#64748b">spark-22b6 :8767</span>
+    </div>
+  </div>
+
+  <!-- Stack selector -->
+  <div class="stack-bar">
+    <span style="font-size:11px;color:#475569">Quick select:</span>
+    <button class="stack-btn active" id="btnPhilDev" onclick="selectHost('ds')">
+      <span class="stack-dot" id="dotPhilDev"></span>
+      phil-dev :8767
+    </button>
+    <button class="stack-btn" id="btnSpark" onclick="selectHost('aws')">
+      <span class="stack-dot" id="dotSpark"></span>
+      spark-22b6 :8767
+    </button>
+  </div>
+
+  <!-- Main grid -->
+  <div class="main-grid">
+
+    <!-- Live Subscribe -->
+    <div class="card">
+      <div class="card-header">
+        Live Subscribe
+        <span class="badge" id="liveCount">0 msgs</span>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <label>Subject</label>
+          <input id="subjectInput" class="w-subject" value="batteries.>" />
+          <button class="btn primary" id="subBtn" onclick="subscribe()" disabled>Subscribe</button>
+          <button class="btn danger" id="unsubBtn" onclick="unsubscribe()" disabled>Unsubscribe</button>
+        </div>
+        <div id="jsonLog" class="json-log">
+          <span class="log-empty">No live messages yet.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status -->
+    <div class="card">
+      <div class="card-header">Status &amp; Stats</div>
+      <div class="card-body">
+        <div class="conn-row">
+          <span class="dot" id="natsConnDot"></span>
+          <span id="natsConnLabel">NATS: unknown</span>
+          <span class="dot" id="s3ConnDot" style="margin-left:12px"></span>
+          <span id="s3ConnLabel">S3: unknown</span>
+          <span class="dot" id="subConnDot" style="margin-left:12px"></span>
+          <span id="subConnLabel">Sub: off</span>
+        </div>
+        <div class="status-grid">
+          <div class="stat-cell">
+            <div class="stat-label">Live Total</div>
+            <div class="stat-value" id="statLiveTotal">0</div>
+            <div class="stat-sub">msgs since start</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">Live Rate</div>
+            <div class="stat-value" id="statLivePerSec">0</div>
+            <div class="stat-sub">msg/sec</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">Queries Run</div>
+            <div class="stat-value" id="statQueriesRun">0</div>
+            <div class="stat-sub">since start</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">Subject</div>
+            <div class="stat-value" id="statSubject" style="font-size:11px;color:#60a5fa;word-break:break-all">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- History Query -->
+    <div class="card">
+      <div class="card-header">
+        History Query
+        <span class="badge" id="historyMeta"></span>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <label>Site ID</label>
+          <input id="histSite" class="w-siteid" placeholder="0 (all)" />
+          <label>Limit</label>
+          <input id="histLimit" class="w-limit" value="1000" />
+        </div>
+        <div class="form-row">
+          <label>From</label>
+          <input type="datetime-local" id="histFrom" class="w-datetime" />
+          <label>To</label>
+          <input type="datetime-local" id="histTo" class="w-datetime" />
+        </div>
+        <div class="form-row">
+          <button class="btn primary" id="histBtn" onclick="runHistory()" disabled>Run Query</button>
+          <span id="histStatus" style="font-size:11px;color:#64748b"></span>
+        </div>
+        <div class="table-wrap" id="histTableWrap" style="display:none">
+          <table id="histTable"></table>
+        </div>
+        <div class="table-meta" id="histTableMeta"></div>
+      </div>
+    </div>
+
+    <!-- Flux HTTP Test -->
+    <div class="card">
+      <div class="card-header">
+        Flux HTTP Test
+        <span class="badge" id="fluxMeta"></span>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <label>Host</label>
+          <input id="fluxHost" class="w-host" placeholder="phil-dev" />
+          <label>Port</label>
+          <input id="fluxPort" class="w-port" value="8768" />
+          <button class="btn primary" onclick="sendFlux()">Send</button>
+        </div>
+        <textarea id="fluxQuery" class="flux-textarea">from(bucket: "battery-data")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r.site_id == "0")
+  |> aggregateWindow(every: 30s, fn: mean)</textarea>
+        <div class="flux-meta" id="fluxStatus"></div>
+        <pre id="csvOut" class="csv-out">— CSV output will appear here —</pre>
+      </div>
+    </div>
+
+  </div><!-- /main-grid -->
+</div><!-- /container -->
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let ws = null;
+let liveMessages = [];
+const MAX_LOG = 20;
+let probeTimers = {};
+
+// ---------------------------------------------------------------------------
+// localStorage helpers
+// ---------------------------------------------------------------------------
+function getHost(key, fallback) {
+  return localStorage.getItem(key) || fallback;
+}
+
+function init() {
+  const dsHost = getHost('ds_host', 'phil-dev');
+  const awsHost = getHost('aws_host', 'spark-22b6');
+
+  document.getElementById('hostInput').value = dsHost;
+  document.getElementById('fluxHost').value = dsHost;
+
+  document.getElementById('probeA').textContent = dsHost + ' :8767';
+  document.getElementById('probeB').textContent = awsHost + ' :8767';
+  document.getElementById('btnPhilDev').querySelector('span:last-child') || null;
+  document.getElementById('btnPhilDev').childNodes[2] && (document.getElementById('btnPhilDev').lastChild.textContent = dsHost + ' :8767');
+  document.getElementById('btnSpark').lastChild && (document.getElementById('btnSpark').lastChild.textContent = awsHost + ' :8767');
+
+  // Set default from/to
+  const now = new Date();
+  const ago = new Date(now.getTime() - 3600 * 1000);
+  document.getElementById('histTo').value   = toDatetimeLocal(now);
+  document.getElementById('histFrom').value = toDatetimeLocal(ago);
+
+  // Start probes
+  probePeriodically(dsHost,  'probeDotA');
+  probePeriodically(awsHost, 'probeDotB');
+}
+
+function toDatetimeLocal(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// ---------------------------------------------------------------------------
+// Stack selector
+// ---------------------------------------------------------------------------
+function selectHost(type) {
+  const host = type === 'ds'
+    ? getHost('ds_host', 'phil-dev')
+    : getHost('aws_host', 'spark-22b6');
+  document.getElementById('hostInput').value = host;
+  document.getElementById('fluxHost').value = host;
+  document.getElementById('btnPhilDev').classList.toggle('active', type === 'ds');
+  document.getElementById('btnSpark').classList.toggle('active', type === 'aws');
+  if (ws) disconnect();
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket
+// ---------------------------------------------------------------------------
+function connect() {
+  const host = document.getElementById('hostInput').value.trim() || 'phil-dev';
+  const port = parseInt(document.getElementById('portInput').value) || 8767;
+  localStorage.setItem('ds_host', host);
+
+  if (ws) { ws.close(); }
+
+  setPill('loading', 'CONNECTING…');
+  ws = new WebSocket(`ws://${host}:${port}`);
+
+  ws.onopen = () => {
+    setPill('ok', 'CONNECTED');
+    document.getElementById('connectBtn').disabled = true;
+    document.getElementById('disconnectBtn').disabled = false;
+    document.getElementById('subBtn').disabled = false;
+    document.getElementById('unsubBtn').disabled = false;
+    document.getElementById('histBtn').disabled = false;
+    addLogSys(`Connected to ws://${host}:${port}`);
+  };
+
+  ws.onmessage = ({ data }) => {
+    try { handleMessage(JSON.parse(data)); }
+    catch (e) { addLogEntry('parse error: ' + e.message, true); }
+  };
+
+  ws.onclose = () => {
+    setPill('bad', 'DISCONNECTED');
+    document.getElementById('connectBtn').disabled = false;
+    document.getElementById('disconnectBtn').disabled = true;
+    document.getElementById('subBtn').disabled = true;
+    document.getElementById('unsubBtn').disabled = true;
+    document.getElementById('histBtn').disabled = true;
+    addLogSys('Disconnected');
+    ws = null;
+  };
+
+  ws.onerror = () => addLogEntry('WebSocket error', true);
+}
+
+function disconnect() {
+  if (ws) ws.close();
+}
+
+// ---------------------------------------------------------------------------
+// Message routing
+// ---------------------------------------------------------------------------
+function handleMessage(msg) {
+  if (msg.type === 'live')    return handleLive(msg);
+  if (msg.type === 'status')  return handleStatus(msg);
+  if (msg.type === 'stats')   return handleStats(msg);
+  if (msg.type === 'history') return handleHistory(msg);
+  if (msg.type === 'error')   return addLogEntry('ERROR: ' + msg.message, true);
+}
+
+function handleLive(msg) {
+  liveMessages.unshift(msg);
+  if (liveMessages.length > MAX_LOG) liveMessages.length = MAX_LOG;
+  renderLiveLog();
+
+  const cnt = document.getElementById('liveCount');
+  const n = parseInt(cnt.dataset.n || 0) + 1;
+  cnt.dataset.n = n;
+  cnt.textContent = n + ' msgs';
+}
+
+function handleStatus(msg) {
+  setDot('natsConnDot', msg.nats_connected);
+  document.getElementById('natsConnLabel').textContent = 'NATS: ' + (msg.nats_connected ? 'connected' : 'disconnected');
+  setDot('s3ConnDot', msg.s3_connected);
+  document.getElementById('s3ConnLabel').textContent = 'S3: ' + (msg.s3_connected ? 'connected' : 'disconnected');
+  setDot('subConnDot', msg.subscribed);
+  document.getElementById('subConnLabel').textContent = 'Sub: ' + (msg.subscribed ? 'active' : 'off');
+  document.getElementById('statSubject').textContent = msg.subject || '—';
+}
+
+function handleStats(msg) {
+  document.getElementById('statLiveTotal').textContent  = fmt(msg.live_total);
+  document.getElementById('statLivePerSec').textContent = fmt(msg.live_per_sec);
+  document.getElementById('statQueriesRun').textContent = fmt(msg.queries_run);
+}
+
+function handleHistory(msg) {
+  const elapsed = msg.elapsed_ms != null ? msg.elapsed_ms.toFixed(1) + 'ms' : '';
+  document.getElementById('histStatus').textContent = '';
+  document.getElementById('historyMeta').textContent = msg.total + ' rows' + (elapsed ? ' · ' + elapsed : '');
+  document.getElementById('histTableMeta').innerHTML =
+    `<b>${msg.total}</b> rows returned${elapsed ? ' in <b>' + elapsed + '</b>' : ''}`;
+
+  const cols = msg.columns || [];
+  const rows = (msg.rows || []).slice(0, 50);
+
+  if (!cols.length) {
+    document.getElementById('histTableWrap').style.display = 'none';
+    return;
+  }
+
+  let html = '<thead><tr>' + cols.map(c => `<th>${escHtml(c)}</th>`).join('') + '</tr></thead><tbody>';
+  for (const row of rows) {
+    html += '<tr>' + row.map(v => `<td>${escHtml(v == null ? '' : String(v))}</td>`).join('') + '</tr>';
+  }
+  html += '</tbody>';
+  document.getElementById('histTable').innerHTML = html;
+  document.getElementById('histTableWrap').style.display = '';
+}
+
+// ---------------------------------------------------------------------------
+// Subscribe / Unsubscribe
+// ---------------------------------------------------------------------------
+function subscribe() {
+  if (!ws) return;
+  const subject = document.getElementById('subjectInput').value.trim() || 'batteries.>';
+  ws.send(JSON.stringify({ type: 'subscribe', subject }));
+  addLogSys('Sent subscribe: ' + subject);
+}
+
+function unsubscribe() {
+  if (!ws) return;
+  ws.send(JSON.stringify({ type: 'unsubscribe' }));
+  addLogSys('Sent unsubscribe');
+}
+
+// ---------------------------------------------------------------------------
+// History query
+// ---------------------------------------------------------------------------
+function runHistory() {
+  if (!ws) return;
+
+  const site   = document.getElementById('histSite').value.trim();
+  const limit  = parseInt(document.getElementById('histLimit').value) || 1000;
+  const fromEl = document.getElementById('histFrom').value;
+  const toEl   = document.getElementById('histTo').value;
+
+  const from_ts = fromEl ? new Date(fromEl).getTime() / 1000 : (Date.now() / 1000 - 3600);
+  const to_ts   = toEl   ? new Date(toEl).getTime()   / 1000 : Date.now() / 1000;
+
+  const msg = {
+    type:     'query_history',
+    query_id: 'q' + Date.now(),
+    from_ts,
+    to_ts,
+    limit,
+  };
+  if (site) msg.site_id = site;
+
+  ws.send(JSON.stringify(msg));
+  document.getElementById('histStatus').textContent = 'Running…';
+  document.getElementById('historyMeta').textContent = '';
+  document.getElementById('histTableWrap').style.display = 'none';
+  document.getElementById('histTableMeta').textContent = '';
+}
+
+// ---------------------------------------------------------------------------
+// Flux HTTP
+// ---------------------------------------------------------------------------
+async function sendFlux() {
+  const host  = document.getElementById('fluxHost').value.trim() || getHost('ds_host', 'phil-dev');
+  const port  = parseInt(document.getElementById('fluxPort').value) || 8768;
+  const flux  = document.getElementById('fluxQuery').value;
+  const out   = document.getElementById('csvOut');
+  const meta  = document.getElementById('fluxStatus');
+
+  out.textContent = '…waiting…';
+  meta.textContent = '';
+  const t0 = Date.now();
+
+  try {
+    const resp = await fetch(`http://${host}:${port}/api/v2/query`, {
+      method:  'POST',
+      body:    flux,
+      headers: { 'Content-Type': 'application/vnd.flux' },
+    });
+    const text = await resp.text();
+    const elapsed = Date.now() - t0;
+    out.textContent = text || '(empty response)';
+    const lines = text.split('\n').filter(l => l && !l.startsWith('#') && !l.startsWith(',result')).length;
+    meta.innerHTML = `HTTP <b>${resp.status}</b> · <b>${lines}</b> data rows · <b>${elapsed}ms</b>`;
+    document.getElementById('fluxMeta').textContent = resp.status + ' · ' + lines + ' rows';
+  } catch (e) {
+    out.textContent = 'Error: ' + e.message;
+    meta.innerHTML = '<span style="color:#fca5a5">Fetch failed: ' + escHtml(e.message) + '</span>';
+    document.getElementById('fluxMeta').textContent = 'error';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Log helpers
+// ---------------------------------------------------------------------------
+function renderLiveLog() {
+  const el = document.getElementById('jsonLog');
+  if (!liveMessages.length) {
+    el.innerHTML = '<span class="log-empty">No live messages yet.</span>';
+    return;
+  }
+  el.innerHTML = liveMessages.map(m =>
+    `<div class="log-entry">${escHtml(JSON.stringify(m, null, 2))}</div>`
+  ).join('');
+}
+
+function addLogEntry(text, isErr) {
+  const el = document.getElementById('jsonLog');
+  if (el.querySelector('.log-empty')) el.innerHTML = '';
+  const d = document.createElement('div');
+  d.className = 'log-entry' + (isErr ? ' err' : '');
+  d.textContent = text;
+  el.prepend(d);
+  // trim
+  while (el.children.length > MAX_LOG) el.removeChild(el.lastChild);
+}
+
+function addLogSys(text) {
+  const el = document.getElementById('jsonLog');
+  if (el.querySelector('.log-empty')) el.innerHTML = '';
+  const d = document.createElement('div');
+  d.className = 'log-entry sys';
+  d.textContent = '// ' + text;
+  el.prepend(d);
+  while (el.children.length > MAX_LOG) el.removeChild(el.lastChild);
+}
+
+// ---------------------------------------------------------------------------
+// Probe dots
+// ---------------------------------------------------------------------------
+function probePeriodically(host, dotId) {
+  probe(host, dotId);
+  setInterval(() => probe(host, dotId), 10000);
+}
+
+async function probe(host, dotId) {
+  const dot = document.getElementById(dotId);
+  if (!dot) return;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
+    await fetch(`http://${host}:8768/ping`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    dot.className = 'dot ok';
+  } catch {
+    dot.className = 'dot bad';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// UI helpers
+// ---------------------------------------------------------------------------
+function setPill(state, text) {
+  const el = document.getElementById('connPill');
+  el.textContent = text;
+  el.className = 'pill ' + (state === 'ok' ? 'ok' : state === 'loading' ? 'loading' : 'bad');
+}
+
+function setDot(id, ok) {
+  const el = document.getElementById(id);
+  if (el) el.className = 'dot ' + (ok ? 'ok' : 'bad');
+}
+
+function fmt(n) {
+  return n == null ? '—' : Number(n).toLocaleString();
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
