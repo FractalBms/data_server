@@ -109,12 +109,12 @@
   <div class="stack-bar">
     <button class="stack-btn" id="btnOld" onclick="selectStack('influxdb')">
       <span class="stack-dot" id="dotOld"></span>
-      orig_aws — InfluxDB2
+      Orig AWS · InfluxDB2 · AWS EC2
       <span style="font-size:10px;color:#475569">:8086</span>
     </button>
     <button class="stack-btn" id="btnNew" onclick="selectStack('subscriber')">
       <span class="stack-dot" id="dotNew"></span>
-      New NATS Stack — Subscriber API
+      NATS Stack · Subscriber API · AWS EC2
       <span style="font-size:10px;color:#475569">:8767</span>
     </button>
     <div style="margin-left:auto;font-size:12px;color:#64748b">
@@ -296,13 +296,13 @@ function selectStack(stack) {
   document.getElementById('influxFields').style.display    = stack === 'influxdb'   ? 'flex' : 'none';
   document.getElementById('subscriberFields').style.display = stack === 'subscriber' ? 'flex' : 'none';
   if (stack === 'influxdb') {
-    document.getElementById('headerTitle').textContent = 'Battery Monitor — orig_aws';
-    document.getElementById('headerSub').textContent   = 'FlashMQ → Telegraf → InfluxDB2';
+    document.getElementById('headerTitle').textContent = 'Battery Monitor — Orig AWS';
+    document.getElementById('headerSub').textContent   = 'Battery Sites → FlashMQ → Telegraf → InfluxDB2 (AWS EC2) · REST/Flux';
     document.getElementById('sbStack').textContent     = 'orig_aws';
     document.getElementById('sbSource').textContent    = 'InfluxDB2';
   } else {
-    document.getElementById('headerTitle').textContent = 'Battery Monitor — New NATS Stack';
-    document.getElementById('headerSub').textContent   = 'Mosquitto → NATS → Parquet/S3 → Subscriber API';
+    document.getElementById('headerTitle').textContent = 'Battery Monitor — NATS Stack';
+    document.getElementById('headerSub').textContent   = 'Battery Sites → FlashMQ → NATS → AWS S3 · Subscriber API (AWS EC2)';
     document.getElementById('sbStack').textContent     = 'NATS';
     document.getElementById('sbSource').textContent    = 'Sub API';
   }

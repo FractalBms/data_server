@@ -139,7 +139,7 @@ svg.arch { width: 100%; overflow: visible; display: block; }
       <span class="ws-dot" id="dot8760"></span>
       <span style="font-size:0.65rem;color:#8b949e" id="lbl8760">disconnected</span>
     </div>
-    <div class="col-sub">FlashMQ → Telegraf → InfluxDB2 &nbsp;·&nbsp; manager :8760</div>
+    <div class="col-sub">Battery Sites → FlashMQ → Telegraf → InfluxDB2 &nbsp;·&nbsp; all AWS EC2 &nbsp;·&nbsp; manager :8760</div>
     <svg class="arch" id="svg8760" viewBox="0 0 300 430"></svg>
     <div class="legend">
       <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>running</div>
@@ -157,8 +157,8 @@ svg.arch { width: 100%; overflow: visible; display: block; }
       <span class="ws-dot" id="dot8761"></span>
       <span style="font-size:0.65rem;color:#8b949e" id="lbl8761">disconnected</span>
     </div>
-    <div class="col-sub">Mosquitto → NATS → Parquet/S3 &nbsp;·&nbsp; manager :8761</div>
-    <svg class="arch" id="svg8761" viewBox="0 0 300 510"></svg>
+    <div class="col-sub">Battery Sites → FlashMQ → NATS → Parquet → AWS S3 &nbsp;·&nbsp; Subscriber API serves browser &nbsp;·&nbsp; manager :8761</div>
+    <svg class="arch" id="svg8761" viewBox="0 0 325 510"></svg>
     <div class="legend">
       <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>running</div>
       <div class="legend-item"><div class="legend-dot" style="background:#484f58"></div>stopped</div>
@@ -187,11 +187,11 @@ const GAP = 70;                      // vertical gap centre-to-centre
 // orig_aws: Generator at top (simulates IoT sites), then FlashMQ, Telegraf, InfluxDB2, Monitor
 const ORIG = {
   nodes: [
-    { id:'generator', label:'Data Generator',  sub:'Simulates IoT battery sites', port:'',      y:0,   kind:'managed' },
-    { id:'flashmq',   label:'FlashMQ',          sub:'MQTT Broker',                 port:':1883', y:75,  kind:'managed' },
-    { id:'telegraf',  label:'Telegraf',          sub:'MQTT → InfluxDB2',            port:'',      y:150, kind:'managed' },
-    { id:'influxdb',  label:'InfluxDB2',         sub:'Time-series DB',              port:':8086', y:225, kind:'managed' },
-    { id:'monitor',   label:'orig_aws.html',     sub:'Browser monitor',             port:'',      y:300, kind:'external'},
+    { id:'generator', label:'Battery Sites',    sub:'Remote IoT installations',       port:'',      y:0,   kind:'external' },
+    { id:'flashmq',   label:'FlashMQ',           sub:'MQTT Broker · AWS EC2',          port:':1883', y:75,  kind:'managed' },
+    { id:'telegraf',  label:'Telegraf',           sub:'MQTT subscriber · AWS EC2',      port:'',      y:150, kind:'managed' },
+    { id:'influxdb',  label:'InfluxDB2 + EFS',    sub:'Time-series · AWS EC2',          port:':8086', y:225, kind:'managed' },
+    { id:'monitor',   label:'orig_aws.html',      sub:'Browser · REST/Flux queries',    port:'',      y:300, kind:'external'},
   ],
   arrows: [
     { from:'generator', to:'flashmq',  label:'MQTT publish', flow:['generator','flashmq'] },
@@ -204,18 +204,18 @@ const ORIG = {
 // new NATS stack: Generator at top, then Mosquitto, NATS Bridge, NATS, Parquet Writer, MinIO
 // Side nodes: AWS Server and Subscriber API branch off MinIO/NATS
 const NATS_MAIN = [
-  { id:'generator',     label:'Data Generator',  sub:'Simulates IoT battery sites', port:':8765', y:0   },
-  { id:'mosquitto',     label:'Mosquitto',        sub:'MQTT Broker',                 port:':1884', y:75  },
-  { id:'nats_bridge',   label:'NATS Bridge',      sub:'MQTT → NATS',                 port:'',      y:150 },
-  { id:'nats',          label:'NATS JetStream',   sub:'Durable stream',              port:':4222', y:225 },
-  { id:'parquet_writer',label:'Parquet Writer',   sub:'ack-after-write to S3',       port:'',      y:300 },
-  { id:'minio',         label:'MinIO / S3',       sub:'Columnar Parquet store',      port:':9000', y:375 },
+  { id:'generator',     label:'Battery Sites',    sub:'Remote IoT installations',       port:'',      y:0   },
+  { id:'mosquitto',     label:'FlashMQ',           sub:'MQTT Broker · AWS EC2 (shared)', port:':1883', y:75  },
+  { id:'nats_bridge',   label:'NATS Bridge',       sub:'FlashMQ → NATS · AWS EC2',       port:'',      y:150 },
+  { id:'nats',          label:'NATS JetStream',    sub:'Durable stream · AWS EC2',       port:':4222', y:225 },
+  { id:'parquet_writer',label:'Parquet Writer',    sub:'ack-after-S3-write · AWS EC2',   port:'',      y:300 },
+  { id:'minio',         label:'AWS S3',            sub:'Parquet columnar store',         port:'',      y:375 },
 ];
 // Side nodes sit to the right, beside their related main node
 const NATS_SIDE = [
-  { id:'subscriber_api',label:'Subscriber API',   sub:'DuckDB + live stream',        port:':8767', mainY:225 },
-  { id:'monitor',       label:'monitor.html',     sub:'Battery Monitor',             port:'',      mainY:300, kind:'external' },
-  { id:'aws_server',    label:'AWS Store',        sub:'Parquet browser',             port:':8766', mainY:375 },
+  { id:'subscriber_api',label:'Subscriber API',  sub:'NATS live + DuckDB/S3 history', port:':8767', mainY:225 },
+  { id:'monitor',       label:'monitor.html',    sub:'Browser · WebSocket',           port:'',      mainY:300, kind:'external' },
+  { id:'aws_server',    label:'AWS Store',       sub:'Parquet browser · AWS EC2',     port:':8766', mainY:375 },
 ];
 const NATS_ARROWS_MAIN = [
   { id:'gen-mosq',    y1:NH,  y2:75,  label:'MQTT',    flow:['generator','mosquitto'] },
@@ -313,30 +313,34 @@ function buildOrig(svg) {
 
 function buildNats(svg, status) {
   svg.innerHTML = '';
-  const W = 300, MX = 10, MW = 168, SX = 190, SW = 108;
+  const W = 325, MX = 10, MW = 168, SX = 190, SW = 108;
   const cy = y => y + NH / 2;
 
   // main chain arrows
   NATS_ARROWS_MAIN.forEach(a => {
     drawArrow(svg, a.id, MX + MW/2, a.y1, MX + MW/2, a.y2, a.label);
   });
-  // side branch arrows (horizontal, from main right edge)
+  // side branch arrows (horizontal, from main right edge to side column)
   NATS_ARROWS_SIDE.forEach(a => {
     drawArrow(svg, a.id,
       MX + MW, cy(a.mainY),
       SX,      cy(a.mainY),
       a.label);
   });
-  // vertical arrow: subscriber_api → monitor.html
+  // vertical arrow: subscriber_api → monitor.html (WebSocket)
   const subN = NATS_SIDE.find(n => n.id === 'subscriber_api');
   const monN = NATS_SIDE.find(n => n.id === 'monitor');
   if (subN && monN)
     drawArrow(svg, 'sub-monitor', SX + SW/2, subN.mainY + NH, SX + SW/2, monN.mainY, 'WS');
+  // DuckDB history arrow: AWS S3 → Subscriber API (right side of diagram)
+  const s3N = NATS_MAIN.find(n => n.id === 'minio');
+  if (s3N && subN)
+    drawArrow(svg, 's3-duckdb', SX + SW + 10, s3N.y + NH/2, SX + SW + 10, subN.mainY + NH/2, 'DuckDB');
 
-  // main nodes
+  // main nodes (generator is external — battery sites, not managed)
   NATS_MAIN.forEach(n => {
-    drawNode(svg, n.id, n.label, n.sub, n.port, MX, n.y, MW, NH, 'managed',
-      status[n.id]);
+    const kind = n.id === 'generator' ? 'external' : 'managed';
+    drawNode(svg, n.id, n.label, n.sub, n.port, MX, n.y, MW, NH, kind, status[n.id]);
   });
   // side nodes (aligned to their mainY)
   NATS_SIDE.forEach(n => {
