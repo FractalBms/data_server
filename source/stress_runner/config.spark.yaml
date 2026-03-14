@@ -1,0 +1,40 @@
+# Stress runner — spark-22b6 24/7 load test
+# Adjust project/site/cell counts to target desired MQTT message rate.
+
+mqtt:
+  host: localhost
+  port: 1883
+  client_id: stress-runner
+  username: ""
+  password: ""
+
+websocket:
+  host: 0.0.0.0
+  port: 8769
+
+topic_prefix: batteries
+sample_interval_seconds: 1
+
+# Cell measurements (same ranges as generator)
+cell_data:
+  voltage:           {min: 3.0,   max: 4.2,  unit: V,       nominal: 3.7}
+  current:           {min: -50.0, max: 50.0,  unit: A,       nominal: 0.0}
+  temperature:       {min: 20.0,  max: 45.0,  unit: C,       nominal: 25.0}
+  soc:               {min: 0.0,   max: 100.0, unit: percent,  nominal: 80.0}
+  internal_resistance: {min: 0.001, max: 0.05, unit: ohm,    nominal: 0.01}
+
+projects:
+  - project_id: 0
+    sites:
+      - site_id: 0
+        racks: 4
+        modules_per_rack: 8
+        cells_per_module: 12
+      - site_id: 1
+        racks: 4
+        modules_per_rack: 8
+        cells_per_module: 12
+      - site_id: 2
+        racks: 4
+        modules_per_rack: 8
+        cells_per_module: 12
