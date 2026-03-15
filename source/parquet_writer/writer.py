@@ -94,12 +94,23 @@ def _flatten(row: dict) -> dict:
     return out
 
 
+_PA_INT   = pa.int64()
+_PA_FLOAT = pa.float64()
+
 def rows_to_parquet(rows: list[dict], compression: str) -> bytes:
     flat = [_flatten(r) for r in rows]
     all_keys = list({k for r in flat for k in r})
-    cols = {k: [r.get(k) for r in flat] for k in all_keys}
+    arrays = {}
+    for k in all_keys:
+        vals = [r.get(k) for r in flat]
+        if k in _INT_COLS:
+            arrays[k] = pa.array(vals, type=_PA_INT)
+        elif k in _FLOAT_COLS:
+            arrays[k] = pa.array(vals, type=_PA_FLOAT)
+        else:
+            arrays[k] = pa.array(vals)
     buf = BytesIO()
-    pq.write_table(pa.table(cols), buf, compression=compression)
+    pq.write_table(pa.table(arrays), buf, compression=compression)
     return buf.getvalue()
 
 
