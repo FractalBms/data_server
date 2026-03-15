@@ -3,6 +3,7 @@
 
 # MQTT
 aiomqtt>=2.0.0
+paho-mqtt>=1.6.0
 
 # NATS JetStream
 nats-py>=2.6.0
