@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AWS Cost Reduction — Team Kickoff</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #0d1117;
+  color: #e6edf3;
+  padding: 40px 32px;
+  max-width: 1100px;
+  margin: auto;
+  line-height: 1.65;
+}
+
+h1   { color: #58a6ff; font-size: 1.8em; margin-bottom: 6px; }
+h2   { color: #79c0ff; font-size: 1.1em; margin: 40px 0 14px;
+       border-bottom: 1px solid #30363d; padding-bottom: 8px; }
+h3   { color: #d2a679; font-size: 0.95em; margin: 0 0 8px; }
+p    { color: #c9d1d9; font-size: 0.88em; margin-bottom: 10px; }
+code { color: #f39c12; background: #161b22; padding: 1px 6px; border-radius: 3px; font-size: 0.85em; }
+ul   { margin: 6px 0 0 18px; color: #8b949e; font-size: 0.85em; }
+ul li { margin-bottom: 4px; }
+strong { color: #e6edf3; }
+
+.subtitle { color: #8b949e; font-size: 0.90em; margin-bottom: 40px; }
+
+/* ── Cost banner ── */
+.cost-banner {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: #30363d;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 36px;
+}
+.cost-cell {
+  background: #161b22;
+  padding: 18px 20px;
+  text-align: center;
+}
+.cost-cell .lbl { font-size: 0.75em; color: #8b949e; text-transform: uppercase; letter-spacing: 0.06em; }
+.cost-cell .amt { font-size: 1.9em; font-weight: 800; margin: 6px 0 4px; }
+.cost-cell .sub { font-size: 0.75em; color: #8b949e; }
+.cost-cell.old  .amt { color: #f85149; }
+.cost-cell.new  .amt { color: #3fb950; }
+.cost-cell.save .amt { color: #e3b341; }
+.cost-cell.ann  .amt { color: #a371f7; }
+
+/* ── Two column grid ── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+@media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+
+/* ── Cards ── */
+.card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 20px 22px;
+}
+.card.problem { border-color: #6e2020; }
+.card.solution { border-color: #1e4a6e; }
+.card.warning { border-color: #5a4000; background: #161100; }
+
+/* ── Line item table ── */
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84em;
+  margin-top: 8px;
+}
+.cost-table th {
+  padding: 7px 12px;
+  text-align: left;
+  background: #0d1117;
+  color: #8b949e;
+  font-weight: normal;
+  border-bottom: 1px solid #30363d;
+}
+.cost-table th:not(:first-child) { text-align: right; }
+.cost-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #21262d;
+  color: #c9d1d9;
+}
+.cost-table td:not(:first-child) { text-align: right; font-family: monospace; }
+.cost-table tr:last-child td { border-bottom: none; font-weight: 700; border-top: 1px solid #30363d; }
+.old  { color: #f85149; }
+.new  { color: #3fb950; }
+.save { color: #e3b341; }
+.elim { color: #3fb950; font-size: 0.8em; letter-spacing: 0.04em; }
+.row-dim td { color: #484f58; }
+
+/* ── Task cards ── */
+.task-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
+@media (max-width: 800px) { .task-grid { grid-template-columns: 1fr; } }
+
+.task-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.task-card .task-num {
+  font-size: 0.72em;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.task-card .task-title {
+  font-size: 1.05em;
+  font-weight: 700;
+  color: #58a6ff;
+}
+.task-card .task-owner {
+  font-size: 0.78em;
+  color: #8b949e;
+  border-top: 1px solid #21262d;
+  padding-top: 8px;
+  margin-top: auto;
+}
+.task-card .task-owner span {
+  color: #e3b341;
+  font-weight: 600;
+}
+.task-card .deliverable {
+  font-size: 0.78em;
+  color: #56d364;
+  background: #0d1a0d;
+  border: 1px solid #1a3a1a;
+  border-radius: 4px;
+  padding: 6px 10px;
+}
+.task-card .deliverable::before { content: "Deliverable: "; color: #8b949e; }
+
+.task-card.t1 { border-color: #1e4a6e; }
+.task-card.t2 { border-color: #2a3d1e; }
+.task-card.t3 { border-color: #3d2a1e; }
+.task-card.t4 { border-color: #3d1e3d; }
+
+/* ── Phase rollout ── */
+.phase-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
+@media (max-width: 700px) { .phase-grid { grid-template-columns: 1fr; } }
+
+.phase-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 18px 20px;
+}
+.phase-card .phase-label {
+  font-size: 0.72em;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.phase-card .phase-title { font-size: 1.05em; font-weight: 700; margin-bottom: 10px; }
+.phase-card.committed { border-color: #1e4a6e; }
+.phase-card.committed .phase-title { color: #58a6ff; }
+.phase-card.expected  { border-color: #2a3d1e; }
+.phase-card.expected  .phase-title { color: #56d364; }
+.phase-card.stretch   { border-color: #5a4000; }
+.phase-card.stretch   .phase-title { color: #e3b341; }
+
+.phase-saving {
+  font-size: 1.4em;
+  font-weight: 800;
+  margin: 10px 0 4px;
+}
+.phase-card.committed .phase-saving { color: #58a6ff; }
+.phase-card.expected  .phase-saving { color: #56d364; }
+.phase-card.stretch   .phase-saving { color: #e3b341; }
+
+/* ── Principle list ── */
+.principle {
+  display: flex;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid #21262d;
+  align-items: flex-start;
+}
+.principle:last-child { border-bottom: none; }
+.principle .icon { font-size: 1.3em; flex-shrink: 0; margin-top: 2px; }
+.principle .text { font-size: 0.86em; color: #c9d1d9; }
+.principle .text strong { color: #e6edf3; }
+
+/* ── Agenda ── */
+.agenda-row {
+  display: flex;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid #21262d;
+  align-items: baseline;
+  font-size: 0.86em;
+}
+.agenda-row:last-child { border-bottom: none; }
+.agenda-time { color: #8b949e; width: 70px; flex-shrink: 0; font-family: monospace; }
+.agenda-item { color: #c9d1d9; flex: 1; }
+.agenda-item strong { color: #58a6ff; }
+.agenda-who { color: #8b949e; font-size: 0.82em; width: 120px; text-align: right; flex-shrink: 0; }
+
+/* ── Footer ── */
+.footer {
+  margin-top: 48px;
+  padding-top: 18px;
+  border-top: 1px solid #30363d;
+  font-size: 0.78em;
+  color: #484f58;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+</style>
+</head>
+<body>
+
+<h1>AWS Cost Reduction — Architecture Proposal</h1>
+<p class="subtitle">
+  Team Kickoff &nbsp;·&nbsp; March 2026 &nbsp;·&nbsp;
+  Confidential — internal working document
+</p>
+
+<!-- ── Cost Banner ── -->
+<div class="cost-banner">
+  <div class="cost-cell old">
+    <div class="lbl">Current Monthly Bill</div>
+    <div class="amt">$76,200</div>
+    <div class="sub">pre-discount, growing</div>
+  </div>
+  <div class="cost-cell new">
+    <div class="lbl">Phase 1 Target</div>
+    <div class="amt">~$54k</div>
+    <div class="sub">committed — pilot sites</div>
+  </div>
+  <div class="cost-cell save">
+    <div class="lbl">Phase 1 Saving</div>
+    <div class="amt">~$22k/mo</div>
+    <div class="sub">29% reduction</div>
+  </div>
+  <div class="cost-cell ann">
+    <div class="lbl">Annual if rolled out</div>
+    <div class="amt">&gt;$800k</div>
+    <div class="sub">stretch goal</div>
+  </div>
+</div>
+
+<!-- ── Problem Framing ── -->
+<h2>1. The Problem</h2>
+<div class="two-col">
+  <div class="card problem">
+    <h3>What we know</h3>
+    <ul>
+      <li>80+ sites — batteries, solar, wind, grid</li>
+      <li>~100,000 data points per site</li>
+      <li>MQTT <strong>topic-per-measurement</strong> — one message per sensor value</li>
+      <li>All telemetry flows into AWS: IoT Core → Lambda → InfluxDB2 on EC2+EFS</li>
+      <li>$76,200/month and <strong>growing with every new site</strong></li>
+      <li>Cannot sell or acquire the company at this run rate</li>
+    </ul>
+  </div>
+  <div class="card problem">
+    <h3>Why the bill is this shape</h3>
+    <ul>
+      <li><strong>EC2 $36k</strong> — large instances needed to handle InfluxDB2 write throughput at this cardinality</li>
+      <li><strong>EFS $10k</strong> — InfluxDB2 requires fast network-attached storage</li>
+      <li><strong>IoT Core $3k</strong> — per-message pricing at high volume</li>
+      <li><strong>Lambda $2k</strong> — routing layer between IoT and InfluxDB2</li>
+      <li>The architecture is not wrong — it is the <strong>wrong architecture for this problem</strong></li>
+    </ul>
+  </div>
+</div>
+
+<div class="card warning" style="margin-bottom:16px">
+  <h3>What the team has already achieved</h3>
+  <p style="margin-top:8px">
+    EC2, EFS, S3, and data transfer have all been reviewed and optimised — that work is real and
+    the bill would be higher without it. The remaining $7.6k in CloudWatch, IoT, and Lambda are
+    also worth addressing. The proposal here is <strong>not a criticism of that work</strong> — it
+    is a different question: what if we changed the underlying architecture rather than continuing
+    to optimise the current one?
+  </p>
+</div>
+
+<!-- ── Cost Breakdown ── -->
+<h2>2. Where the Money Goes — and Where It Goes With the New Stack</h2>
+
+<table class="cost-table">
+  <thead>
+    <tr>
+      <th>AWS Service</th>
+      <th>Current/mo</th>
+      <th>New Stack/mo</th>
+      <th>Saving</th>
+      <th>How</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>EC2 — Compute</td>
+      <td class="old">$36,000</td>
+      <td class="new">~$1,500</td>
+      <td class="save">~$34,500</td>
+      <td>Replace InfluxDB2 cluster with 2–4 small instances running NATS + Parquet writer</td>
+    </tr>
+    <tr>
+      <td>EFS — Storage</td>
+      <td class="old">$10,000</td>
+      <td class="new"><span class="elim">ELIMINATED</span></td>
+      <td class="save">$10,000</td>
+      <td>Parquet files on S3 replace InfluxDB2 file storage entirely</td>
+    </tr>
+    <tr>
+      <td>IoT Core</td>
+      <td class="old">$3,000</td>
+      <td class="new"><span class="elim">ELIMINATED</span></td>
+      <td class="save">$3,000</td>
+      <td>NATS bridge replaces AWS IoT — no per-message AWS charges</td>
+    </tr>
+    <tr>
+      <td>Lambda</td>
+      <td class="old">$2,000</td>
+      <td class="new"><span class="elim">ELIMINATED</span></td>
+      <td class="save">$2,000</td>
+      <td>No routing layer needed — NATS JetStream handles message delivery directly</td>
+    </tr>
+    <tr>
+      <td>CloudWatch</td>
+      <td class="old">$2,600</td>
+      <td class="new">~$10</td>
+      <td class="save">~$2,590</td>
+      <td>No custom metric cardinality — basic EC2 metrics only</td>
+    </tr>
+    <tr>
+      <td>S3 — Storage</td>
+      <td class="old">$3,000</td>
+      <td class="new">~$3,500</td>
+      <td class="save" style="color:#f39c12">–$500</td>
+      <td>Slight increase — Parquet is primary store, but 5:1 compression keeps cost low</td>
+    </tr>
+    <tr>
+      <td>Data Transfer</td>
+      <td class="old">$3,600</td>
+      <td class="new">~$1,000</td>
+      <td class="save">~$2,600</td>
+      <td>Batched Parquet writes vs. continuous real-time streaming to AWS</td>
+    </tr>
+    <tr>
+      <td><strong>TOTAL</strong></td>
+      <td class="old"><strong>$76,200</strong></td>
+      <td class="new"><strong>~$6,500</strong></td>
+      <td class="save"><strong>~$69,700</strong></td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ── The New Architecture ── -->
+<h2>3. The New Architecture</h2>
+<div class="two-col">
+  <div class="card solution">
+    <h3>Core pipeline</h3>
+    <ul>
+      <li>Site MQTT broker (FlashMQ) — unchanged, already running</li>
+      <li><strong>NATS Bridge</strong> — subscribes to MQTT, publishes to NATS JetStream</li>
+      <li><strong>NATS JetStream</strong> — durable, replayable message store (replaces IoT + Lambda)</li>
+      <li><strong>Parquet Writer</strong> — batches messages, writes columnar files to S3</li>
+      <li><strong>Subscriber API</strong> — serves live stream and historical queries from S3</li>
+    </ul>
+  </div>
+  <div class="card solution">
+    <h3>Why this works at scale</h3>
+    <ul>
+      <li>NATS handles <strong>millions of messages/sec</strong> on a single t3.medium</li>
+      <li>Parquet columnar format gives <strong>5–10× storage compression</strong> vs InfluxDB2</li>
+      <li>DuckDB queries Parquet on S3 directly — no database server needed for history</li>
+      <li>Self-hosted — no per-message AWS charges anywhere in the pipeline</li>
+      <li>Working proof-of-concept running on spark-22b6 right now</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ── Rollout Strategy ── -->
+<h2>4. Rollout Strategy — Phase by Phase</h2>
+<p>The full rollout is the destination. We get there in stages, each one proving the next.</p>
+
+<div class="phase-grid">
+  <div class="phase-card committed">
+    <div class="phase-label">Phase 1 — Committed</div>
+    <div class="phase-title">Pilot: 3–4 Troubled Sites</div>
+    <div class="phase-saving">~$22k/mo saved</div>
+    <ul>
+      <li>Sites already struggling with the current solution</li>
+      <li>"Can only get better" risk profile</li>
+      <li>1 week intensive testing on spark-22b6 first</li>
+      <li>Proves the model on real data before wider rollout</li>
+      <li>Target: live within 30 days</li>
+    </ul>
+  </div>
+  <div class="phase-card expected">
+    <div class="phase-label">Phase 2 — Expected</div>
+    <div class="phase-title">Next 20–30 Sites</div>
+    <div class="phase-saving">+~$25k/mo</div>
+    <ul>
+      <li>Use Phase 1 deployment template</li>
+      <li>Team can execute independently</li>
+      <li>Rollout risk is low — proven stack</li>
+      <li>Target: 60–90 days after Phase 1</li>
+    </ul>
+  </div>
+  <div class="phase-card stretch">
+    <div class="phase-label">Phase 3 — Stretch Goal</div>
+    <div class="phase-title">Full Fleet Rollout</div>
+    <div class="phase-saving">Full reduction</div>
+    <ul>
+      <li>All 80+ sites on new stack</li>
+      <li>AWS bill restructured entirely</li>
+      <li>Architecture becomes a product in its own right</li>
+      <li>Every competitor in the industry has this problem</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ── Immediate Tasks ── -->
+<h2>5. Immediate Tasks — This Week</h2>
+<p>Four parallel workstreams. Each has a working template to build from.</p>
+
+<div class="task-grid">
+
+  <div class="task-card t1">
+    <div class="task-num">Task 1</div>
+    <div class="task-title">Data Generator</div>
+    <p>Build a realistic multi-source data generator covering all four asset types the system
+       will encounter in production.</p>
+    <ul>
+      <li><strong>Batteries</strong> — cell voltage, temperature, SoC, SoH per cell</li>
+      <li><strong>Solar</strong> — panel voltage, current, irradiance (ramp with time of day)</li>
+      <li><strong>Wind</strong> — output power, RPM, wind speed (stochastic)</li>
+      <li><strong>Grid</strong> — import/export, frequency, voltage</li>
+      <li>Configurable: site count, cell count, publish interval</li>
+      <li>Must produce realistic patterns, not random noise</li>
+    </ul>
+    <div class="deliverable">Configurable generator that can simulate any site's data profile</div>
+    <div class="task-owner">Template: <code>generator/</code> package &nbsp;·&nbsp; Owner: <span>TBD</span></div>
+  </div>
+
+  <div class="task-card t2">
+    <div class="task-num">Task 2</div>
+    <div class="task-title">Stress Simulator</div>
+    <p>Define and run a stress test that proves the stack is production-ready before Phase 1
+       deployment. "Proven" must be defined clearly — not a feeling.</p>
+    <ul>
+      <li>Sustained load: full site equivalent for 24–48 hours minimum</li>
+      <li>Pass criteria: message throughput, end-to-end latency, Parquet write rate</li>
+      <li>Failure modes: what does the stack do when NATS restarts? When S3 is slow?</li>
+      <li>Report format suitable for showing the owner and team</li>
+    </ul>
+    <div class="deliverable">Test plan + pass/fail report from spark-22b6 run</div>
+    <div class="task-owner">Template: <code>stress_runner/</code> package &nbsp;·&nbsp; Owner: <span>TBD</span></div>
+  </div>
+
+  <div class="task-card t3">
+    <div class="task-num">Task 3</div>
+    <div class="task-title">Query &amp; Viewer Requirements</div>
+    <p>Define what data consumers actually need — this varies by site type. Do not assume
+       all sites have the same query patterns.</p>
+    <ul>
+      <li><strong>Real-time</strong>: which subjects, what latency is acceptable</li>
+      <li><strong>History</strong>: time ranges, aggregations, common queries</li>
+      <li><strong>Viewers</strong>: different dashboards per asset type (battery vs. solar vs. grid)</li>
+      <li>Map to Subscriber API surface: WebSocket :8767 and Flux HTTP :8768</li>
+    </ul>
+    <div class="deliverable">Query requirements doc + viewer spec per site type</div>
+    <div class="task-owner">Template: <code>monitor.html</code>, <code>subscriber.html</code> &nbsp;·&nbsp; Owner: <span>TBD</span></div>
+  </div>
+
+  <div class="task-card t4">
+    <div class="task-num">Task 4</div>
+    <div class="task-title">Phase 1 Site Identification</div>
+    <p>Identify the 3–4 Phase 1 candidate sites and define how their data enters the new stack.
+       This is the critical path for the first deployment.</p>
+    <ul>
+      <li>Identify sites currently having problems with the existing solution</li>
+      <li>Document each site: asset types, MQTT topics, message frequency, payload format</li>
+      <li>Define the MQTT bridge config needed to feed each site into NATS</li>
+      <li>Identify any data model differences between sites</li>
+      <li>Flag any site-specific constraints (connectivity, hardware, compliance)</li>
+    </ul>
+    <div class="deliverable">Site profiles (4×) + MQTT bridge config per site</div>
+    <div class="task-owner">Needs: access to site configs &nbsp;·&nbsp; Owner: <span>TBD</span></div>
+  </div>
+
+</div>
+
+<!-- ── Test Platform ── -->
+<h2>6. Test Platform</h2>
+<div class="two-col">
+  <div class="card">
+    <h3>spark-22b6 — current state</h3>
+    <ul>
+      <li>Full NATS stack running 24/7</li>
+      <li>Stress runner active — continuous load test</li>
+      <li>MinIO S3-compatible storage</li>
+      <li>Process manager WebSocket :8762</li>
+      <li>All pipeline components: FlashMQ, NATS, bridge, writer, subscriber API</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>What "proven" means before Phase 1</h3>
+    <ul>
+      <li>Sustained throughput matching target site load for <strong>48 hours</strong></li>
+      <li>End-to-end latency: MQTT publish → Parquet landed in S3 &lt; 30s</li>
+      <li>Zero message loss under normal load</li>
+      <li>Graceful recovery: NATS restart, S3 slowdown, network blip</li>
+      <li>Query response time: 30-day history scan &lt; 5 seconds</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ── Guiding Principles ── -->
+<h2>7. How We Work</h2>
+<div class="card">
+  <div class="principle">
+    <div class="icon">&#9679;</div>
+    <div class="text"><strong>Prove it, then roll it.</strong> Nothing goes to a production site
+    until it has passed the defined test criteria on spark-22b6. No exceptions.</div>
+  </div>
+  <div class="principle">
+    <div class="icon">&#9679;</div>
+    <div class="text"><strong>Troubled sites first.</strong> Phase 1 targets sites where the
+    current solution is already struggling. The risk of change is lower than the risk of staying.</div>
+  </div>
+  <div class="principle">
+    <div class="icon">&#9679;</div>
+    <div class="text"><strong>Templates over one-offs.</strong> Everything built this week is a
+    template the team can replicate at each subsequent site. No bespoke deployments.</div>
+  </div>
+  <div class="principle">
+    <div class="icon">&#9679;</div>
+    <div class="text"><strong>Existing work is not thrown away.</strong> FlashMQ stays.
+    MQTT topics stay. The generator, the orig_aws stack, the CloudWatch work — all of it
+    is an asset, not a liability. We are adding a better data path, not dismantling the existing one.</div>
+  </div>
+  <div class="principle">
+    <div class="icon">&#9679;</div>
+    <div class="text"><strong>The architecture is the product.</strong> Every competitor in
+    this industry has the same AWS cost problem. A proven, deployable solution to this problem
+    is a commercial asset — for acquisition conversations, for licensing, for the company's
+    position in the market.</div>
+  </div>
+</div>
+
+<!-- ── Meeting Agenda ── -->
+<h2>8. Tuesday Agenda</h2>
+<div class="card">
+  <div class="agenda-row">
+    <div class="agenda-time">0:00</div>
+    <div class="agenda-item"><strong>Problem framing</strong> — the bill, why it's shaped this way, why incremental optimisation has a ceiling</div>
+    <div class="agenda-who">10 min</div>
+  </div>
+  <div class="agenda-row">
+    <div class="agenda-time">0:10</div>
+    <div class="agenda-item"><strong>Live demo</strong> — spark-22b6 running the full NATS stack, data flowing, Parquet landing in S3, query API responding</div>
+    <div class="agenda-who">15 min</div>
+  </div>
+  <div class="agenda-row">
+    <div class="agenda-time">0:25</div>
+    <div class="agenda-item"><strong>Cost model walkthrough</strong> — costs.html interactive estimator, line-by-line old vs. new</div>
+    <div class="agenda-who">10 min</div>
+  </div>
+  <div class="agenda-row">
+    <div class="agenda-time">0:35</div>
+    <div class="agenda-item"><strong>Rollout strategy</strong> — Phase 1 troubled sites, what "proven" means, the path to full fleet</div>
+    <div class="agenda-who">10 min</div>
+  </div>
+  <div class="agenda-row">
+    <div class="agenda-time">0:45</div>
+    <div class="agenda-item"><strong>Task assignments</strong> — Generator, Simulator, Query/Viewer, Site Identification. Owners, templates, deliverables</div>
+    <div class="agenda-who">15 min</div>
+  </div>
+  <div class="agenda-row">
+    <div class="agenda-time">1:00</div>
+    <div class="agenda-item"><strong>Q&amp;A and objections</strong> — open discussion</div>
+    <div class="agenda-who">20 min</div>
+  </div>
+</div>
+
+<div class="footer">
+  <span>Battery Data Server · AWS Cost Reduction · March 2026</span>
+  <span>Working proof-of-concept: spark-22b6 :8762</span>
+</div>
+
+</body>
+</html>
