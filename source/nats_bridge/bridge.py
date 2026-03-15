@@ -23,6 +23,7 @@ import yaml
 
 import aiomqtt
 import nats
+from datetime import timedelta
 from nats.js.api import RetentionPolicy, StorageType, StreamConfig
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -41,14 +42,13 @@ async def ensure_stream(js, cfg: dict) -> None:
     max_age_hours = int(cfg["nats"].get("max_age_hours", 48))
 
     max_bytes = int(cfg["nats"].get("max_bytes", 8 * 1024 ** 3))  # default 8 GB
-    max_age_ns = max_age_hours * 3600 * 1_000_000_000
 
     stream_cfg = StreamConfig(
         name      = stream_name,
         subjects  = subjects,
         storage   = StorageType.FILE,
         retention = RetentionPolicy.LIMITS,
-        max_age   = max_age_ns,
+        max_age   = timedelta(hours=max_age_hours),
         max_bytes = max_bytes,
     )
     try:
