@@ -40,16 +40,25 @@ async def ensure_stream(js, cfg: dict) -> None:
     subjects    = cfg["nats"]["stream_subjects"]
     max_age_hours = int(cfg["nats"].get("max_age_hours", 48))
 
+    max_bytes = int(cfg["nats"].get("max_bytes", 8 * 1024 ** 3))  # default 8 GB
+    max_age_ns = max_age_hours * 3600 * 1_000_000_000
+
+    stream_cfg = StreamConfig(
+        name      = stream_name,
+        subjects  = subjects,
+        storage   = StorageType.FILE,
+        retention = RetentionPolicy.LIMITS,
+        max_age   = max_age_ns,
+        max_bytes = max_bytes,
+    )
     try:
         await js.stream_info(stream_name)
-        log.info("Stream %s already exists", stream_name)
+        # Update existing stream limits in case config changed
+        await js.update_stream(stream_cfg)
+        log.info("Stream %s updated (max_age=%dh max_bytes=%dGB)",
+                 stream_name, max_age_hours, max_bytes // 1024 ** 3)
     except nats.js.errors.NotFoundError:
-        await js.add_stream(StreamConfig(
-            name      = stream_name,
-            subjects  = subjects,
-            storage   = StorageType.FILE,
-            retention = RetentionPolicy.LIMITS,
-        ))
+        await js.add_stream(stream_cfg)
         log.info("Created stream %s  subjects=%s", stream_name, subjects)
 
 
