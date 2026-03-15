@@ -116,20 +116,19 @@ def check_s3(cfg: dict) -> bool:
 def run_history_query(cfg: dict, proj_id: str, site_id: str, from_ts: float, to_ts: float, limit: int) -> dict:
     bucket = cfg["s3"]["bucket"]
     prefix = cfg["s3"].get("prefix", "").strip("/")
-    # Always glob all parquet files — hive_partitioning detects key=value dirs
-    # and maps them to columns; proj_id / site_id filters applied via SQL WHERE.
-    path = f"s3://{bucket}/{prefix + '/' if prefix else ''}**/*.parquet"
+    base = f"s3://{bucket}/{prefix + '/' if prefix else ''}"
+    # Glob only project=* directories so hive_partitioning sees a consistent
+    # key=value schema and can prune partitions. Old site=N/ files are skipped.
+    path = f"{base}project=*/**/*.parquet"
 
     where = [f"timestamp >= {from_ts}", f"timestamp <= {to_ts}"]
     if proj_id:
-        # Filter on the payload column (always present) not the hive partition key
-        # (hive 'project' column disappears when any file lacks a project= path segment)
-        where.append(f"CAST(project_id AS VARCHAR) = '{proj_id}'")
+        where.append(f"CAST(project AS VARCHAR) = '{proj_id}'")
     if site_id:
         where.append(f"CAST(site_id AS VARCHAR) = '{site_id}'")
     sql = f"""
         SELECT *
-        FROM read_parquet('{path}', hive_partitioning=false, union_by_name=true)
+        FROM read_parquet('{path}', hive_partitioning=true, union_by_name=true)
         WHERE {' AND '.join(where)}
         ORDER BY timestamp DESC
         LIMIT {limit}
