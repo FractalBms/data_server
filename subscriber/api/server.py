@@ -122,9 +122,11 @@ def run_history_query(cfg: dict, proj_id: str, site_id: str, from_ts: float, to_
 
     where = [f"timestamp >= {from_ts}", f"timestamp <= {to_ts}"]
     if proj_id:
-        where.append(f"CAST(project AS VARCHAR) = '{proj_id}'")
+        # Filter on the payload column (always present) not the hive partition key
+        # (hive 'project' column disappears when any file lacks a project= path segment)
+        where.append(f"CAST(project_id AS VARCHAR) = '{proj_id}'")
     if site_id:
-        where.append(f"CAST(site AS VARCHAR) = '{site_id}'")
+        where.append(f"CAST(site_id AS VARCHAR) = '{site_id}'")
     sql = f"""
         SELECT *
         FROM read_parquet('{path}', hive_partitioning=true, union_by_name=true)
