@@ -66,14 +66,31 @@ def ensure_bucket(s3, bucket: str) -> None:
             raise
 
 
+_INT_COLS  = {"project_id", "site_id", "rack_id", "module_id", "cell_id"}
+_FLOAT_COLS = {"timestamp", "voltage", "current", "temperature", "soc", "soh",
+               "internal_resistance", "resistance", "capacity", "power"}
+
+
 def _flatten(row: dict) -> dict:
-    """Flatten generator's {value, unit} measurement objects to plain floats."""
+    """Flatten {value, unit} measurement objects and normalise column types."""
     out = {}
     for k, v in row.items():
         if isinstance(v, dict) and "value" in v:
-            out[k] = v["value"]
-        else:
-            out[k] = v
+            v = v["value"]
+        if k in _INT_COLS:
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                v = None
+        elif k in _FLOAT_COLS:
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                v = None
+        out[k] = v
+    # Ensure project_id always present so rows from different generators mix cleanly
+    if "project_id" not in out:
+        out["project_id"] = 0
     return out
 
 
