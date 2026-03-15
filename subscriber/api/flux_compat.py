@@ -23,14 +23,22 @@ Also serves:
 """
 
 import asyncio
+import json as _json
 import logging
 import re
 import time
+import urllib.request
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
 FIELD_COLS = ["voltage", "temperature", "soc", "current", "internal_resistance"]
+
+# Shared state injected by server.py for /diag
+_server_state: dict = {}
+
+def update_server_state(d: dict) -> None:
+    _server_state.update(d)
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +213,87 @@ def run_flux_query(flux: str, cfg: dict, duckdb_conn) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Diagnostic helpers (sync — run in executor)
+# ---------------------------------------------------------------------------
+
+def _nats_diag(mon_url: str) -> dict:
+    """Fetch NATS JetStream info from the monitoring port. Sync — run in executor."""
+    out: dict = {}
+    try:
+        url = mon_url.rstrip("/") + "/jsz?streams=true&consumers=true&config=true&state=true"
+        with urllib.request.urlopen(url, timeout=3) as resp:
+            data = _json.loads(resp.read())
+        streams = data.get("streams") or []
+        if streams:
+            s = streams[0]
+            state  = s.get("state",  {})
+            config = s.get("config", {})
+            consumers = s.get("consumer_detail") or []
+            pending = sum(c.get("num_pending", 0) for c in consumers)
+            max_bytes = config.get("max_bytes", -1)
+            cur_bytes = state.get("bytes", 0)
+            out = {
+                "stream":           s.get("name"),
+                "messages":         state.get("messages", 0),
+                "bytes":            cur_bytes,
+                "consumer_pending": pending,
+                "num_consumers":    len(consumers),
+                "max_age_hours":    round(config.get("max_age", 0) / 1e9 / 3600, 1),
+                "max_bytes":        max_bytes,
+                "fill_pct":         round(cur_bytes / max_bytes * 100, 1) if max_bytes > 0 else None,
+            }
+        else:
+            out["error"] = "no streams found"
+    except Exception as exc:
+        out["error"] = str(exc)
+    return out
+
+
+def _s3_diag(cfg: dict) -> dict:
+    """List recent S3/MinIO objects for diagnostics. Sync — run in executor."""
+    import boto3
+    s3_cfg = cfg["s3"]
+    bucket = s3_cfg["bucket"]
+    prefix = s3_cfg.get("prefix", "").strip("/")
+    kwargs = dict(
+        region_name           = s3_cfg.get("region", "us-east-1"),
+        aws_access_key_id     = s3_cfg.get("access_key"),
+        aws_secret_access_key = s3_cfg.get("secret_key"),
+    )
+    if s3_cfg.get("endpoint_url"):
+        kwargs["endpoint_url"] = s3_cfg["endpoint_url"]
+
+    out: dict = {"bucket": bucket, "last_file": None, "last_modified": None,
+                 "total_files": 0, "total_bytes": 0, "write_interval_sec": None}
+    try:
+        client    = boto3.client("s3", **kwargs)
+        paginator = client.get_paginator("list_objects_v2")
+        objects: list = []
+        for page in paginator.paginate(Bucket=bucket,
+                                       Prefix=prefix + "/" if prefix else "",
+                                       PaginationConfig={"MaxItems": 2000}):
+            objects.extend(page.get("Contents", []))
+        if objects:
+            objects.sort(key=lambda o: o["LastModified"])
+            last = objects[-1]
+            out["last_file"]    = last["Key"]
+            out["last_modified"] = last["LastModified"].strftime("%Y-%m-%dT%H:%M:%SZ")
+            out["total_files"]  = len(objects)
+            out["total_bytes"]  = sum(o["Size"] for o in objects)
+            recent = objects[-10:]
+            spans = []
+            for i in range(1, len(recent)):
+                dt = (recent[i]["LastModified"] - recent[i-1]["LastModified"]).total_seconds()
+                if dt > 0:
+                    spans.append(dt)
+            if spans:
+                out["write_interval_sec"] = round(sum(spans) / len(spans), 1)
+    except Exception as exc:
+        out["error"] = str(exc)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Asyncio HTTP server
 # ---------------------------------------------------------------------------
 
@@ -253,6 +342,25 @@ async def _handle(reader, writer, cfg, duckdb_conn):
 
         if method == "OPTIONS":
             _http_response(writer, 204, cors, b"")
+            return
+
+        if path.startswith("/diag"):
+            loop = asyncio.get_running_loop()
+            mon_url = cfg.get("nats", {}).get("monitoring_url", "http://localhost:8222")
+            nats_info, s3_info = await asyncio.gather(
+                loop.run_in_executor(None, _nats_diag, mon_url),
+                loop.run_in_executor(None, _s3_diag, cfg),
+            )
+            diag = {
+                "timestamp": time.time(),
+                "nats":      nats_info,
+                "s3":        s3_info,
+                "subscriber": dict(_server_state),
+            }
+            body = _json.dumps(diag, default=str).encode()
+            _http_response(writer, 200,
+                           cors + [("Content-Type", "application/json")],
+                           body)
             return
 
         if path.startswith("/ping") or path.startswith("/health"):

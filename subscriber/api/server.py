@@ -46,7 +46,7 @@ import websockets
 import yaml
 from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
 
-from flux_compat import serve_flux_api
+from flux_compat import serve_flux_api, update_server_state
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ g_live_sub: Optional[object] = None  # NATS push subscription
 g_live_subject: str = ""
 g_stats = {"live_total": 0, "live_per_sec": 0, "queries_run": 0}
 g_live_window: list = []
+g_start_time = time.time()
 g_duckdb: Optional[duckdb.DuckDBPyConnection] = None
 
 
@@ -307,6 +308,16 @@ async def ws_handler(websocket) -> None:
 
 async def stats_loop() -> None:
     while True:
+        update_server_state({
+            "nats_connected": g_nats_connected,
+            "s3_connected":   g_s3_connected,
+            "live_per_sec":   g_stats["live_per_sec"],
+            "live_total":     g_stats["live_total"],
+            "queries_run":    g_stats["queries_run"],
+            "ws_clients":     len(g_connected),
+            "live_subject":   g_live_subject,
+            "uptime_sec":     round(time.time() - g_start_time),
+        })
         await broadcast({"type": "stats", **g_stats})
         await asyncio.sleep(1)
 
