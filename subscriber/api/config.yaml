@@ -2,7 +2,7 @@
 nats:
   url: "nats://localhost:4222"
   stream_name: BATTERY_DATA
-  default_subject: "batteries.>"   # default topic for live subscription
+  default_subject: ">"              # default topic for live subscription
 
 # S3 / MinIO (historical data source)
 s3:
@@ -12,6 +12,7 @@ s3:
   access_key: minioadmin
   secret_key: minioadmin
   prefix: ""
+  gap_fill_prefix: "gap-fill"  # set to "" to disable gap-fill queries
   project_id: 0
 
 # WebSocket server (monitor.html, subscriber.html)

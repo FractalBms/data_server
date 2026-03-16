@@ -40,7 +40,7 @@ sources:
 
   - id: solar
     type: solar
-    enabled: false
+    enabled: true
     topic_prefix: solar
     sites: 2
     racks_per_site: 4

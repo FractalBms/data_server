@@ -47,7 +47,7 @@ import websockets
 import yaml
 from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
 
-from flux_compat import serve_flux_api, update_server_state
+from flux_compat import serve_flux_api, update_server_state, _gap_fill_exists_flux as _gap_fill_exists
 
 LOG_BUFFER: collections.deque = collections.deque(maxlen=200)
 
@@ -151,22 +151,52 @@ def _date_paths(base: str, proj_id: str, site_id: str, from_ts: float, to_ts: fl
 
 
 def run_history_query(cfg: dict, proj_id: str, site_id: str, from_ts: float, to_ts: float, limit: int) -> dict:
-    bucket = cfg["s3"]["bucket"]
-    prefix = cfg["s3"].get("prefix", "").strip("/")
-    base = f"s3://{bucket}/{prefix + '/' if prefix else ''}"
+    bucket     = cfg["s3"]["bucket"]
+    prefix     = cfg["s3"].get("prefix", "").strip("/")
+    gap_prefix = cfg["s3"].get("gap_fill_prefix", "").strip("/")
+    base     = f"s3://{bucket}/{prefix + '/' if prefix else ''}"
+    gap_base = f"s3://{bucket}/{gap_prefix + '/' if gap_prefix else ''}"
 
-    paths = _date_paths(base, proj_id, site_id, from_ts, to_ts)
-    # DuckDB accepts a list of globs; hive_partitioning extracts project= and site= columns.
-    path_list = "[" + ", ".join(f"'{p}'" for p in paths) + "]"
+    primary_paths  = _date_paths(base,     proj_id, site_id, from_ts, to_ts)
+    primary_list   = "[" + ", ".join(f"'{p}'" for p in primary_paths) + "]"
+    where          = f"timestamp >= {from_ts} AND timestamp <= {to_ts}"
 
-    where = [f"timestamp >= {from_ts}", f"timestamp <= {to_ts}"]
-    sql = f"""
-        SELECT *
-        FROM read_parquet({path_list}, hive_partitioning=true, union_by_name=true)
-        WHERE {' AND '.join(where)}
-        ORDER BY timestamp DESC
-        LIMIT {limit}
-    """
+    if gap_prefix and _gap_fill_exists(cfg):
+        gap_paths = _date_paths(gap_base, proj_id, site_id, from_ts, to_ts)
+        gap_list  = "[" + ", ".join(f"'{p}'" for p in gap_paths) + "]"
+        # UNION primary + gap-fill, deduplicate keeping primary (src=0) over gap-fill (src=1).
+        sql = f"""
+            WITH combined AS (
+                SELECT *, 0 AS _src
+                FROM read_parquet({primary_list}, hive_partitioning=true, union_by_name=true)
+                WHERE {where}
+                UNION ALL
+                SELECT *, 1 AS _src
+                FROM read_parquet({gap_list}, hive_partitioning=true, union_by_name=true)
+                WHERE {where}
+            ),
+            deduped AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY timestamp, site_id, rack_id, module_id, cell_id
+                    ORDER BY _src
+                ) AS _rn
+                FROM combined
+            )
+            SELECT * EXCLUDE (_src, _rn) FROM deduped
+            WHERE _rn = 1
+            ORDER BY timestamp DESC
+            LIMIT {limit}
+        """
+        log.debug("History query: gap-fill UNION active")
+    else:
+        sql = f"""
+            SELECT *
+            FROM read_parquet({primary_list}, hive_partitioning=true, union_by_name=true)
+            WHERE {where}
+            ORDER BY timestamp DESC
+            LIMIT {limit}
+        """
+
     t0       = time.monotonic()
     cursor   = g_duckdb.execute(sql)
     columns  = [d[0] for d in cursor.description]

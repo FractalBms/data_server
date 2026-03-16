@@ -1208,6 +1208,331 @@ jetstream {
 </div>
 </div>
 
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  Why does NATS reduce AWS costs so dramatically?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>
+  The old stack charged AWS <strong>per message</strong> at high volume.
+  The NATS stack charges AWS <strong>per byte stored</strong> at much lower volume.
+</p>
+<p><strong>The root cause of the $76k bill</strong></p>
+<p>
+  The InfluxDB stack pushes every raw MQTT message through AWS IoT Core, then triggers a Lambda
+  invocation to write it to InfluxDB. At stress load:
+</p>
+<pre>8,000 msg/s × 3,600s × 24h × 30d = <span class="hw">~20 billion messages/month</span> per site
+× 80 sites = ~1.7 trillion messages/month
+
+IoT Core:       $0.30 / million messages  = <span class="hw">~$3,000/site/month</span>
+Lambda:         per-invocation cost       = <span class="hw">~$2,000/site/month</span>
+Data transfer:  8 MB/s raw × 80 sites    = <span class="hw">~$3,600/site/month</span></pre>
+<p>
+  Every single cell reading hits AWS as an individual HTTP transaction. AWS bills you for each one.
+</p>
+<p><strong>What NATS changes</strong></p>
+<p>
+  The NATS bridge moves the pipeline so that raw messages <strong>never reach AWS at all</strong>.
+  Instead:
+</p>
+<ul>
+  <li>Messages accumulate in local NATS JetStream for 60 seconds.</li>
+  <li>The parquet writer batches them, compresses with Snappy, and uploads <strong>one file per site per minute</strong>.</li>
+  <li>That one file replaces ~480,000 individual messages (8,000 msg/s × 60 s).</li>
+</ul>
+<pre>Old:  8,000 msg/s × ~1 KB  =  8 MB/s  =  <span class="hw">~700 GB/day</span> per site
+New:  one 60 s parquet file ≈ 12 MB compressed  =  <span class="hl">~17 GB/day</span> per site
+                                                      ↑ 40× less transfer</pre>
+<p>
+  Because data goes direct to S3 — not through IoT Core or Lambda — the per-message charges
+  disappear entirely:
+</p>
+<ul>
+  <li><strong>IoT Core:</strong> ~$3,000/site/mo → <span class="hl">$0</span></li>
+  <li><strong>Lambda:</strong> ~$2,000/site/mo → <span class="hl">$0</span></li>
+  <li><strong>Data transfer:</strong> ~$3,600/site/mo → <span class="hl">~$0.35/site/mo</span></li>
+  <li><strong>EC2:</strong> $182/site/mo → <span class="hl">$10 shared</span></li>
+  <li><strong>S3:</strong> $0 → <span class="hl">$10/site/mo</span></li>
+  <li><strong>Total: ~$226/site/mo → ~$21/site/mo. Saving across 80 sites: ~$75,000/month.</strong></li>
+</ul>
+<p><strong>The deeper principle</strong></p>
+<p>
+  IoT Core + Lambda is an event-driven serverless pattern designed for <em>sporadic, low-volume
+  device messages</em> — think a thermostat reporting once a minute. Battery telemetry at 8,000 msg/s
+  is an industrial time-series workload, and AWS pricing for that pattern is punishing at scale.
+</p>
+<p>
+  NATS acts as a local aggregation layer that converts a firehose of small events into a trickle
+  of large files before touching AWS. S3 is extremely cheap for bulk storage; IoT Core is extremely
+  expensive for bulk messaging. The architecture simply stops using the expensive service.
+</p>
+</div>
+</div>
+
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  What does NATS do?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>
+  NATS is a lightweight, high-performance message broker — a central bus that lets processes send
+  messages to each other without knowing about each other directly. A publisher sends a message to
+  a <em>subject</em>; any number of subscribers listening on that subject receive it.
+  The publisher and subscriber never connect directly and don't need to be running at the same time.
+</p>
+<p><strong>Core concepts</strong></p>
+<ul>
+  <li><strong>Subject</strong> — a dot-separated address string, e.g. <code>batteries.site=0.rack=1.module=2.cell=3</code>.
+    Wildcards: <code>*</code> matches one token, <code>&gt;</code> matches everything remaining.
+    <code>batteries.&gt;</code> catches all cell messages from all sites.</li>
+  <li><strong>Publish / Subscribe</strong> — fire-and-forget. If no subscriber is listening the message is dropped.
+    Fast and stateless; suitable for live dashboards where losing the occasional message is acceptable.</li>
+  <li><strong>Queue groups</strong> — multiple subscribers in the same group share the load; each message
+    goes to exactly one of them. Used to horizontally scale consumers.</li>
+  <li><strong>Request / Reply</strong> — built-in RPC pattern. Publisher includes a reply subject;
+    subscriber responds to it. Not used in this pipeline but useful for control commands.</li>
+</ul>
+<p><strong>JetStream — the persistence layer</strong></p>
+<p>
+  Plain NATS pub/sub is lossy. JetStream adds durable, disk-backed message storage on top of the same
+  subject space. This is what this pipeline uses exclusively.
+</p>
+<ul>
+  <li><strong>Stream</strong> — captures all messages matching a subject filter and stores them on disk.
+    Here: stream <code>BATTERY_DATA</code> captures <code>batteries.&gt;</code>, retaining up to 10 GB.</li>
+  <li><strong>Consumer</strong> — a named cursor into a stream. Tracks which messages have been
+    acknowledged so that on restart the process replays only what it missed.
+    Two types used here:
+    <ul>
+      <li><em>Pull consumer</em> (Parquet Writer, gap-fill writer) — fetches batches on demand, acks only after S3 upload succeeds.</li>
+      <li><em>Push consumer</em> (Subscriber API) — server pushes new messages as they arrive; used for the live WebSocket feed.</li>
+    </ul>
+  </li>
+  <li><strong>DeliverPolicy</strong> — controls where a new consumer starts: <code>ALL</code> replays
+    from the beginning of the stream; <code>NEW</code> delivers only messages arriving after the
+    subscription is created.</li>
+  <li><strong>AckPolicy</strong> — unacknowledged messages are redelivered after <code>ack_wait</code>
+    (60 s here). If the writer crashes mid-upload, NATS retries delivery automatically on restart.</li>
+</ul>
+<p><strong>Leaf nodes</strong></p>
+<p>
+  A leaf node is a NATS server that connects outbound to a hub NATS server over a single TLS connection
+  and forwards a filtered set of subjects. In this architecture each site NATS connects to the AWS NATS
+  as a leaf node, giving AWS a real-time copy of all battery messages with no application-level code involved.
+</p>
+<p><strong>Why NATS instead of Kafka, RabbitMQ, or MQTT alone?</strong></p>
+<ul>
+  <li>Single ~20 MB binary, no JVM, no ZooKeeper, no external dependencies.</li>
+  <li>Handles millions of messages per second on modest hardware.</li>
+  <li>JetStream WAL gives zero-loss guarantees without a separate queue service.</li>
+  <li>Leaf nodes make multi-site fan-in to a central hub trivial — one config block, no code.</li>
+  <li>MQTT is device-friendly but has no durable consumer model suitable for batch Parquet writing.
+    NATS JetStream fills that gap cleanly.</li>
+</ul>
+</div>
+</div>
+
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  Can NATS and the bridge clean up or transform the MQTT topic format?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>
+  Yes, straightforwardly. The bridge is the ideal place because it already touches every message —
+  adding transformation there keeps it in one process with no extra hop.
+</p>
+<p><strong>What "clean up" could mean</strong></p>
+<p>The current topic arriving at the bridge is:</p>
+<pre>batteries/site=0/rack=1/module=2/cell=3</pre>
+<p>converted as-is to NATS subject:</p>
+<pre>batteries.site=0.rack=1.module=2.cell=3</pre>
+<p>Two useful transformations:</p>
+<ul>
+  <li><strong>Cleaner subject</strong> — strip the key names, keep only values:
+    <code>batteries.0.1.2.3</code>. Consumers use positional wildcards
+    (<code>batteries.*.*.*.&gt;</code>). Shorter and faster to route, but less self-describing.</li>
+  <li><strong>Payload enrichment</strong> — parse the topic and inject the hierarchy fields into
+    the JSON body so downstream consumers never need to parse the subject at all:
+    <code>{"site_id": 0, "rack_id": 1, "module_id": 2, "cell_id": 3, "voltage": {…}}</code>.
+    This is what the parquet writer already expects — if a real device omitted those fields,
+    the bridge could inject them from the topic.</li>
+</ul>
+<p><strong>How you would do it</strong></p>
+<p>
+  A small change to <code>bridge.py</code>. Currently <code>mqtt_topic_to_nats_subject</code>
+  is a one-liner. Extending the message loop to parse and enrich:
+</p>
+<pre><span class="hi">import re</span>
+
+_TOPIC_RE = re.compile(
+    r<span class="hw">"batteries/site=(\d+)/rack=(\d+)/module=(\d+)/cell=(\d+)"</span>
+)
+
+<span class="hi">def</span> parse_topic(topic):
+    m = _TOPIC_RE.match(topic)
+    <span class="hi">if</span> m:
+        <span class="hi">return</span> {k: int(v) <span class="hi">for</span> k, v <span class="hi">in</span> zip(
+            (<span class="hw">"site_id"</span>,<span class="hw">"rack_id"</span>,<span class="hw">"module_id"</span>,<span class="hw">"cell_id"</span>), m.groups()
+        )}
+    <span class="hi">return</span> {}
+
+<span class="hl"># In the message loop:</span>
+subject = f<span class="hw">"batteries.{site}.{rack}.{module}.{cell}"</span>  <span class="hl"># clean subject</span>
+payload = json.loads(message.payload)
+payload.update(parse_topic(str(message.topic)))        <span class="hl"># inject ids if missing</span>
+<span class="hi">await</span> js.publish(subject, json.dumps(payload).encode())</pre>
+<p><strong>NATS server-side option (JetStream transforms, 2.10+)</strong></p>
+<p>
+  NATS can rewrite subjects server-side via <code>subject_transform</code> in the stream config,
+  but it only does token-level remapping — not regex parsing of <code>key=value</code> strings.
+  It cannot strip the key names. The bridge approach is the right tool here.
+</p>
+<p><strong>Trade-offs</strong></p>
+<ul>
+  <li><strong>Clean subject only</strong> — shorter routing keys, smaller wire overhead; positional so loses self-description.</li>
+  <li><strong>Payload enrichment only</strong> — downstream code simpler, no subject parsing needed; subject stays verbose.</li>
+  <li><strong>Both</strong> — maximum flexibility; bridge code slightly more complex.</li>
+</ul>
+<p>
+  For this pipeline <strong>payload enrichment</strong> is the higher-value change — the parquet writer
+  and DuckDB queries both work on payload fields, not subject tokens. The subject format matters less
+  once data is in Parquet.
+</p>
+</div>
+</div>
+
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  What types of data can NATS handle, and does it offer translation?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>
+  NATS is payload-agnostic — it treats every message as raw bytes and does zero inspection or
+  transformation of the content. Translation is not a NATS concept; that is left to the application layer.
+</p>
+<p><strong>What NATS handles</strong></p>
+<p>
+  Any byte sequence: JSON, Protobuf, MessagePack, Avro, raw binary, plain text, compressed blobs.
+  The only constraint is the default max message size (1 MB, configurable up to 64 MB via
+  <code>max_payload</code> in <code>nats-server.conf</code>).
+</p>
+<p>
+  In this codebase the bridge publishes raw MQTT payloads straight into NATS with no transformation:
+</p>
+<pre><span class="hi"># bridge.py</span>
+await js.publish(subject, message.payload)   <span class="hl"># bytes — untouched</span></pre>
+<p>
+  The parquet writer is where the bytes get interpreted — <code>json.loads(msg.data)</code>
+  then <code>_flatten()</code>.
+</p>
+<p><strong>What NATS does offer that is relevant</strong></p>
+<ul>
+  <li><strong>Subject-based routing</strong> — the subject hierarchy (<code>batteries.site=0.rack=1…</code>)
+    is the closest thing to translation. Consumers subscribe to wildcards (<code>batteries.&gt;</code>,
+    <code>batteries.site=0.&gt;</code>) to filter without touching payloads.</li>
+  <li><strong>JetStream subject transforms (NATS 2.10+)</strong> — the server can rewrite subjects on
+    ingress/egress via <code>subject_transform</code> in stream config. Useful for fan-out or renaming,
+    but still payload-blind.</li>
+  <li><strong>Header support</strong> — messages can carry key/value headers (like HTTP). You could tag
+    messages with schema version, source site, or content-type without touching the payload.
+    Not currently used here.</li>
+  <li><strong>Leaf node subject filtering</strong> — the leaf node config restricts which subjects get
+    forwarded to AWS (e.g. only <code>batteries.&gt;</code>, not internal admin subjects).</li>
+</ul>
+<p><strong>What NATS explicitly does not do</strong></p>
+<ul>
+  <li>No schema registry</li>
+  <li>No payload serialisation or deserialisation</li>
+  <li>No protocol translation (e.g. MQTT → AMQP)</li>
+  <li>No field extraction or filtering within a payload</li>
+</ul>
+<p>
+  The NATS Bridge pattern — what <code>bridge.py</code> is — is the standard answer to
+  "how do I get data from protocol X into NATS": write a small process that speaks both.
+  That is also why things like Telegraf, Kafka Connect, and NATS's own <code>nats-kafka</code>
+  bridge exist.
+</p>
+<p><strong>Practical implication for this system</strong></p>
+<p>
+  If the payload format ever changed (e.g. JSON → Protobuf for bandwidth), NATS would not need
+  to change at all — update the bridge to encode and the parquet writer to decode.
+  The NATS layer is completely insulated from serialisation choices.
+</p>
+</div>
+</div>
+
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  How does MQTT data get to the local NATS server and to AWS?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>
+  Two separate mechanisms handle the two hops — one is bespoke code, the other is pure NATS config.
+</p>
+<p><strong>Hop 1 — MQTT → Local NATS (the bridge)</strong></p>
+<p>
+  <code>source/nats_bridge/bridge.py</code> is a Python process that glues the two protocols together:
+</p>
+<ul>
+  <li>Subscribes to FlashMQ on <code>batteries/#</code>, QoS 1 (port 1884) via <code>aiomqtt</code>.</li>
+  <li>For every message, converts the topic separator — <code>/</code> → <code>.</code>:<br>
+    <code>batteries/site=0/rack=1/module=2/cell=3</code><br>
+    → <code>batteries.site=0.rack=1.module=2.cell=3</code>
+  </li>
+  <li>Calls <code>js.publish(subject, payload)</code> — waits for NATS server ack before moving on.</li>
+  <li>NATS stores the message durably to disk (WAL, up to 10 GB) before acking back to the bridge.</li>
+  <li>QoS 1 on the MQTT side means FlashMQ retransmits if the bridge disappears — no gap at this hop.</li>
+  <li>Both the MQTT and NATS connections retry with infinite back-off on failure.</li>
+</ul>
+<p><strong>Hop 2 — Local NATS → AWS (leaf node)</strong></p>
+<p>
+  This is <strong>zero code</strong> — it is a NATS server feature configured in <code>nats-server.conf</code>.
+  The site NATS server opens a single outbound TLS connection to the AWS NATS server and forwards every
+  matching message automatically:
+</p>
+<pre>leafnodes {
+  remotes [
+    {
+      url: "nats://aws-nats.example.com:7422"
+      credentials: "/etc/nats/site.creds"
+      account: "BATTERY_DATA"
+    }
+  ]
+}</pre>
+<p>
+  AWS NATS receives messages as if they were published locally — the Subscriber API and gap-fill writer
+  see no difference. The current <code>manager/nats-server.conf</code> does not yet contain this block;
+  adding it is the one remaining config change needed to complete the edge architecture.
+</p>
+<p><strong>Combined flow:</strong></p>
+<pre><span class="hl">Battery device</span>
+    │ MQTT QoS 1  (retransmits until FlashMQ acks)
+    ▼
+<span class="hi">FlashMQ :1884</span>
+    │ MQTT subscribe batteries/#  (bridge.py / aiomqtt)
+    ▼
+<span class="hi">bridge.py</span>  ── topic / → .  ──►  js.publish()
+    │
+    ▼
+<span class="hi">Local NATS JetStream</span>  (WAL on disk, 10 GB)
+    │
+    ├── PATH 1: Parquet Writer  ──►  S3  (every 60 s, acks after upload)
+    │
+    └── PATH 2: Leaf Node  (nats-server.conf, outbound TLS, no code)
+              │
+              ▼
+         <span class="hl">AWS NATS JetStream</span>  (2 h retention)
+              ├── Gap-fill Writer  ──►  S3/gap-fill/
+              └── Subscriber API  ──►  live WS buffer</pre>
+</div>
+</div>
+
 <!-- ─── Typical Workflow ──────────────────────────────────── -->
 <h2>Typical Workflow</h2>
 <div class="flow">

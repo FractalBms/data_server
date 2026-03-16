@@ -5,7 +5,7 @@ mqtt:
   username: ""
   password: ""
   client_id: nats-bridge
-  topic: "batteries/#"
+  topic: "#"
   qos: 1
 
 # NATS JetStream
@@ -14,4 +14,7 @@ nats:
   stream_name: BATTERY_DATA
   stream_subjects:
     - "batteries.>"
+    - "solar.>"
+    - "wind.>"
+    - "localgen.>"
   max_age_hours: 48

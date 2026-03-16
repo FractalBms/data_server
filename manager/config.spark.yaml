@@ -14,6 +14,7 @@ order:
   - aws_server
   - subscriber_api
   - stress_runner
+  - generator
 
 components:
 
@@ -59,3 +60,9 @@ components:
     cmd: [".venv/bin/python", "stress_runner.py", "--config", "config.spark.yaml"]
     cwd: "source/stress_runner"
     ports: [8769]
+
+  generator:
+    label: "Data Generator"
+    cmd: [".venv/bin/python", "generator.py", "--config", "config.spark.yaml"]
+    cwd: "source/generator"
+    ports: [8765]

@@ -86,6 +86,35 @@ def _query_type(flux: str) -> str:
 # SQL builder
 # ---------------------------------------------------------------------------
 
+def _flux_source(cfg: dict, gap_exists: bool) -> str:
+    """Build the FROM clause: plain read_parquet, or a UNION + dedup CTE if gap-fill files exist."""
+    bucket     = cfg["s3"]["bucket"]
+    prefix     = cfg["s3"].get("prefix", "").strip("/")
+    gap_prefix = cfg["s3"].get("gap_fill_prefix", "").strip("/")
+    base     = "s3://{}/{}".format(bucket, prefix + "/" if prefix else "")
+    gap_base = "s3://{}/{}".format(bucket, gap_prefix + "/" if gap_prefix else "")
+
+    primary_path = "{}project=*/**/*.parquet".format(base)
+    primary_read = "read_parquet('{}', hive_partitioning=true, union_by_name=true)".format(primary_path)
+
+    if gap_prefix and gap_exists:
+        gap_path = "{}project=*/**/*.parquet".format(gap_base)
+        gap_read = "read_parquet('{}', hive_partitioning=true, union_by_name=true)".format(gap_path)
+        # Return a subquery alias that callers can use as a table reference.
+        return (
+            "(SELECT * EXCLUDE (_src, _rn) FROM ("
+            "  SELECT *, ROW_NUMBER() OVER ("
+            "    PARTITION BY timestamp, site_id, rack_id, module_id, cell_id ORDER BY _src"
+            "  ) AS _rn FROM ("
+            "    SELECT *, 0 AS _src FROM {primary} UNION ALL"
+            "    SELECT *, 1 AS _src FROM {gap}"
+            "  ) _combined"
+            ") _deduped WHERE _rn = 1) _src_data"
+        ).format(primary=primary_read, gap=gap_read)
+
+    return "({}) _src_data".format(primary_read)
+
+
 def flux_to_sql(flux: str, cfg: dict):
     """
     Parse a Flux query and return (qtype, sql, from_ts, to_ts, fields).
@@ -95,11 +124,9 @@ def flux_to_sql(flux: str, cfg: dict):
     filters = _parse_filters(flux)
     qtype = _query_type(flux)
 
-    bucket = cfg["s3"]["bucket"]
-    prefix = cfg["s3"].get("prefix", "").strip("/")
-    base = "s3://{}/{}".format(bucket, prefix + "/" if prefix else "")
-    path = "{}project=*/**/*.parquet".format(base)
-    read = "read_parquet('{}', hive_partitioning=true, union_by_name=true)".format(path)
+    gap_prefix = cfg["s3"].get("gap_fill_prefix", "").strip("/")
+    gap_exists = bool(gap_prefix) and _gap_fill_exists_flux(cfg)
+    source = _flux_source(cfg, gap_exists)
 
     where = ["timestamp >= {}".format(from_ts), "timestamp <= {}".format(to_ts)]
     for col in ("site_id", "rack_id", "module_id", "cell_id"):
@@ -116,11 +143,11 @@ def flux_to_sql(flux: str, cfg: dict):
             SELECT
                 CAST(timestamp / {b} AS BIGINT) * {b} + {b} / 2.0 AS bucket_ts,
                 {cols}
-            FROM {read}
+            FROM {source}
             WHERE {where}
             GROUP BY CAST(timestamp / {b} AS BIGINT)
             ORDER BY bucket_ts
-        """.format(b=bucket_secs, cols=agg_cols, read=read, where=where_sql)
+        """.format(b=bucket_secs, cols=agg_cols, source=source, where=where_sql)
         return qtype, sql, from_ts, to_ts, FIELD_COLS
 
     elif qtype == "heatmap":
@@ -130,16 +157,39 @@ def flux_to_sql(flux: str, cfg: dict):
                 SELECT *, ROW_NUMBER() OVER (
                     PARTITION BY module_id, cell_id ORDER BY timestamp DESC
                 ) AS rn
-                FROM {read}
+                FROM {source}
                 WHERE {where}
             ) sub
             WHERE rn = 1
-        """.format(read=read, where=where_sql)
+        """.format(source=source, where=where_sql)
         return qtype, sql, from_ts, to_ts, ["voltage"]
 
     else:  # writerate
-        sql = "SELECT COUNT(*) AS cnt FROM {} WHERE {}".format(read, where_sql)
+        sql = "SELECT COUNT(*) AS cnt FROM {} WHERE {}".format(source, where_sql)
         return qtype, sql, from_ts, to_ts, []
+
+
+def _gap_fill_exists_flux(cfg: dict) -> bool:
+    """Same cheap S3 check as server.py — reused here for the Flux path."""
+    gap_prefix = cfg["s3"].get("gap_fill_prefix", "").strip("/")
+    if not gap_prefix:
+        return False
+    try:
+        import boto3
+        s3_cfg = cfg["s3"]
+        kwargs = dict(
+            region_name           = s3_cfg.get("region", "us-east-1"),
+            aws_access_key_id     = s3_cfg.get("access_key"),
+            aws_secret_access_key = s3_cfg.get("secret_key"),
+        )
+        if s3_cfg.get("endpoint_url"):
+            kwargs["endpoint_url"] = s3_cfg["endpoint_url"]
+        resp = boto3.client("s3", **kwargs).list_objects_v2(
+            Bucket=s3_cfg["bucket"], Prefix=gap_prefix + "/", MaxKeys=1
+        )
+        return bool(resp.get("Contents"))
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------

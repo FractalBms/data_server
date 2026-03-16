@@ -3,7 +3,7 @@ nats:
   url: "nats://localhost:4222"
   stream_name: BATTERY_DATA
   consumer_name: parquet-writer   # durable — survives restarts, replays on reconnect
-  subject_filter: "batteries.>"
+  subject_filter: ">"
 
 # Buffer — flush to Parquet after this many seconds or messages (whichever first)
 buffer:
