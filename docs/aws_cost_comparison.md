@@ -83,3 +83,13 @@ The NATS stack scales **horizontally and cheaply**:
 
 5. **Same region** — keep EC2, S3, and any client VPCs in the same AWS region to avoid
    cross-region data transfer charges ($0.02/GB).
+
+---
+
+## Further Cost Reduction: Edge Parquet Architecture
+
+Moving parquet file generation to the site controller reduces the AWS bill further
+to **~$860/month for 80 sites** by eliminating data transfer costs and shrinking
+the AWS EC2 footprint to a single shared `t3.small`.
+
+See `docs/edge_parquet_architecture.md` for the full design.
