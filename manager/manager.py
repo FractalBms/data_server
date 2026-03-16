@@ -188,9 +188,11 @@ class Component:
     async def stop(self, broadcast_fn) -> None:
         if self.process and self.status == "running":
             log.info("Stopping %s (pid %d)", self.name, self.pid)
-            # Cancel readers first so no further log output is broadcast
+            # Cancel readers and wait for them to finish so no further
+            # log output is broadcast after this point
             for t in self._reader_tasks:
                 t.cancel()
+            await asyncio.gather(*self._reader_tasks, return_exceptions=True)
             self._reader_tasks = []
             try:
                 self.process.terminate()
@@ -283,12 +285,16 @@ async def ws_handler(websocket) -> None:
                     asyncio.create_task(g_components[name].stop(broadcast))
 
             elif t == "start_all":
-                for comp in g_components.values():
-                    asyncio.create_task(comp.start(broadcast))
+                async def _start_all():
+                    for comp in g_components.values():
+                        await comp.start(broadcast)
+                asyncio.create_task(_start_all())
 
             elif t == "stop_all":
-                for comp in g_components.values():
-                    asyncio.create_task(comp.stop(broadcast))
+                async def _stop_all():
+                    for comp in reversed(list(g_components.values())):
+                        await comp.stop(broadcast)
+                asyncio.create_task(_stop_all())
 
     except websockets.exceptions.ConnectionClosed:
         pass
