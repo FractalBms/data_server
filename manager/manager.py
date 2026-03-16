@@ -188,14 +188,15 @@ class Component:
     async def stop(self, broadcast_fn) -> None:
         if self.process and self.status == "running":
             log.info("Stopping %s (pid %d)", self.name, self.pid)
+            # Cancel readers first so no further log output is broadcast
+            for t in self._reader_tasks:
+                t.cancel()
+            self._reader_tasks = []
             try:
                 self.process.terminate()
                 await asyncio.wait_for(self.process.wait(), timeout=5)
             except asyncio.TimeoutError:
                 self.process.kill()
-            for t in self._reader_tasks:
-                t.cancel()
-            self._reader_tasks = []
         self.status  = "stopped"
         self.pid     = None
         self.process = None
