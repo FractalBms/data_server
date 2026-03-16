@@ -58,3 +58,4 @@ components:
     label: "Stress Runner (multi-project 24/7)"
     cmd: [".venv/bin/python", "stress_runner.py", "--config", "config.spark.yaml"]
     cwd: "source/stress_runner"
+    ports: [8769]
