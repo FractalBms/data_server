@@ -15,34 +15,41 @@ message processing pipeline.
 SITE CONTROLLER (on-premise / edge)
 ┌─────────────────────────────────────────────────────────┐
 │                                                         │
-│  FlashMQ (MQTT broker)                                  │
+│  FlashMQ (MQTT broker, QoS 1)                           │
 │       │                                                 │
 │       ▼                                                 │
-│  NATS Bridge          ──────────────────────────────┐  │
-│       │               NATS Leaf Node                │  │
-│       ▼               (live feed to AWS)            │  │
-│  NATS JetStream  ─────────────────────────────────► │  │
-│       │                                             │  │
-│       ▼                                             │  │
-│  Parquet Writer                                     │  │
-│       │                                             │  │
-│       ▼                                             │  │
-│  Local parquet files ──► S3 upload (every 60s)      │  │
-│                                                     │  │
-└─────────────────────────────────────────────────────┘  │
-                                                          │
-                         ┌────────────────────────────────┘
-                         │ NATS Leaf Node connection
+│  NATS Bridge                                            │
+│       │                                                 │
+│       ▼                                                 │
+│  NATS JetStream (WAL on disk)                           │
+│       │                          │                      │
+│       ▼                          │ Leaf Node            │
+│  Parquet Writer                  │ (real-time forward)  │
+│       │                          │                      │
+│       ▼                          ▼                      │
+│  S3 upload (every 60s) ─────────────────────────────►  │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+                                   │
+                         ┌─────────┘
+                         │ NATS Leaf Node (TLS, single TCP conn)
+                         │ every message forwarded in real time
                          ▼
 AWS
 ┌─────────────────────────────────────────────────────────┐
 │                                                         │
-│  NATS Server (live cache only — no JetStream needed)    │
+│  NATS Server + JetStream (short retention, e.g. 2h)     │
 │       │                                                 │
-│       ▼                                                 │
-│  Subscriber API  ◄──── S3 (parquet store)               │
+│       ├──► Subscriber API (in-memory buffer, live queries)
 │       │                                                 │
-│       ▼                                                 │
+│       └──► Gap-fill Parquet Writer (backup, see below)  │
+│                          │                              │
+│                          ▼                              │
+│  S3  ◄────────────────────────────────────────────────  │
+│   │                                                     │
+│   └──► Subscriber API (history queries)                 │
+│                          │                              │
+│                          ▼                              │
 │  Monitor / Viewer (browser)                             │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
@@ -67,13 +74,20 @@ Parquet files queue locally and upload when connectivity resumes — no data los
 
 ### Cloud (AWS)
 
-AWS becomes a thin read layer:
+AWS becomes a thin read layer with a built-in gap-fill safety net:
 
-- **NATS Server** — receives live messages via Leaf Node from each site, fills the
-  in-memory buffer in the Subscriber API for fast recent-history queries
+- **NATS Server + JetStream** — receives live messages via Leaf Node from every site.
+  Short retention (2 hours) is enough. Fills the Subscriber API in-memory buffer for
+  fast recent-history queries
+- **Gap-fill Parquet Writer** — a second parquet writer runs on AWS consuming from
+  AWS NATS JetStream. It only writes a parquet file for a time window if the site
+  has not already uploaded one (detected by checking S3 key existence before writing).
+  Under normal operation it writes nothing — it activates automatically on site
+  power loss or WAN outage
 - **Subscriber API** — serves history queries from S3 parquet, recent queries from
   the live buffer. Identical code to the current implementation
-- **S3** — stores parquet files uploaded by each site. No change to query logic
+- **S3** — receives parquet files from both the site (primary) and the gap-fill writer
+  (backup). No duplicate files under normal operation
 
 ---
 
@@ -176,13 +190,53 @@ Suitable hardware: Raspberry Pi 5, industrial mini-PC, existing site SCADA serve
 
 ---
 
-## Offline Resilience
+## Resilience: Dual-Path Data Protection
+
+Every message travels two independent paths to S3 simultaneously:
+
+```
+Device
+  │
+  ▼
+FlashMQ (QoS 1 — device retransmits if broker doesn't ack)
+  │
+  ▼
+Site NATS JetStream (WAL on disk — survives process restart)
+  │
+  ├── PATH 1: Site Parquet Writer ──► S3  (primary, every 60s)
+  │           only acks to NATS after successful upload
+  │
+  └── PATH 2: Leaf Node ──► AWS NATS ──► Gap-fill Writer ──► S3
+              real-time forward          writes only if site hasn't
+                                         uploaded that window
+```
+
+**Path 1 failure (power loss mid-buffer):**
+- Messages already forwarded to AWS via Path 2 — not lost
+- On restart, site NATS replays unacknowledged messages
+- Site writer uploads the missing window to S3 on first flush
+- Gap-fill writer may have already covered the window — S3 key check prevents duplicates
+
+**Path 2 failure (WAN link down):**
+- Site writer continues uploading to S3 as normal
+- Leaf Node reconnects automatically when WAN recovers
+- AWS NATS buffer refills; no gap in historical data (S3 already has it)
+
+**Both paths fail simultaneously (power loss + WAN down):**
+- Site NATS WAL preserves messages on local disk
+- On power recovery, site writer replays and uploads the missing window
+- Gap-fill writer covers the window from AWS NATS once Leaf Node reconnects
 
 | Scenario | Current cloud pipeline | Edge parquet |
 |----------|----------------------|--------------|
-| WAN link drops | **Data loss** — IoT Core drops messages | **No data loss** — parquet queues locally |
+| Site power loss (mid-buffer) | **Data loss** | **Covered by Path 2 (Leaf Node)** |
+| WAN link drops | **Data loss** — IoT Core drops messages | **No loss** — parquet queues locally |
+| Site power loss + WAN down | **Total loss** | **Covered by site NATS WAL replay** |
 | AWS outage | **Total failure** | Site continues, uploads resume on recovery |
-| Site controller restart | Replay from NATS (if stream retained) | Replay from NATS (local JetStream) |
+| Site controller restart (clean) | Replay from NATS | Replay from local NATS JetStream |
+
+This makes the edge architecture **more resilient than the current cloud pipeline**
+for every failure mode.
 
 ---
 
