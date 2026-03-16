@@ -1,0 +1,42 @@
+# Gap-fill Parquet Writer — runs on AWS, consumes from AWS NATS JetStream.
+#
+# Writes parquet files to the gap-fill/ prefix in S3.  Under normal operation
+# the site parquet writer covers every 60-second window, so this writer's
+# output is almost never queried.  It activates automatically during site
+# outages (power loss / WAN down) because those windows will be missing from
+# the primary prefix.
+#
+# Run with the same writer binary as the site writer:
+#   python ../../source/parquet_writer/writer.py --config config.yaml
+#
+# The Subscriber API merges primary + gap-fill at query time, deduplicating
+# by (timestamp, site_id, rack_id, module_id, cell_id) with primary winning.
+
+nats:
+  url: "nats://localhost:4222"   # AWS NATS server
+  stream_name: BATTERY_DATA
+  consumer_name: gap-fill-writer  # separate durable consumer — does not interfere with site writer
+  subject_filter: "batteries.>"
+
+buffer:
+  flush_interval_seconds: 60
+  max_messages: 50000
+  fetch_batch: 5000
+
+s3:
+  endpoint_url: ""               # leave empty for real AWS S3; set for MinIO
+  bucket: battery-data
+  region: us-east-1
+  access_key: ""
+  secret_key: ""
+  prefix: "gap-fill"             # all output lands under gap-fill/ — never collides with site uploads
+  project_id: 0
+  partitions:
+    - "project={project_id}"
+    - "site={site_id}"
+    - "{year}"
+    - "{month}"
+    - "{day}"
+
+parquet:
+  compression: snappy
