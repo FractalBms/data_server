@@ -3,10 +3,8 @@
 # Usage: ./scripts/stop_all.sh [-v|--verbose] [spark_nats | spark_influx | all]
 #   Defaults to spark_nats.
 #
-# Preferred path: sends stop_all to the manager via WebSocket so the
-# dashboard stays in sync.  Falls back to direct kill if manager is down.
-#
-# -v / --verbose  show each PID killed and confirm it's gone
+# Uses systemctl to stop managed services, then WebSocket stop_all to the
+# manager for a clean shutdown of components.  Falls back to kill if needed.
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -24,14 +22,10 @@ STACK="${STACK:-spark_nats}"
 VENV="$(pwd)/.venv/bin/python"
 MANAGER_URL="ws://localhost:8762"
 
-G='\033[0;32m'; Y='\033[1;33m'; R='\033[0;31m'; B='\033[0;34m'; N='\033[0m'
+G='\033[0;32m'; Y='\033[1;33m'; R='\033[0;31m'; B='\033[0;34d'; N='\033[0m'
 ok()   { echo -e "${G}  [ok]${N}   $*"; }
-info() { echo -e "${B}  -->  ${N}  $*"; }
+info() { echo -e "  -->    $*"; }
 warn() { echo -e "${Y}  [warn]${N} $*"; }
-
-manager_running() {
-    ss -tlnp "sport = :8762" 2>/dev/null | grep -q ":8762"
-}
 
 kill_proc() {
     local pattern="$1"
@@ -44,7 +38,7 @@ kill_proc() {
     for pid in $pids; do
         local cmd
         cmd=$(ps -p "$pid" -o cmd= 2>/dev/null || echo "?")
-        warn "stopping PID $pid  ($cmd)"
+        warn "killing PID $pid  ($cmd)"
         kill "$pid" 2>/dev/null || true
     done
     sleep 1
@@ -58,55 +52,44 @@ kill_proc() {
     done
 }
 
-verbose_flag() { [[ $VERBOSE -eq 1 ]] && echo "-v" || echo ""; }
-
 if [[ "$STACK" == "spark_nats" || "$STACK" == "all" ]]; then
-    echo -e "\n${B}==> Stopping spark_nats${N}"
+    echo -e "\n==> Stopping spark_nats"
 
-    if manager_running; then
-        info "manager is up — sending stop_all via WebSocket"
-        VFLAG=$(verbose_flag)
-        if "$VENV" scripts/ws_cmd.py $VFLAG --timeout 30 "$MANAGER_URL" stop_all; then
-            ok "manager stopped all services"
-        else
-            warn "manager stop_all did not complete cleanly — falling back to kill"
-            kill_proc "stress_runner.py"
-            kill_proc "subscriber/api/server.py"
-            kill_proc "aws/data_store/server.py"
-            kill_proc "source/parquet_writer/writer.py"
-            kill_proc "source/nats_bridge/bridge.py"
-            kill_proc "nats-server"
-            kill_proc "minio server"
-        fi
+    # 1. Tell manager to stop all components cleanly via WebSocket
+    if ss -tlnp "sport = :8762" 2>/dev/null | grep -q ":8762"; then
+        info "sending stop_all to manager"
+        VFLAG=$([[ $VERBOSE -eq 1 ]] && echo "-v" || echo "")
+        "$VENV" scripts/ws_cmd.py $VFLAG --timeout 30 "$MANAGER_URL" stop_all && \
+            ok "manager stopped all services" || \
+            warn "manager stop_all incomplete — will stop via systemctl anyway"
     else
-        warn "manager not running — killing processes directly"
-        kill_proc "stress_runner.py"
-        kill_proc "subscriber/api/server.py"
-        kill_proc "aws/data_store/server.py"
-        kill_proc "source/parquet_writer/writer.py"
-        kill_proc "source/nats_bridge/bridge.py"
-        kill_proc "nats-server"
-        kill_proc "minio server"
+        warn "manager not running on :8762"
     fi
 
+    # 2. Stop the systemd services (prevents auto-restart)
+    info "stopping systemd services"
+    sudo systemctl stop data-server-stress data-server-spark 2>/dev/null && \
+        ok "systemd services stopped" || warn "systemctl stop had errors (may not be installed)"
+
+    # 3. Kill any survivors (e.g. processes started outside systemd)
     if [[ $VERBOSE -eq 1 ]]; then
-        echo ""
-        echo "    Survivors check:"
+        info "checking for survivors..."
         SURVIVORS=$(pgrep -f "minio|nats-server|bridge\.py|writer\.py|aws/data_store/server|subscriber/api/server|stress_runner" 2>/dev/null || true)
-        if [[ -z "$SURVIVORS" ]]; then
-            ok "all spark_nats processes gone"
-        else
+        if [[ -n "$SURVIVORS" ]]; then
+            warn "survivors found — killing:"
             for pid in $SURVIVORS; do
-                warn "still running: PID $pid  $(ps -p $pid -o cmd= 2>/dev/null || echo '?')"
+                kill_proc "$(ps -p $pid -o comm= 2>/dev/null || echo $pid)"
             done
+        else
+            ok "all spark_nats processes gone"
         fi
     fi
 
-    echo -e "${G}==> spark_nats stopped${N}"
+    echo "==> spark_nats stopped"
 fi
 
 if [[ "$STACK" == "spark_influx" || "$STACK" == "all" ]]; then
-    echo -e "\n${B}==> Stopping spark_influx${N}"
+    echo -e "\n==> Stopping spark_influx"
     for svc in telegraf influxdb flashmq; do
         if systemctl is-active --quiet "$svc" 2>/dev/null; then
             info "stopping $svc"
@@ -116,5 +99,5 @@ if [[ "$STACK" == "spark_influx" || "$STACK" == "all" ]]; then
             [[ $VERBOSE -eq 1 ]] && echo "         (not running: $svc)" || true
         fi
     done
-    echo -e "${G}==> spark_influx stopped${N}"
+    echo "==> spark_influx stopped"
 fi
