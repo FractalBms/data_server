@@ -303,6 +303,38 @@ async def ws_handler(websocket) -> None:
                     await asyncio.gather(*[c.stop(broadcast) for c in g_components.values()], return_exceptions=True)
                 asyncio.create_task(_stop_all())
 
+            elif t == "rescan":
+                # Adopt any processes already running that match our components.
+                # Useful when processes were started outside the manager (e.g. by scripts).
+                # We can't stream their logs but status/PID will show correctly.
+                adopted = []
+                for name, comp in g_components.items():
+                    if comp.status == "running":
+                        continue
+                    if not comp.cmd:
+                        continue
+                    # Search for a process whose cmdline contains the component's script/binary
+                    search = comp.cmd[-1] if len(comp.cmd) > 1 else comp.cmd[0]
+                    result = subprocess.run(
+                        ["pgrep", "-f", search],
+                        capture_output=True, text=True,
+                    )
+                    pids = result.stdout.split()
+                    if pids:
+                        pid = int(pids[0])
+                        comp.status = "running"
+                        comp.pid    = pid
+                        msg = f"[RESCAN] adopted {name} (pid {pid})"
+                        log.info(msg)
+                        comp.logs.append(msg)
+                        adopted.append(name)
+                        await broadcast(comp._status_msg())
+                        await broadcast({"type": "log", "component": name, "line": msg, "stream": "stderr"})
+                if not adopted:
+                    await broadcast({"type": "log", "component": "manager",
+                                     "line": "[RESCAN] no new processes adopted", "stream": "stderr"})
+                _save_pids()
+
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
