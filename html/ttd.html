@@ -160,6 +160,49 @@
   .yes { color: #56d364 !important; font-weight: bold; }
   .part { color: #f39c12 !important; }
 
+  /* ── FAQ ─────────────────────────────────────────────────── */
+  .faq-item {
+    border: 1px solid #21262d;
+    border-radius: 5px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .faq-q {
+    background: #161b22;
+    padding: 10px 16px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85em;
+    color: #c9d1d9;
+    user-select: none;
+  }
+  .faq-q:hover { background: #1c2128; }
+  .faq-q .faq-arrow { color: #484f58; font-size: 0.85em; transition: transform 0.2s; }
+  .faq-item.open .faq-arrow { transform: rotate(90deg); }
+  .faq-a {
+    display: none;
+    padding: 14px 18px;
+    background: #0d1117;
+    border-top: 1px solid #21262d;
+    font-size: 0.82em;
+    color: #8b949e;
+    line-height: 1.7;
+  }
+  .faq-item.open .faq-a { display: block; }
+  .faq-a p   { color: #8b949e; font-size: 1em; margin-bottom: 8px; }
+  .faq-a ul  { margin: 4px 0 10px 20px; }
+  .faq-a li  { margin-bottom: 3px; }
+  .faq-a pre {
+    background: #161b22; border: 1px solid #21262d; border-radius: 3px;
+    padding: 10px 12px; margin: 8px 0; overflow-x: auto;
+    font-size: 0.88em; color: #c9d1d9; line-height: 1.5; white-space: pre;
+  }
+  .faq-a .hl { color: #56d364; }
+  .faq-a .hi { color: #79c0ff; }
+  .faq-a .hw { color: #f39c12; }
+
   /* ── Footer nav ──────────────────────────────────────────── */
   .footer-nav {
     margin-top: 40px;
@@ -520,6 +563,649 @@
       <li>subscriber.html wraps the most common history queries in a UI</li>
     </ul>
   </div>
+  <div class="concept-card">
+    <h3>Monitoring</h3>
+    <ul>
+      <li><strong style="color:#79c0ff;">NATS :8222</strong> — built-in HTTP monitoring API: <code>/varz</code> (server stats), <code>/jsz</code> (JetStream streams &amp; consumers), <code>/connz</code> (connections)</li>
+      <li>nats.html connects to :8222 and shows stream message counts, consumer lag, and per-client throughput</li>
+      <li><strong style="color:#79c0ff;">FlashMQ :1883</strong> — no HTTP API; publishes stats to <code>$SYS/#</code> MQTT topics every 10 s (client count, publish rates, byte totals)</li>
+      <li>FlashMQ process status visible in dashboard.html; NATS message rate in nats.html reflects bridge throughput indirectly</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ─── AWS Cost Comparison ───────────────────────────────── -->
+<h2>AWS Cost Comparison</h2>
+<p>
+  Stress load basis: 3 sites, 1,152 cells, ~8,000 msgs/s, 24/7 operation.
+  Figures for the InfluxDB stack are from the actual AWS bill at 80 sites, extrapolated to single-site.
+</p>
+
+<h3>Per site: NATS stack vs InfluxDB stack</h3>
+<table class="matrix" style="margin-bottom:20px;">
+  <tr>
+    <th style="text-align:left">Component</th>
+    <th>NATS Stack (cloud)</th>
+    <th>Edge Parquet</th>
+    <th>InfluxDB (AWS)</th>
+  </tr>
+  <tr>
+    <td>EC2</td>
+    <td>$37 <code>t3.large</code></td>
+    <td>$10 <code>t3.small</code></td>
+    <td>$182 <code>r5.xlarge</code></td>
+  </tr>
+  <tr>
+    <td>EBS / EFS</td>
+    <td>$2.50</td>
+    <td>$0</td>
+    <td>$25</td>
+  </tr>
+  <tr>
+    <td>S3 storage</td>
+    <td>$10</td>
+    <td>$10</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td>Data transfer</td>
+    <td>$14</td>
+    <td>$0.35</td>
+    <td>$3,600 (80 sites)*</td>
+  </tr>
+  <tr>
+    <td>IoT Core</td>
+    <td class="yes">$0</td>
+    <td class="yes">$0</td>
+    <td>$3,000*</td>
+  </tr>
+  <tr>
+    <td>Lambda</td>
+    <td class="yes">$0</td>
+    <td class="yes">$0</td>
+    <td>$2,000*</td>
+  </tr>
+  <tr>
+    <td style="color:#79c0ff;font-weight:bold">Total</td>
+    <td style="color:#79c0ff;font-weight:bold">~$64/month</td>
+    <td style="color:#56d364;font-weight:bold">~$21/month</td>
+    <td style="color:#f85149;font-weight:bold">~$226/month</td>
+  </tr>
+</table>
+
+<h3>At 80 sites</h3>
+<table class="matrix" style="margin-bottom:8px;">
+  <tr>
+    <th style="text-align:left"></th>
+    <th>Edge Parquet</th>
+    <th>InfluxDB (actual)</th>
+    <th>Saving</th>
+  </tr>
+  <tr><td>EC2</td><td>$20 (shared)</td><td>$36,000</td><td class="yes">$35,980</td></tr>
+  <tr><td>EBS/EFS</td><td>$0</td><td>$10,000</td><td class="yes">$10,000</td></tr>
+  <tr><td>S3</td><td>$800</td><td>$3,000</td><td class="yes">$2,200</td></tr>
+  <tr><td>Data transfer</td><td>$28</td><td>$3,600</td><td class="yes">$3,572</td></tr>
+  <tr><td>IoT Core</td><td>$0</td><td>$3,000</td><td class="yes">$3,000</td></tr>
+  <tr><td>Lambda</td><td>$0</td><td>$2,000</td><td class="yes">$2,000</td></tr>
+  <tr><td>CloudWatch</td><td>$10</td><td>$2,600</td><td class="yes">$2,590</td></tr>
+  <tr>
+    <td style="color:#79c0ff;font-weight:bold">Total</td>
+    <td style="color:#56d364;font-weight:bold">~$860/month</td>
+    <td style="color:#f85149;font-weight:bold">~$76,200/month</td>
+    <td style="color:#56d364;font-weight:bold">~$75,340/month</td>
+  </tr>
+</table>
+<p style="font-size:0.78em;color:#484f58;margin-bottom:28px;">
+  * InfluxDB figures from actual AWS bill across 80 sites. The Subscriber API on AWS is stateless and shared — EC2 cost does not scale with site count.
+  See <code>docs/aws_cost_comparison.md</code> for full breakdown.
+</p>
+
+<!-- ─── Edge Parquet Architecture ─────────────────────────── -->
+<h2>Edge Parquet Architecture</h2>
+<p>
+  Instead of streaming raw messages to AWS, each site controller runs the full NATS pipeline locally,
+  generates compressed Parquet files, and uploads them directly to S3.
+  AWS is reduced to S3 + a single shared Subscriber API instance.
+  Live monitoring is served via a <strong>NATS Leaf Node</strong> — a single outbound TLS connection
+  that forwards messages to the AWS NATS server in real time.
+</p>
+
+<div class="concept-grid" style="margin-bottom:20px;">
+  <div class="concept-card">
+    <h3>Site Controller (edge)</h3>
+    <ul>
+      <li>Full NATS stack: FlashMQ → Bridge → JetStream → Parquet Writer</li>
+      <li>Parquet Writer uploads to S3 every 60 seconds (primary path)</li>
+      <li>NATS Leaf Node forwards every message to AWS in real time (live path)</li>
+      <li>Continues operating fully offline — queues locally, uploads on recovery</li>
+      <li>NATS JetStream WAL on disk — survives power cycle, replays on restart</li>
+    </ul>
+  </div>
+  <div class="concept-card">
+    <h3>AWS (thin read layer)</h3>
+    <ul>
+      <li>NATS Server receives live messages via Leaf Node from all sites</li>
+      <li>Gap-fill Parquet Writer consumes from AWS NATS — writes to S3 <em>only</em> if site hasn't uploaded that window (S3 key check)</li>
+      <li>Subscriber API: history from S3, recent from in-memory buffer</li>
+      <li>One <code>t3.small</code> serves all 80 sites — cost doesn't scale with site count</li>
+    </ul>
+  </div>
+  <div class="concept-card">
+    <h3>Dual-path Resilience</h3>
+    <ul>
+      <li><strong>Path 1</strong> — Site Parquet Writer → S3 (every 60s, primary)</li>
+      <li><strong>Path 2</strong> — Leaf Node → AWS NATS → Gap-fill Writer → S3 (backup)</li>
+      <li>Power loss mid-buffer: messages already on AWS via Path 2 — not lost</li>
+      <li>WAN link drops: site continues, S3 already has data via Path 1</li>
+      <li>Power + WAN simultaneous: NATS WAL on local disk, replay on recovery</li>
+      <li>More resilient than current cloud pipeline on every failure mode</li>
+    </ul>
+  </div>
+  <div class="concept-card">
+    <h3>NATS Leaf Node Config</h3>
+    <ul>
+      <li>Single outbound TLS connection, configured in <code>nats-server.conf</code></li>
+      <li>No code changes — purely infrastructure config</li>
+      <li>All sites appear on the same subject space at AWS</li>
+      <li>~40× less data transfer than raw MQTT streaming</li>
+    </ul>
+    <pre style="margin-top:8px;background:#0d1117;border:1px solid #21262d;border-radius:3px;padding:8px;font-size:0.78em;color:#c9d1d9;">leafnodes {
+  remotes [{
+    url: "nats://aws:7422"
+    credentials: "/etc/nats/site.creds"
+  }]
+}</pre>
+  </div>
+</div>
+
+<h3 style="color:#d2a679;font-size:0.92em;margin:0 0 8px;">Failure mode comparison</h3>
+<table class="matrix" style="margin-bottom:28px;">
+  <tr>
+    <th style="text-align:left">Scenario</th>
+    <th>Current cloud pipeline</th>
+    <th>Edge Parquet</th>
+  </tr>
+  <tr>
+    <td>Site power loss (mid-buffer)</td>
+    <td style="color:#f85149">Data loss</td>
+    <td class="yes">Covered by Leaf Node (Path 2)</td>
+  </tr>
+  <tr>
+    <td>WAN link drops</td>
+    <td style="color:#f85149">Data loss — IoT Core drops</td>
+    <td class="yes">No loss — parquet queues locally</td>
+  </tr>
+  <tr>
+    <td>Power loss + WAN down</td>
+    <td style="color:#f85149">Total loss</td>
+    <td class="yes">NATS WAL replay on recovery</td>
+  </tr>
+  <tr>
+    <td>AWS outage</td>
+    <td style="color:#f85149">Total failure</td>
+    <td class="yes">Site continues unaffected</td>
+  </tr>
+  <tr>
+    <td>Site controller restart (clean)</td>
+    <td class="part">Replay if NATS retained</td>
+    <td class="yes">Replay from local JetStream</td>
+  </tr>
+</table>
+
+<p style="font-size:0.82em;color:#8b949e;margin-bottom:28px;">
+  See <code>docs/edge_parquet_architecture.md</code> for full design including migration path, hardware requirements, and NATS Leaf Node configuration reference.
+</p>
+
+<!-- ─── MQTT Publishing ───────────────────────────────────── -->
+<h2>MQTT Publishing — Generator &amp; Stress Runner</h2>
+<p>
+  Both publishers use <code>paho-mqtt</code> (QoS 1, keepalive 60 s) and connect to the
+  <em>local</em> MQTT broker on the machine they run on.  They share the
+  <code>cell_generator.py</code> simulation core (Gaussian random-walk with drift reversal
+  at bounds) to produce realistic-looking sensor trajectories.
+</p>
+
+<div class="concept-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 28px;">
+  <div class="concept-card">
+    <h3>Generator <span style="color:#8b949e;font-weight:normal;font-size:0.9em">— phil-dev, on demand</span></h3>
+    <ul>
+      <li>Broker: <code>localhost:1884</code> (Mosquitto — managed by process manager)</li>
+      <li>Topology: 2 sites × 3 racks × 4 modules × 6 cells = <strong style="color:#79c0ff;">144 cells</strong></li>
+      <li>Rate: 1 publish loop per second → <strong style="color:#79c0ff;">144 msgs/s</strong></li>
+      <li>Topic mode: <code>per_cell</code> (configurable; also supports <code>per_cell_item</code>)<br>
+        <code>batteries/site=0/rack=1/module=2/cell=3</code></li>
+      <li>Payload (<code>per_cell</code>): measurements are <em>nested</em> — each field is an object:
+        <code>{"voltage": {"value": 3.71, "unit": "V"}, "current": {"value": -0.4, "unit": "A"}, …, "timestamp": 1741234567.89}</code></li>
+      <li>Controlled interactively via WebSocket <code>:8765</code> (start / stop / update_config)</li>
+    </ul>
+  </div>
+  <div class="concept-card">
+    <h3>Stress Runner <span style="color:#8b949e;font-weight:normal;font-size:0.9em">— spark-22b6, 24/7</span></h3>
+    <ul>
+      <li>Broker: <code>localhost:1883</code> (FlashMQ — OS service)</li>
+      <li>Topology: 1 project × 3 sites × 4 racks × 8 modules × 12 cells = <strong style="color:#56d364;">1,152 cells</strong></li>
+      <li>Rate: 1 loop per second per site task → <strong style="color:#56d364;">~1,152 msgs/s</strong> sustained</li>
+      <li>Topic: always includes <code>project=</code> segment<br>
+        <code>batteries/project=0/site=0/rack=1/module=2/cell=3</code></li>
+      <li>Payload: measurements are <em>flat</em> top-level fields:
+        <code>{"timestamp": …, "project_id": 0, "site_id": 0, "rack_id": 1, …, "voltage": 3.71, "current": -0.4, …, "power": -1.48}</code>
+        — <code>power</code> is derived (<code>voltage × current</code>) and only present when both fields are in the schema</li>
+      <li>One asyncio task per (project, site) pair; single shared paho client in <code>loop_start</code> mode</li>
+      <li>Status broadcast every second via WebSocket <code>:8769</code> (read-only stats)</li>
+    </ul>
+  </div>
+</div>
+
+<h3 style="color:#d2a679;font-size:0.92em;margin:0 0 8px;">Key differences at a glance</h3>
+<table class="matrix" style="margin-bottom:28px;">
+  <tr>
+    <th style="text-align:left">Property</th>
+    <th>Generator (phil-dev)</th>
+    <th>Stress Runner (spark-22b6)</th>
+  </tr>
+  <tr>
+    <td>MQTT broker</td>
+    <td>Mosquitto <code>:1884</code></td>
+    <td>FlashMQ <code>:1883</code></td>
+  </tr>
+  <tr>
+    <td>Cell count</td>
+    <td>144</td>
+    <td>1,152</td>
+  </tr>
+  <tr>
+    <td>Topic includes <code>project=</code></td>
+    <td class="dim">no</td>
+    <td class="yes">yes</td>
+  </tr>
+  <tr>
+    <td>Payload shape</td>
+    <td>nested <code>{field: {value, unit}}</code></td>
+    <td>flat <code>{field: value, …, power}</code></td>
+  </tr>
+  <tr>
+    <td>Simulation model</td>
+    <td>simple uniform random-walk</td>
+    <td>Gaussian random-walk (<code>cell_generator.py</code>)</td>
+  </tr>
+  <tr>
+    <td>NATS bridge topic filter</td>
+    <td colspan="2"><code>batteries/#</code> — matches both topic shapes</td>
+  </tr>
+</table>
+
+<!-- ─── FAQ ───────────────────────────────────────────────── -->
+<h2>FAQ — Configuration &amp; Data Flow</h2>
+<p>Click a question to expand. Answers are grounded in the actual config files and source code.</p>
+
+<!-- Q1 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  What configuration does local FlashMQ need for incoming MQTT data?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>FlashMQ is configured in <code>orig_aws/flashmq/flashmq.conf</code>. The minimum required blocks for the battery pipeline are:</p>
+<pre><span class="hw">listen</span> {
+    port     <span class="hl">1883</span>
+    protocol mqtt
+}
+
+allow_anonymous  <span class="hl">true</span>          <span class="hi"># no auth — add TLS + auth for production</span>
+log_file         /var/log/flashmq/flashmq.log
+log_level        info
+
+<span class="hi"># High-throughput tuning</span>
+client_initial_buffer_size  <span class="hl">65536</span>    <span class="hi"># 64 KB per-client receive buffer</span>
+max_packet_size             <span class="hl">1048576</span>  <span class="hi"># 1 MB max MQTT packet</span>
+max_qos_msg_pending_per_client  <span class="hl">1000</span> <span class="hi"># QoS-1 in-flight queue per client</span></pre>
+<ul>
+  <li>No persistence is configured — FlashMQ is intentionally stateless; durability is NATS JetStream's job downstream.</li>
+  <li>Three clients connect: the <strong>generator</strong> (publishes), the <strong>NATS bridge</strong> (subscribes <code>batteries/#</code>, QoS 1), and <strong>Telegraf</strong> in the orig_aws stack (also subscribes <code>batteries/#</code>, QoS 1).</li>
+  <li>On spark-22b6 FlashMQ runs as an OS systemd service, not via the process manager — it is always running before the pipeline starts.</li>
+  <li>To enable per-publish logging (useful when debugging): uncomment <code>log_subscriptions true</code> in the config, then <code>systemctl reload flashmq</code>.</li>
+</ul>
+</div>
+</div>
+
+<!-- Q2 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  How does the local FlashMQ connect to the AWS instance?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>FlashMQ itself does not connect to AWS directly. Data leaves the machine via two separate downstream consumers that both subscribe to it:</p>
+<ul>
+  <li><strong>NATS stack path:</strong> The <code>nats_bridge</code> (Python, <code>aiomqtt</code>) subscribes to FlashMQ on <code>localhost:1883</code>, converts each message to a NATS subject, and publishes it to the local NATS JetStream. The <code>parquet_writer</code> then drains that stream and uploads Parquet files to S3 — either MinIO locally (<code>http://spark-22b6:9000</code>) or real AWS S3 (remove <code>endpoint_url</code> from <code>parquet_writer/config.yaml</code> and supply real AWS credentials).</li>
+  <li><strong>orig_aws path:</strong> Telegraf subscribes to FlashMQ (<code>servers = ["tcp://flashmq:1883"]</code> in Docker, or <code>tcp://localhost:1883</code> natively) and writes to InfluxDB2, which can be a local container or an AWS EC2 instance. Change the Telegraf output URL from <code>http://influxdb:8086</code> to <code>http://&lt;ec2-host&gt;:8086</code> to point at a remote InfluxDB2.</li>
+</ul>
+<p>There is no MQTT bridge configured (FlashMQ-to-FlashMQ forwarding). All AWS connectivity is in the consuming services, not in the broker.</p>
+</div>
+</div>
+
+<!-- Q3 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  How do we monitor traffic through the pipeline?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>Several complementary views:</p>
+<ul>
+  <li><strong>NATS HTTP API (<a href="nats.html">nats.html</a>):</strong> <code>GET :8222/varz</code> shows <code>in_msgs</code>, <code>out_msgs</code>, <code>in_msgs_rate</code>, <code>out_msgs_rate</code>, and slow consumers in real time. <code>GET :8222/jsz?streams=true&amp;consumer=true</code> shows per-stream message counts and per-consumer <code>num_pending</code> (pipeline lag).</li>
+  <li><strong>FlashMQ $SYS topics:</strong> FlashMQ publishes broker stats every 10 s to <code>$SYS/broker/clients/connected</code>, <code>$SYS/broker/messages/publish/received</code>, <code>$SYS/broker/messages/publish/sent</code>, and <code>$SYS/broker/bytes/received</code>. Subscribe with any MQTT client: <code>mosquitto_sub -t '$SYS/#' -v</code>.</li>
+  <li><strong>Process manager (<a href="dashboard.html">dashboard.html</a>):</strong> Shows running/stopped state for all managed processes including <code>nats</code>, <code>nats_bridge</code>, <code>parquet_writer</code>.</li>
+  <li><strong>Subscriber API /diag endpoint:</strong> <code>GET :8768/diag</code> returns a JSON snapshot combining NATS JetStream state (messages, bytes, consumer lag, fill %), recent S3 file list, and live subscriber stats. This is the single-call health check for the whole pipeline.</li>
+  <li><strong>Parquet writer log:</strong> Logs every flush — row count, S3 key, and bytes uploaded — once per <code>flush_interval_seconds</code> (default 60 s).</li>
+</ul>
+</div>
+</div>
+
+<!-- Q4 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  What configuration connects the NATS bridge to FlashMQ and NATS?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>All settings live in <code>source/nats_bridge/config.spark.yaml</code> (spark-22b6) or <code>config.yaml</code> (phil-dev):</p>
+<pre><span class="hw">mqtt</span>:
+  host:      localhost
+  port:      <span class="hl">1883</span>          <span class="hi"># FlashMQ port</span>
+  client_id: nats-bridge
+  topic:     <span class="hl">"batteries/#"</span>  <span class="hi"># wildcard — catches both topic shapes</span>
+  qos:       <span class="hl">1</span>              <span class="hi"># at-least-once delivery</span>
+  username:  ""             <span class="hi"># leave blank for allow_anonymous</span>
+
+<span class="hw">nats</span>:
+  url:             <span class="hl">"nats://localhost:4222"</span>
+  stream_name:     <span class="hl">BATTERY_DATA</span>
+  stream_subjects:
+    - <span class="hl">"batteries.>"</span>      <span class="hi"># NATS wildcard — all batteries.* subjects</span>
+  max_age_hours:   <span class="hl">48</span>       <span class="hi"># messages retained 48 h as replay buffer</span>
+  max_bytes:       <span class="hi"># default 8 GB — overrides stream limit on each start</span></pre>
+<p><strong>Topic conversion:</strong> The bridge replaces every <code>/</code> with <code>.</code> so MQTT hierarchy becomes NATS subject hierarchy:</p>
+<pre>MQTT:  <span class="hw">batteries/project=0/site=0/rack=1/module=2/cell=3</span>
+NATS:  <span class="hl">batteries.project=0.site=0.rack=1.module=2.cell=3</span></pre>
+<p>The bridge creates or updates the <code>BATTERY_DATA</code> JetStream stream on startup (idempotent). If NATS or MQTT is unavailable it retries with a fixed 2 s back-off loop — no manual restart required.</p>
+</div>
+</div>
+
+<!-- Q5 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  What configuration controls does NATS JetStream expose?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p><strong>Server-level</strong> — <code>manager/nats-server.conf</code>:</p>
+<pre>port: <span class="hl">4222</span>              <span class="hi"># client / bridge / subscriber connections</span>
+http_port: <span class="hl">8222</span>        <span class="hi"># monitoring API (read-only)</span>
+
+jetstream {
+  store_dir:        <span class="hl">"./nats-data"</span>   <span class="hi"># on-disk message store location</span>
+  max_memory_store: <span class="hl">512MB</span>
+  max_file_store:   <span class="hl">10GB</span>
+}</pre>
+<p><strong>Stream-level</strong> — set by the bridge on startup via the NATS Go/Python API:</p>
+<ul>
+  <li><code>stream_name: BATTERY_DATA</code> — single stream for all battery subjects</li>
+  <li><code>stream_subjects: ["batteries.>"]</code> — captures all <code>batteries.*</code> NATS subjects</li>
+  <li><code>retention: LimitsPolicy</code> — messages kept until age or size limit, then dropped from head</li>
+  <li><code>storage: FileStorage</code> — persisted to <code>nats-data/</code> on disk (survives restarts)</li>
+  <li><code>max_age_hours: 48</code> — configurable per-deploy in bridge config; messages older than this are evicted</li>
+  <li><code>max_bytes: 8 GB</code> (default in bridge code, overrides previous stream config each restart)</li>
+</ul>
+<p><strong>Consumer-level</strong> — two consumers are created by pipeline services:</p>
+<ul>
+  <li><code>parquet-writer</code> — durable pull consumer, <code>deliver_policy: ALL</code>, <code>ack_wait: 60 s</code>, <code>max_deliver: 10</code></li>
+  <li>Subscriber API live sub — ephemeral push consumer, <code>deliver_policy: NEW</code>, auto-deleted when it unsubscribes</li>
+</ul>
+</div>
+</div>
+
+<!-- Q6 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  How does NATS handle queries from the monitor / subscriber systems?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>NATS itself only delivers messages — it does not run queries. The Subscriber API wraps NATS to provide two query modes:</p>
+<p><strong>Live stream (push consumer):</strong></p>
+<ul>
+  <li>When a browser sends <code>{"type": "subscribe", "subject": "batteries.>"}</code> over WebSocket to <code>:8767</code>, the Subscriber API creates an ephemeral NATS push consumer with <code>deliver_policy: NEW</code>.</li>
+  <li>Each incoming NATS message is JSON-decoded, nested <code>{value, unit}</code> objects are flattened to scalars, and the result is forwarded to all connected WebSocket clients as <code>{"type": "live", "subject": "…", "payload": {…}}</code>.</li>
+  <li>The subscription auto-rebuilds on NATS reconnect.</li>
+</ul>
+<p><strong>History queries (DuckDB over S3):</strong></p>
+<ul>
+  <li>When a browser sends <code>{"type": "query_history", "query_id": "q1", "site_id": "0", "from_ts": …, "to_ts": …, "limit": 1000}</code>, the server translates this into a DuckDB SQL query against the Parquet files in S3.</li>
+  <li>DuckDB uses the <code>httpfs</code> extension to read <code>s3://battery-data/project=*/…/*.parquet</code> with hive partitioning — it prunes to only the relevant <code>project=</code> and <code>site=</code> directories.</li>
+  <li>Results come back as <code>{"type": "history", "query_id": "q1", "columns": […], "rows": […], "total": N, "elapsed_ms": N}</code>.</li>
+  <li>NATS is not involved in history queries at all — they go directly to S3/MinIO.</li>
+</ul>
+<p><strong>NATS monitoring API (nats.html):</strong></p>
+<ul>
+  <li>Browser makes plain <code>GET</code> requests directly to <code>:8222/varz</code>, <code>/jsz</code>, <code>/connz</code> etc. — this is a built-in NATS feature, no custom code required.</li>
+</ul>
+</div>
+</div>
+
+<!-- Q7 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  How is MQTT data turned into Parquet files, and which config items control it?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>The Parquet Writer (<code>source/parquet_writer/writer.py</code>) runs as a durable NATS pull consumer. The pipeline is:</p>
+<ol style="margin:4px 0 10px 20px;color:#8b949e;line-height:1.8">
+  <li>Connect to NATS <code>:4222</code> and register durable consumer <code>parquet-writer</code> on stream <code>BATTERY_DATA</code>, subject filter <code>batteries.></code>.</li>
+  <li>Pull messages in batches of <code>fetch_batch</code> (default <strong>500</strong>) with a 1 s timeout — fills an in-memory buffer of <code>(payload_dict, nats_msg)</code> tuples.</li>
+  <li>Flush the buffer when either <code>flush_interval_seconds</code> (default <strong>60 s</strong>) elapses or the buffer reaches <code>max_messages</code> (default <strong>10 000</strong>).</li>
+  <li>On flush: JSON-decode each message; flatten nested <code>{value, unit}</code> objects to scalars; coerce id columns to <code>int64</code> and measurement columns to <code>float64</code>; add <code>project_id = 0</code> if absent.</li>
+  <li>Group rows by <code>(project_id, site_id)</code> — one Parquet file per group per flush.</li>
+  <li>Build the S3 key from the <code>partitions</code> template (default: <code>project={p}/site={s}/{year}/{month}/{day}/{timestamp}.parquet</code>).</li>
+  <li>Upload to S3/MinIO with up to 5 exponential-backoff retries.</li>
+  <li>Acknowledge NATS messages <em>only after</em> successful upload — if the writer crashes mid-flush, NATS replays the unacknowledged batch on restart.</li>
+</ol>
+<p><strong>Key config items</strong> in <code>source/parquet_writer/config.yaml</code>:</p>
+<pre><span class="hw">nats</span>:
+  url:           nats://localhost:4222
+  stream_name:   BATTERY_DATA
+  consumer_name: <span class="hl">parquet-writer</span>   <span class="hi"># durable — survives restarts</span>
+  subject_filter: <span class="hl">"batteries.>"</span>
+
+<span class="hw">buffer</span>:
+  flush_interval_seconds: <span class="hl">60</span>   <span class="hi"># max age of any buffered message before flush</span>
+  max_messages:           <span class="hl">10000</span> <span class="hi"># flush early if buffer fills first</span>
+  fetch_batch:            <span class="hl">500</span>  <span class="hi"># NATS pull batch size per iteration</span>
+
+<span class="hw">parquet</span>:
+  compression: <span class="hl">snappy</span>          <span class="hi"># snappy | zstd | gzip</span>
+
+<span class="hw">s3</span>:
+  endpoint_url: http://spark-22b6:9000  <span class="hi"># remove for real AWS S3</span>
+  bucket:       battery-data
+  access_key:   minioadmin
+  secret_key:   minioadmin
+  project_id:   0
+  partitions:
+    - <span class="hl">"project={project_id}"</span>
+    - <span class="hl">"site={site_id}"</span>
+    - <span class="hl">"{year}"</span>
+    - <span class="hl">"{month}"</span>
+    - <span class="hl">"{day}"</span></pre>
+<p>The <code>partitions</code> list is the full list of path segments in order — reorder or add <code>{hour}</code> to change granularity. Available variables: <code>{project_id}</code>, <code>{site_id}</code>, <code>{year}</code>, <code>{month}</code>, <code>{day}</code>, <code>{hour}</code>.</p>
+</div>
+</div>
+
+<!-- Q8 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  What endpoints and services does the Subscriber API expose?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>The Subscriber API runs two servers from a single process (<code>subscriber/api/server.py</code>):</p>
+<p><strong>WebSocket server — <code>:8767</code></strong></p>
+<pre><span class="hi"># Client → Server</span>
+{"type": <span class="hl">"get_status"</span>}
+{"type": <span class="hl">"subscribe"</span>,   "subject": <span class="hw">"batteries.>"</span>}  <span class="hi"># start live push stream</span>
+{"type": <span class="hl">"unsubscribe"</span>}
+{"type": <span class="hl">"query_history"</span>,
+  "query_id": "q1",
+  "proj_id":  "0",          <span class="hi"># omit = all projects</span>
+  "site_id":  "0",          <span class="hi"># omit = all sites</span>
+  "from_ts":  1700000000.0, <span class="hi"># unix float; omit = now − 1 h</span>
+  "to_ts":    1700003600.0, <span class="hi"># unix float; omit = now</span>
+  "limit":    1000}         <span class="hi"># capped at max_limit: 10000</span>
+
+<span class="hi"># Server → Client</span>
+{"type": <span class="hl">"status"</span>,  "nats_connected": bool, "s3_connected": bool,
+                   "subscribed": bool, "subject": str}
+{"type": <span class="hl">"live"</span>,    "subject": "batteries.site=0…", "payload": {…}}
+{"type": <span class="hl">"stats"</span>,   "live_total": N, "live_per_sec": N, "queries_run": N}
+{"type": <span class="hl">"history"</span>, "query_id": "q1", "columns": […], "rows": [[…],…],
+                   "total": N, "elapsed_ms": N}
+{"type": <span class="hl">"error"</span>,   "query_id": "q1", "message": "…"}</pre>
+<p><strong>Flux-compat HTTP server — <code>:8768</code></strong> (implemented in <code>flux_compat.py</code>)</p>
+<ul>
+  <li><code>GET  /ping</code> and <code>GET /health</code> → 204 (connection probe — same response as InfluxDB2)</li>
+  <li><code>POST /api/v2/query</code> — accepts a Flux query body; translates it to DuckDB SQL against the S3 Parquet files; returns InfluxDB2 annotated CSV. Supports three query patterns:
+    <ul>
+      <li><em>timeseries</em> — <code>aggregateWindow(fn:mean)</code>: time-bucketed averages per field</li>
+      <li><em>heatmap</em> — <code>last()</code>: latest voltage per (module, cell)</li>
+      <li><em>writerate</em> — <code>count() + sum()</code>: total rows in window</li>
+    </ul>
+  </li>
+  <li><code>GET  /diag</code> — JSON diagnostic snapshot: NATS JetStream state (messages, bytes, consumer lag, fill%), S3 file list (last file, total files/bytes, write interval), and live subscriber stats.</li>
+</ul>
+<p><strong>Config items</strong> in <code>subscriber/api/config.yaml</code> that control the above:</p>
+<pre><span class="hw">nats</span>:
+  url:             nats://localhost:4222
+  stream_name:     BATTERY_DATA
+  default_subject: <span class="hl">"batteries.>"</span>
+  monitoring_url:  <span class="hl">http://localhost:8222</span>  <span class="hi"># used by /diag</span>
+
+<span class="hw">s3</span>:
+  endpoint_url: http://spark-22b6:9000
+  bucket:       battery-data
+  access_key:   minioadmin
+  secret_key:   minioadmin
+
+<span class="hw">websocket</span>:
+  host: 0.0.0.0
+  port: <span class="hl">8767</span>
+
+<span class="hw">flux_http</span>:
+  port: <span class="hl">8768</span>
+
+<span class="hw">history</span>:
+  default_limit: <span class="hl">1000</span>
+  max_limit:     <span class="hl">10000</span></pre>
+</div>
+</div>
+
+<!-- Q9 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  How does monitor.html fetch data — and is the path the same for NATS and InfluxDB2?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>monitor.html implements two completely separate data paths selected by the stack-selector buttons, but uses identical rendering code for both:</p>
+<p><strong>NATS stack (Subscriber API — <code>:8767</code>)</strong></p>
+<ul>
+  <li>Opens a WebSocket to <code>ws://&lt;host&gt;:8767</code>.</li>
+  <li>On connect sends <code>{"type": "subscribe", "subject": "batteries.>"}</code> — live messages arrive as <code>{"type": "live", "payload": {…}}</code> events; these update the heatmap and time-series charts in real time with no polling.</li>
+  <li>For history (time-series chart data) sends <code>{"type": "query_history", …}</code>; the server responds with a columnar <code>{"type": "history", "columns": […], "rows": [[…],…]}</code> result that the page maps to chart data arrays.</li>
+</ul>
+<p><strong>orig_aws stack (InfluxDB2 — <code>:8086</code>)</strong></p>
+<ul>
+  <li>No WebSocket — uses plain <code>fetch()</code> HTTP POST to <code>/api/v2/query?org=battery-org</code> with header <code>Authorization: Token battery-token-secret</code> and <code>Content-Type: application/vnd.flux</code>.</li>
+  <li>Three separate Flux queries are fired in parallel on each refresh: <em>timeseries</em> (aggregateWindow mean), <em>heatmap</em> (last voltage per module/cell), and <em>writerate</em> (count of rows in last 30 s). The responses are InfluxDB2 annotated CSV, parsed by a custom CSV parser in the page.</li>
+  <li>Auto-refreshes on a configurable timer (3/5/10/30 s) because InfluxDB2 has no push mechanism.</li>
+</ul>
+<p><strong>Using the Flux-compat shim instead of real InfluxDB2</strong></p>
+<ul>
+  <li>Point the "Host" field at the Subscriber API host and set port to <code>8768</code> instead of <code>8086</code>. The shim at <code>:8768</code> accepts the same Flux POST and returns the same annotated CSV format — monitor.html requires no code changes.</li>
+  <li>This lets the orig_aws HTML stack be demonstrated even when no InfluxDB2 is running, by reading from the same S3 Parquet files that the NATS stack writes.</li>
+</ul>
+<p><strong>What both paths share</strong></p>
+<ul>
+  <li>Same chart rendering functions (<code>drawLineChart</code>, <code>renderHeatmap</code>, <code>renderMiniStats</code>).</li>
+  <li>Same cell selector (site / rack / module / cell dropdowns).</li>
+  <li>Same host saved to <code>localStorage</code> keys <code>ds_host</code> (phil-dev) and <code>aws_host</code> (spark-22b6).</li>
+</ul>
+</div>
+</div>
+
+<!-- Q10 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  What is the Edge Parquet architecture and why does it reduce AWS costs so dramatically?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>
+  In the current cloud pipeline, every raw MQTT message is streamed to AWS for processing —
+  at 8,000 msgs/s that's ~8 MB/s, ~700 GB/day per site, plus per-message IoT Core and Lambda charges.
+</p>
+<p>
+  The edge architecture moves Parquet file generation to the site controller. Instead of streaming
+  raw messages, each site uploads pre-compressed Parquet files every 60 seconds — the same data
+  compressed to ~12 MB/flush (~17 GB/day), roughly <strong>40× less transfer</strong>.
+  IoT Core and Lambda are eliminated entirely.
+</p>
+<p><strong>Why the ratio widens at scale:</strong></p>
+<ul>
+  <li>InfluxDB2 must scale <em>vertically</em> — its cardinality index grows with series count (site × rack × module × cell × measurement), forcing progressively larger <code>r5</code> instances.</li>
+  <li>The NATS/Parquet stack scales <em>horizontally</em> — NATS handles millions of msgs/s on a single node; S3 scales with data volume at a fixed $0.023/GB.</li>
+  <li>The Subscriber API is stateless — one <code>t3.small</code> on AWS serves all 80 sites. EC2 cost is flat regardless of site count.</li>
+</ul>
+<p>Result: 80 sites at <strong>~$860/month</strong> vs <strong>~$76,200/month</strong> with InfluxDB.</p>
+</div>
+</div>
+
+<!-- Q11 -->
+<div class="faq-item">
+<div class="faq-q" onclick="faqToggle(this)">
+  What happens to the last 60 seconds of data if the site controller loses power?
+  <span class="faq-arrow">›</span>
+</div>
+<div class="faq-a">
+<p>
+  The 60-second buffer in the Parquet Writer is in RAM — a hard power cut before the flush would
+  normally lose it. However, the Edge Parquet architecture provides two independent protections:
+</p>
+<p><strong>Protection 1 — NATS Leaf Node (Path 2)</strong></p>
+<ul>
+  <li>The NATS Leaf Node forwards every message to AWS in real time — well before the 60-second flush.</li>
+  <li>On power loss, those messages are already sitting in AWS NATS JetStream.</li>
+  <li>The AWS gap-fill Parquet Writer detects the missing S3 window and writes it from the AWS NATS data.</li>
+  <li>No data loss — the gap-fill writer activates automatically, no manual intervention.</li>
+</ul>
+<p><strong>Protection 2 — NATS JetStream WAL on disk</strong></p>
+<ul>
+  <li>NATS JetStream writes every message to a write-ahead log on local disk before acknowledging to the bridge.</li>
+  <li>The Parquet Writer only acknowledges messages to NATS <em>after</em> a successful S3 upload.</li>
+  <li>On restart, NATS replays all unacknowledged messages from the last committed position.</li>
+  <li>The writer uploads the missing window to S3 on its first flush after restart.</li>
+</ul>
+<p><strong>Remaining risks and mitigations:</strong></p>
+<ul>
+  <li><strong>NATS disk corruption:</strong> use a journaling filesystem (ext4/xfs — Linux default). Optionally add <code>sync: always</code> in <code>nats-server.conf</code> for fsync-per-message durability (~20% throughput cost).</li>
+  <li><strong>MQTT → NATS bridge window (~milliseconds):</strong> devices using QoS 1 retransmit automatically if the broker didn't ack.</li>
+  <li><strong>Simultaneous power loss + WAN failure:</strong> covered by the NATS WAL — replays to S3 when both recover.</li>
+  <li><strong>Best practice:</strong> a small UPS ($50–100) gives a 30-second clean shutdown — NATS flushes its WAL and the writer acks cleanly. With a UPS the power cycle risk is effectively zero.</li>
+</ul>
+<p>
+  This makes the edge architecture <strong>more resilient than the current cloud pipeline</strong> for every failure mode — the InfluxDB stack has no equivalent recovery mechanism if IoT Core drops messages during a WAN outage.
+</p>
+</div>
 </div>
 
 <!-- ─── Typical Workflow ──────────────────────────────────── -->
@@ -594,6 +1280,60 @@
       <td><code>8767 / 8768</code></td>
       <td>Interactive API tester — raw WebSocket command panel and Flux HTTP query tester</td>
       <td><span class="tag t">test</span><span class="tag d">doc</span></td>
+    </tr>
+    <tr>
+      <td><a href="nats.html">nats.html</a></td>
+      <td><code>8222</code></td>
+      <td>NATS monitoring explorer — server stats, JetStream streams &amp; consumer lag, active connections; auto-connects to phil-dev or spark-22b6</td>
+      <td><span class="tag t">test</span><span class="tag d">doc</span></td>
+    </tr>
+    <tr>
+      <td><a href="study_data_sources.html">study_data_sources.html</a></td>
+      <td><code>8767</code></td>
+      <td>Study 1 — Data sources &amp; message rates: battery baseline, solar/wind/grid schemas, interactive rate calculator, generator config templates</td>
+      <td><span class="tag d">doc</span><span class="tag s">standalone</span></td>
+    </tr>
+    <tr>
+      <td><a href="study_data_recall.html">study_data_recall.html</a></td>
+      <td><code>8767</code></td>
+      <td>Study 2 — Data recall &amp; query patterns: real-time/medium/long-term tiers, the 60s gap, live demo panel, retention &amp; response benchmarks</td>
+      <td><span class="tag d">doc</span><span class="tag s">standalone</span></td>
+    </tr>
+    <tr>
+      <td><a href="study_aws_monitoring.html">study_aws_monitoring.html</a></td>
+      <td><code>8767 8768</code></td>
+      <td>Study 3 — AWS monitoring &amp; performance: two-tab view (NATS path + InfluxDB path), live /diag health panel, recall time specs, data completeness checks, fleet monitoring scale</td>
+      <td><span class="tag d">doc</span><span class="tag s">standalone</span></td>
+    </tr>
+    <tr>
+      <td><a href="../docs/aws_setup_influx.md">docs/aws_setup_influx.md</a></td>
+      <td>—</td>
+      <td>AWS setup guide — FlashMQ → Telegraf → InfluxDB2 path: native install (setup_aws.sh), Docker Compose, config reference, security groups, Telegraf monitoring, known issues</td>
+      <td><span class="tag d">doc</span></td>
+    </tr>
+    <tr>
+      <td><a href="../docs/aws_setup_nats.md">docs/aws_setup_nats.md</a></td>
+      <td>—</td>
+      <td>AWS setup guide — NATS path: EC2 + S3, deployment topology options, config reference, systemd services, NATS monitoring endpoints, known issues</td>
+      <td><span class="tag d">doc</span></td>
+    </tr>
+    <tr>
+      <td><a href="../docs/system_faults.md">docs/system_faults.md</a></td>
+      <td>—</td>
+      <td>System faults &amp; known problems: data dropping risks, recall gaps, fixed bugs (bridge crash, hive partitioning), active monitoring gaps — summary table with risk ratings</td>
+      <td><span class="tag d">doc</span></td>
+    </tr>
+    <tr>
+      <td><a href="../docs/aws_cost_comparison.md">docs/aws_cost_comparison.md</a></td>
+      <td>—</td>
+      <td>AWS cost comparison: NATS stack vs InfluxDB per site and at 80 sites, key cost drivers, S3 lifecycle rules, query buffer impact on GET costs</td>
+      <td><span class="tag d">doc</span></td>
+    </tr>
+    <tr>
+      <td><a href="../docs/edge_parquet_architecture.md">docs/edge_parquet_architecture.md</a></td>
+      <td>—</td>
+      <td>Edge Parquet architecture: site-controller parquet generation, NATS Leaf Node live feed, dual-path resilience, gap-fill writer, failure mode table, migration path, hardware requirements</td>
+      <td><span class="tag d">doc</span></td>
     </tr>
     <tr>
       <td><a href="architecture.html">architecture.html</a></td>
@@ -703,6 +1443,10 @@
     <td class="yes">●</td><td>—</td><td class="part">◑</td></tr>
   <tr><td>24/7 stress runner validation</td>
     <td class="part">◑</td><td>—</td><td class="part">◑</td></tr>
+  <tr><td>NATS server monitoring (:8222 API)</td>
+    <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td></tr>
+  <tr><td>FlashMQ broker monitoring ($SYS topics)</td>
+    <td class="part">◑</td><td class="part">◑</td><td class="yes">●</td></tr>
   <tr><td>Architecture &amp; design documentation</td>
     <td>—</td><td class="part">◑</td><td class="yes">●</td></tr>
 </table>
@@ -740,6 +1484,10 @@
   <a href="monitor.html">Monitor</a>
   <a href="subscriber.html">Subscriber</a>
   <a href="aws.html">S3 / AWS</a>
+  <a href="nats.html">NATS Monitor</a>
+  <a href="study_data_sources.html">Study 1: Data Sources</a>
+  <a href="study_data_recall.html">Study 2: Data Recall</a>
+  <a href="study_aws_monitoring.html">Study 3: AWS Monitoring</a>
   <a href="api_test.html">API Test</a>
   <a href="architecture.html">Architecture</a>
 </div>
@@ -839,6 +1587,11 @@ window.onload = () => {
     document.getElementById('mgr-host').value = saved;
   }
 };
+
+// ── FAQ accordion ────────────────────────────────────────────────────
+function faqToggle(btn) {
+  btn.closest('.faq-item').classList.toggle('open');
+}
 </script>
 </body>
 </html>
