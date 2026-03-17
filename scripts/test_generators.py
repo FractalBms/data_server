@@ -232,6 +232,159 @@ def test_cross_check(stress_info: dict, mqtt_info: dict) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def build_report(gen_info: dict, stress_info: dict, mqtt_info: dict,
+                 passed: int, failed: int, warned: int,
+                 args) -> tuple[str, str]:
+    """Return (markdown, html) report strings."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    counts = mqtt_info.get("counts", {})
+    payloads = mqtt_info.get("first_payloads", {})
+    total_rate = round(sum(counts.values()) / args.sample_secs, 1)
+
+    # ── Markdown ────────────────────────────────────────────────────────────
+    rows = []
+    for r in results:
+        icon = "✅" if r["ok"] else ("⚠️" if r["ok"] is None else "❌")
+        rows.append(f"| {icon} | {r['name']} | {r['detail']} |")
+    table = "\n".join(rows)
+
+    source_rows = []
+    for prefix, n in sorted(counts.items()):
+        rate = round(n / args.sample_secs, 1)
+        p = payloads.get(prefix, {})
+        meas = [k for k, v in p.items() if isinstance(v, dict) and "value" in v] \
+            or [k for k, v in p.items() if isinstance(v, (int, float))]
+        fmt = "nested" if any(isinstance(v, dict) for v in p.values()) else "flat"
+        source_rows.append(
+            f"| `{prefix}` | {rate} msg/s | {n} | {fmt} | {', '.join(meas[:5])} |"
+        )
+    source_table = "\n".join(source_rows)
+
+    gen_assets   = gen_info.get("cell_count", "?")
+    gen_sources  = ", ".join(s.get("id","?") for s in gen_info.get("sources",[]))
+    stress_cells = stress_info.get("cell_total", "?")
+    stress_mps   = stress_info.get("mps", "?")
+
+    md = f"""# Generator Test Report
+*{now} — sample window {args.sample_secs}s*
+
+## Summary
+
+| | |
+|---|---|
+| **Total MQTT rate** | {total_rate} msg/s |
+| **Multi-generator assets** | {gen_assets} cells ({gen_sources}) |
+| **Stress-runner assets** | {stress_cells} cells @ {stress_mps} msg/s |
+| **Result** | {passed} passed · {failed} failed · {warned} warnings |
+
+## MQTT Sources
+
+| Topic prefix | Rate | Messages | Format | Measurements |
+|---|---|---|---|---|
+{source_table}
+
+## Test Results
+
+| | Test | Detail |
+|---|---|---|
+{table}
+"""
+
+    # ── HTML ────────────────────────────────────────────────────────────────
+    status_color = "#2ecc71" if failed == 0 else "#e74c3c"
+    status_label = "ALL PASS" if failed == 0 else f"{failed} FAILED"
+
+    result_rows_html = ""
+    for r in results:
+        if r["ok"]:
+            bg, icon = "#eafaf1", "✅"
+        elif r["ok"] is None:
+            bg, icon = "#fef9e7", "⚠️"
+        else:
+            bg, icon = "#fdedec", "❌"
+        result_rows_html += (
+            f'<tr style="background:{bg}">'
+            f'<td style="text-align:center">{icon}</td>'
+            f'<td>{r["name"]}</td>'
+            f'<td style="color:#555">{r["detail"]}</td></tr>\n'
+        )
+
+    source_rows_html = ""
+    for prefix, n in sorted(counts.items()):
+        rate = round(n / args.sample_secs, 1)
+        p = payloads.get(prefix, {})
+        meas = [k for k, v in p.items() if isinstance(v, dict) and "value" in v] \
+            or [k for k, v in p.items() if isinstance(v, (int, float))]
+        fmt = "nested" if any(isinstance(v, dict) for v in p.values()) else "flat"
+        source_rows_html += (
+            f"<tr><td><code>{prefix}</code></td>"
+            f"<td><b>{rate}</b> msg/s</td>"
+            f"<td>{n}</td><td>{fmt}</td>"
+            f"<td style='font-size:0.85em'>{', '.join(meas[:5])}</td></tr>\n"
+        )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Generator Test Report</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; max-width: 900px;
+         margin: 40px auto; padding: 0 20px; color: #222; }}
+  h1 {{ border-bottom: 2px solid #ddd; padding-bottom: 8px; }}
+  h2 {{ margin-top: 32px; color: #333; }}
+  .badge {{ display:inline-block; padding:6px 18px; border-radius:20px;
+            color:#fff; font-weight:700; font-size:1.1em;
+            background:{status_color}; }}
+  .kv {{ display:grid; grid-template-columns:220px 1fr; gap:6px 16px;
+         background:#f8f9fa; padding:16px; border-radius:8px; margin:16px 0; }}
+  .kv .label {{ color:#666; font-size:0.9em; }}
+  .kv .value {{ font-weight:600; }}
+  table {{ border-collapse:collapse; width:100%; }}
+  th {{ background:#f0f0f0; padding:8px 12px; text-align:left; }}
+  td {{ padding:7px 12px; border-bottom:1px solid #eee; }}
+  code {{ background:#f0f0f0; padding:2px 5px; border-radius:3px; }}
+  .ts {{ color:#888; font-size:0.85em; }}
+</style>
+</head>
+<body>
+<h1>Generator Test Report
+  <span class="badge">{status_label}</span></h1>
+<p class="ts">{now} — sample window {args.sample_secs}s</p>
+
+<h2>Overview</h2>
+<div class="kv">
+  <span class="label">Total MQTT rate</span>
+  <span class="value">{total_rate} msg/s</span>
+  <span class="label">Multi-generator</span>
+  <span class="value">{gen_assets} cells ({gen_sources})</span>
+  <span class="label">Stress-runner</span>
+  <span class="value">{stress_cells} cells @ {stress_mps} msg/s</span>
+  <span class="label">Test result</span>
+  <span class="value">{passed} passed · {failed} failed · {warned} warnings</span>
+</div>
+
+<h2>MQTT Sources</h2>
+<table>
+  <tr><th>Topic prefix</th><th>Rate</th><th>Messages</th>
+      <th>Format</th><th>Measurements</th></tr>
+{source_rows_html}
+</table>
+
+<h2>Test Results</h2>
+<table>
+  <tr><th></th><th>Test</th><th>Detail</th></tr>
+{result_rows_html}
+</table>
+
+</body>
+</html>
+"""
+    return md, html
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Verify both data generators")
     parser.add_argument("--mqtt-host",   default="localhost")
@@ -239,6 +392,8 @@ async def main() -> None:
     parser.add_argument("--gen-ws",      default="ws://localhost:8765")
     parser.add_argument("--stress-ws",   default="ws://localhost:8769")
     parser.add_argument("--sample-secs", type=int, default=10)
+    parser.add_argument("--out-md",  default="docs/generators_report.md")
+    parser.add_argument("--out-html", default="html/generators_report.html")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -259,6 +414,18 @@ async def main() -> None:
     print("\n" + "=" * 60)
     print(f"Results: {passed} passed  {failed} failed  {warned} warnings")
     print("=" * 60)
+
+    md, html = build_report(gen_info, stress_info, mqtt_info,
+                             passed, failed, warned, args)
+
+    import os
+    os.makedirs(os.path.dirname(args.out_md),   exist_ok=True)
+    os.makedirs(os.path.dirname(args.out_html), exist_ok=True)
+    with open(args.out_md,   "w") as f: f.write(md)
+    with open(args.out_html, "w") as f: f.write(html)
+    print(f"\nReports written:")
+    print(f"  {args.out_md}")
+    print(f"  {args.out_html}")
 
     sys.exit(0 if failed == 0 else 1)
 
