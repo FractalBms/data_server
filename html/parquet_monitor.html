@@ -516,15 +516,15 @@ h2.section-title {
     <div class="comp-box dim" id="box-sub">
       <div class="box-title">
         <span class="dot dim" id="dot-sub"></span>
-        subscriber_api
-        <span class="box-port">:8767</span>
+        Subscriber API · Stats broker
+        <span class="box-port">:8767 / :8768</span>
       </div>
-      <div class="box-sub">WS live (MQTT :1884) · WS history (DuckDB → Parquet)</div>
+      <div class="box-sub">flux_compat HTTP :8768 · stats loop → monitor WS :8767</div>
       <div class="metrics">
-        <div class="metric">MQTT   <span id="sub-mqtt">—</span></div>
-        <div class="metric">Live   <span id="sub-mps">—</span> msg/s</div>
-        <div class="metric">Total  <span id="sub-total">—</span></div>
-        <div class="metric">WS cli <span id="sub-wsclients">—</span></div>
+        <div class="metric">Flux queries  <span id="sub-flux-q">—</span></div>
+        <div class="metric">Avg latency   <span id="sub-flux-avg">—</span> ms</div>
+        <div class="metric">WS clients    <span id="sub-wsclients">—</span></div>
+        <div class="metric">MQTT :1884    <span id="sub-mqtt">—</span></div>
       </div>
     </div>
   </div>
@@ -824,10 +824,11 @@ function updateSubStatus(d) {
 }
 
 function updateSubStats(d) {
-  const mps = d.live_per_sec ?? 0;
-  setText('sub-mps',     mps > 0 ? mps.toLocaleString() : '0');
-  setText('sub-total',   fmtNum(d.live_total));
+  setText('sub-flux-q',   fmtNum(d.flux_queries_run));
+  setText('sub-flux-avg', d.flux_avg_ms != null ? d.flux_avg_ms.toFixed(0) : '—');
   setText('sub-wsclients', d.ws_clients ?? '—');
+  setText('sub-mqtt',    d.mqtt_connected ? 'connected' : 'disconnected');
+  setClass('sub-mqtt',   d.mqtt_connected ? 'ok' : 'warn');
   setText('store-queries', fmtNum(d.queries_run));
   if (d.last_query_ms !== undefined) setText('store-last-ms', d.last_query_ms.toFixed(0));
   if (d.avg_query_ms  !== undefined) setText('store-avg-ms',  d.avg_query_ms.toFixed(0));
