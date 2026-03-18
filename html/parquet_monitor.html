@@ -386,7 +386,7 @@ h2.section-title {
           <span style="color:#3fb950">DuckDB</span> <span id="duckdb-q-count">—</span> · last <span id="duckdb-q-last">—</span> ms · avg <span id="duckdb-q-avg">—</span> ms
         </div>
         <div class="metric" style="border-top:1px solid #30363d;margin-top:3px;padding-top:3px;font-size:1em">
-          Gap <span id="gap-value" style="font-weight:600;font-size:1.1em">—</span> <span id="gap-unit" style="color:#8b949e;font-size:0.85em"></span>
+          DuckDB age <span id="gap-value" style="font-weight:600;font-size:1.1em">—</span> <span id="gap-unit" style="color:#8b949e;font-size:0.85em"></span>
         </div>
         <div class="metric" style="margin-top:6px">
           <button id="btn-flux-toggle" style="padding:2px 10px;font-size:0.82em;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer">▶ Start queries</button>
@@ -426,6 +426,11 @@ h2.section-title {
         <span class="box-port">:9000</span>
       </div>
       <div class="box-sub">boto3 upload /srv/data/parquet/ → s3://battery-data/</div>
+      <!-- TODO Phase 3: wire DuckDB to read directly from s3://battery-data/ via httpfs
+           instead of local rsync'd path. DuckDB uses read_parquet('s3://...') with
+           SET s3_endpoint_url / s3_access_key_id / s3_secret_access_key.
+           Latency ~10-50ms higher than local reads but proves end-to-end architecture
+           without InfluxDB. rsync step becomes redundant once S3 read path is active. -->
       <div class="metrics">
         <div class="metric" style="margin-bottom:4px">
           s3sync <span id="s3sync-state" class="dim">stopped</span>
@@ -936,15 +941,15 @@ function updateRouterStats(r) {
   setText('duckdb-q-count', r.duckdb_count ?? '—');
   setText('duckdb-q-last',  r.duckdb_last_ms ?? '—');
   setText('duckdb-q-avg',   r.duckdb_avg_ms  ?? '—');
-  if (r.gap_s !== null && r.gap_s !== undefined) {
-    const abs = Math.abs(r.gap_s);
+  if (r.gap_s !== null && r.gap_s !== undefined && r.gap_s >= 0) {
+    // gap_s = time.time() - duckdb_max_ts = DuckDB data age (always ≥ 0)
     let val, unit;
-    if (abs >= 3600)      { val = (abs / 3600).toFixed(1); unit = 'h'; }
-    else if (abs >= 60)   { val = (abs / 60).toFixed(1);   unit = 'm'; }
-    else                  { val = abs.toFixed(1);           unit = 's'; }
-    setText('gap-value', (r.gap_s < 0 ? '-' : '') + val);
-    setText('gap-unit',  unit + (r.gap_s > 0 ? ' behind' : ' ahead'));
-    setClass('gap-value', abs > 120 ? 'warn' : abs > 30 ? 'ok' : 'ok');
+    if (r.gap_s >= 3600)      { val = (r.gap_s / 3600).toFixed(1); unit = 'h old'; }
+    else if (r.gap_s >= 60)   { val = (r.gap_s / 60).toFixed(1);   unit = 'm old'; }
+    else                      { val = r.gap_s.toFixed(1);           unit = 's old'; }
+    setText('gap-value', val);
+    setText('gap-unit',  unit);
+    setClass('gap-value', r.gap_s > 120 ? 'warn' : 'ok');
   } else {
     setText('gap-value', '—'); setText('gap-unit', '');
   }

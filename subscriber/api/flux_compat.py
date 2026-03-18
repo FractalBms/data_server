@@ -735,7 +735,11 @@ async def _handle(reader, writer, cfg, duckdb_conn):
                                    csv.encode())
 
                 elif mode == "both":
-                    # Run influx query + DuckDB MAX(timestamp) in parallel
+                    # Run influx query + DuckDB MAX(timestamp) in parallel.
+                    # gap_s = time.time() - duckdb_max_ts  (data age, always ≥ 0)
+                    # Using wall-clock rather than InfluxDB _stop avoids negative gaps
+                    # caused by the race between InfluxDB's _stop timestamp and new
+                    # parquet files arriving mid-query.
                     local_path = (cfg.get("local") or {}).get("path", "")
                     def _duckdb_max_ts():
                         if not local_path:
@@ -749,6 +753,7 @@ async def _handle(reader, writer, cfg, duckdb_conn):
                             return float(row[0]) if row and row[0] else None
                         except Exception:
                             return None
+                    t_query = time.time()
                     t0 = time.monotonic()
                     (i_status, i_csv), d_ts = await asyncio.gather(
                         loop.run_in_executor(None, _influx_query),
@@ -757,11 +762,10 @@ async def _handle(reader, writer, cfg, duckdb_conn):
                     elapsed = round((time.monotonic() - t0) * 1000, 1)
                     _update_path_stats("influx", elapsed)
                     _update_path_stats("duckdb", elapsed)
-                    i_ts = _latest_ts_from_csv(i_csv)
-                    if i_ts and d_ts:
-                        _router["gap_s"]       = round(i_ts - d_ts, 1)
-                        _router["gap_updated"]  = time.time()
-                        log.info("Gap: %.1fs  (influx %.0f  duckdb %.0f)", _router["gap_s"], i_ts, d_ts)
+                    if d_ts:
+                        _router["gap_s"]      = round(t_query - d_ts, 1)
+                        _router["gap_updated"] = time.time()
+                        log.info("Gap: %.1fs  (now %.0f  duckdb %.0f)", _router["gap_s"], t_query, d_ts)
                     _http_response(writer, i_status,
                                    cors + [("Content-Type", "application/csv; charset=utf-8")],
                                    i_csv.encode())
