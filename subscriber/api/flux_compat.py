@@ -218,11 +218,11 @@ def _flux_source(cfg: dict, gap_exists: bool) -> str:
 
     if local_cfg.get("path"):
         # Local filesystem mode (fractal-phil / parquet-aws-sim)
-        base     = local_cfg["path"].rstrip("/") + "/"
-        gap_base = (local_cfg.get("gap_fill_path") or "").rstrip("/") + "/"
+        base         = local_cfg["path"].rstrip("/") + "/"
         primary_path = "{}project=*/**/*.parquet".format(base)
         primary_read = "read_parquet('{}', hive_partitioning=true, union_by_name=true)".format(primary_path)
         if local_cfg.get("gap_fill_path") and gap_exists:
+            gap_base = local_cfg["gap_fill_path"].rstrip("/") + "/"
             gap_path = "{}project=*/**/*.parquet".format(gap_base)
             gap_read = "read_parquet('{}', hive_partitioning=true, union_by_name=true)".format(gap_path)
             return (
@@ -235,7 +235,8 @@ def _flux_source(cfg: dict, gap_exists: bool) -> str:
                 "  ) _combined"
                 ") _deduped WHERE _rn = 1) _src_data"
             ).format(primary=primary_read, gap=gap_read)
-        return "({}) _src_data".format(primary_read)
+        # No outer parens — DuckDB rejects (read_parquet(...)) alias without SELECT
+        return "{} _src_data".format(primary_read)
     else:
         # S3 / MinIO mode
         bucket     = s3_cfg["bucket"]
@@ -258,7 +259,7 @@ def _flux_source(cfg: dict, gap_exists: bool) -> str:
                 "  ) _combined"
                 ") _deduped WHERE _rn = 1) _src_data"
             ).format(primary=primary_read, gap=gap_read)
-        return "({}) _src_data".format(primary_read)
+        return "{} _src_data".format(primary_read)
 
 
 def flux_to_sql(flux: str, cfg: dict):
@@ -630,22 +631,33 @@ async def _handle(reader, writer, cfg, duckdb_conn):
                                    csv.encode())
 
                 elif mode == "both":
+                    # Run influx query + DuckDB MAX(timestamp) in parallel
+                    local_path = (cfg.get("local") or {}).get("path", "")
+                    def _duckdb_max_ts():
+                        if not local_path:
+                            return None
+                        pq = "{}/project=*/**/*.parquet".format(local_path.rstrip("/"))
+                        try:
+                            cur = duckdb_conn.execute(
+                                "SELECT MAX(timestamp) FROM read_parquet('{}', hive_partitioning=true, union_by_name=true)".format(pq)
+                            )
+                            row = cur.fetchone()
+                            return float(row[0]) if row and row[0] else None
+                        except Exception:
+                            return None
                     t0 = time.monotonic()
-                    (i_status, i_csv), (_, d_csv) = await asyncio.gather(
+                    (i_status, i_csv), d_ts = await asyncio.gather(
                         loop.run_in_executor(None, _influx_query),
-                        loop.run_in_executor(None, _duckdb_query),
+                        loop.run_in_executor(None, _duckdb_max_ts),
                     )
                     elapsed = round((time.monotonic() - t0) * 1000, 1)
                     _update_path_stats("influx", elapsed)
                     _update_path_stats("duckdb", elapsed)
-                    # measure gap: newest influx ts − newest duckdb ts
                     i_ts = _latest_ts_from_csv(i_csv)
-                    d_ts = _latest_ts_from_csv(d_csv)
                     if i_ts and d_ts:
-                        _router["gap_s"]      = round(i_ts - d_ts, 1)
-                        _router["gap_updated"] = time.time()
+                        _router["gap_s"]       = round(i_ts - d_ts, 1)
+                        _router["gap_updated"]  = time.time()
                         log.info("Gap: %.1fs  (influx %.0f  duckdb %.0f)", _router["gap_s"], i_ts, d_ts)
-                    # return influx result to caller
                     _http_response(writer, i_status,
                                    cors + [("Content-Type", "application/csv; charset=utf-8")],
                                    i_csv.encode())
@@ -659,6 +671,28 @@ async def _handle(reader, writer, cfg, duckdb_conn):
             except Exception as exc:
                 log.error("Flux query error: %s", exc)
                 _http_response(writer, 500, cors, str(exc).encode())
+            return
+
+        if path.startswith("/latest_ts"):
+            # Fast gap probe: MAX(timestamp) from DuckDB parquet store
+            local_path = (cfg.get("local") or {}).get("path", "")
+            def _max_ts():
+                if not local_path:
+                    return None
+                pq = "{}/project=*/**/*.parquet".format(local_path.rstrip("/"))
+                try:
+                    cur = duckdb_conn.execute(
+                        "SELECT MAX(timestamp) FROM read_parquet('{}', hive_partitioning=true, union_by_name=true)".format(pq)
+                    )
+                    row = cur.fetchone()
+                    return float(row[0]) if row and row[0] else None
+                except Exception as exc:
+                    log.warning("latest_ts query failed: %s", exc)
+                    return None
+            loop = asyncio.get_running_loop()
+            max_ts = await loop.run_in_executor(None, _max_ts)
+            _http_response(writer, 200, cors + [("Content-Type", "application/json")],
+                           _json.dumps({"max_ts": max_ts, "now": time.time()}).encode())
             return
 
         if path.startswith("/route/"):
