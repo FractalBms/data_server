@@ -47,6 +47,7 @@ import os
 import signal
 import sys
 import time
+import uuid
 from typing import Dict, List, Optional, Set
 
 import paho.mqtt.client as mqtt
@@ -76,6 +77,9 @@ g_mqtt_client:     Optional[mqtt.Client] = None
 g_stop:            asyncio.Event
 g_interval:        float = 1.0   # seconds between publish sweeps — set_rate changes this live
 g_topic_mode:      str   = "per_cell"  # "per_cell" | "per_cell_item" — set_mode changes this live
+g_session_id:      str   = ""    # unique ID per run — reset on restart, lets consumers detect gaps
+g_sync_seq:        int   = 0     # monotonically increasing sync counter
+g_last_sync_total: int   = 0     # g_total_published snapshot at last sync publish
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +201,8 @@ def build_stats_message() -> dict:
         "active_tasks":    g_active_tasks,
         "interval":        g_interval,
         "topic_mode":      g_topic_mode,
+        "session_id":      g_session_id,
+        "sync_seq":        g_sync_seq,
         "projects":        projects_out,
     }
 
@@ -254,15 +260,51 @@ async def stats_broadcaster() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Sync publisher — chain-of-custody heartbeat
+# ---------------------------------------------------------------------------
+
+async def sync_publisher(sync_interval: float) -> None:
+    """Publish periodic _sync messages so downstream consumers can detect drops.
+
+    Each message carries the number of MQTT messages published since the previous
+    sync, allowing writer.cpp, subscriber-api, etc. to compare their received count
+    against the expected count and report the gap.
+    """
+    global g_sync_seq, g_last_sync_total
+    while not g_stop.is_set():
+        await asyncio.sleep(sync_interval)
+        if g_mqtt_client is None:
+            continue
+        g_sync_seq   += 1
+        total         = g_total_published
+        interval_msgs = total - g_last_sync_total
+        g_last_sync_total = total
+        msg = {
+            "type":               "sync",
+            "session_id":         g_session_id,
+            "seq":                g_sync_seq,
+            "total_published":    total,
+            "interval_published": interval_msgs,
+            "timestamp":          time.time(),
+            "topic_mode":         g_topic_mode,
+        }
+        g_mqtt_client.publish("_sync", json.dumps(msg), qos=0)
+        log.info("Sync #%d: total=%d interval=%d session=%s",
+                 g_sync_seq, total, interval_msgs, g_session_id)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 async def main_async(config: dict) -> None:
-    global g_mqtt_client, g_stop, g_topology, g_interval, g_topic_mode
+    global g_mqtt_client, g_stop, g_topology, g_interval, g_topic_mode, g_session_id
 
     g_stop       = asyncio.Event()
     g_interval   = float(config.get("sample_interval_seconds", 1.0))
     g_topic_mode = config.get("topic_mode", "per_cell")
+    g_session_id = uuid.uuid4().hex[:8]
+    log.info("Session ID: %s", g_session_id)
 
     loop = asyncio.get_event_loop()
     loop.add_signal_handler(signal.SIGINT,  lambda: (log.info("SIGINT"),  g_stop.set()))
@@ -310,10 +352,13 @@ async def main_async(config: dict) -> None:
 
     log.info("Launched %d site task(s)", len(tasks))
 
+    sync_interval = float(config.get("sync_interval_seconds", 10.0))
     async with websockets.serve(ws_handler, ws_host, ws_port):
         broadcaster = asyncio.create_task(stats_broadcaster())
+        syncer      = asyncio.create_task(sync_publisher(sync_interval))
         await asyncio.gather(*tasks, return_exceptions=True)
         broadcaster.cancel()
+        syncer.cancel()
         try:
             await broadcaster
         except asyncio.CancelledError:

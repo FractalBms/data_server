@@ -74,6 +74,15 @@ g_s3_connected: bool = False
 g_live_subject: str = ""                          # active MQTT subscription topic
 g_stats = {"live_total": 0, "live_per_sec": 0, "queries_run": 0,
            "last_query_ms": 0.0, "avg_query_ms": 0.0}
+# Chain-of-custody: updated when _sync messages arrive from the publisher
+g_sync_stats = {
+    "session_id":      "",
+    "sync_seq":        0,
+    "last_sync_ts":    0.0,
+    "received_since":  0,    # data messages received since last _sync
+    "drops_detected":  0,    # cumulative drops detected vs expected
+    "total_received":  0,    # total data messages received on this MQTT connection
+}
 g_live_window: list = []
 g_start_time = time.time()
 g_duckdb: Optional[duckdb.DuckDBPyConnection] = None
@@ -303,7 +312,7 @@ async def ws_handler(websocket) -> None:
     }))
     await websocket.send(json.dumps({"type": "stats", **g_stats, **flux_stats,
                                      "rsync": get_rsync_stats(), "s3sync": get_s3sync_stats(),
-                                     "router": dict(_router)}))
+                                     "router": dict(_router), "sync": dict(g_sync_stats)}))
 
     try:
         async for raw in websocket:
@@ -324,7 +333,7 @@ async def ws_handler(websocket) -> None:
                 }))
                 await websocket.send(json.dumps({"type": "stats", **g_stats, **flux_stats,
                                                  "rsync": get_rsync_stats(), "s3sync": get_s3sync_stats(),
-                                                 "router": dict(_router)}))
+                                                 "router": dict(_router), "sync": dict(g_sync_stats)}))
 
             elif t == "subscribe":
                 topic = msg.get("subject", g_config.get("mqtt", {}).get("default_topic", "batteries/#"))
@@ -411,7 +420,7 @@ async def stats_loop() -> None:
         })
         await broadcast({"type": "stats", **g_stats, **flux_stats,
                           "rsync": get_rsync_stats(), "s3sync": get_s3sync_stats(),
-                          "router": dict(_router)})
+                          "router": dict(_router), "sync": dict(g_sync_stats)})
         await asyncio.sleep(1)
 
 
@@ -433,7 +442,9 @@ async def mqtt_connect_loop() -> None:
                 log.info("MQTT connected: %s:%d", host, port)
                 await broadcast_status()
 
-                # Restore active subscription after reconnect
+                # Always subscribe to sync heartbeats for chain-of-custody tracking
+                await client.subscribe("_sync")
+                # Restore active live-data subscription after reconnect
                 if g_live_subject:
                     await client.subscribe(g_live_subject)
                     log.info("MQTT subscription restored: %s", g_live_subject)
@@ -458,7 +469,47 @@ async def mqtt_connect_loop() -> None:
 
 
 async def _handle_mqtt_message(topic: str, payload: bytes) -> None:
-    global g_stats, g_live_window
+    global g_stats, g_live_window, g_sync_stats
+
+    # Chain-of-custody sync message — count received vs expected, detect drops
+    if topic == "_sync":
+        try:
+            msg = json.loads(payload)
+            session = msg.get("session_id", "")
+            seq     = msg.get("seq", 0)
+            expect  = msg.get("interval_published", 0)
+
+            if session != g_sync_stats["session_id"]:
+                # New session (restart) — reset per-session counters
+                if g_sync_stats["session_id"]:
+                    log.info("Sync: new session %s (was %s) — counters reset",
+                             session, g_sync_stats["session_id"])
+                g_sync_stats["session_id"]     = session
+                g_sync_stats["received_since"] = 0
+                g_sync_stats["sync_seq"]       = seq
+                g_sync_stats["last_sync_ts"]   = msg.get("timestamp", 0.0)
+                return  # skip comparison for first sync of new session
+
+            received = g_sync_stats["received_since"]
+            dropped  = max(0, expect - received)
+            g_sync_stats["drops_detected"] += dropped
+            g_sync_stats["received_since"]  = 0
+            g_sync_stats["sync_seq"]        = seq
+            g_sync_stats["last_sync_ts"]    = msg.get("timestamp", 0.0)
+
+            if dropped:
+                log.warning("Sync #%d DROPS: expected=%d received=%d dropped=%d cumulative=%d",
+                            seq, expect, received, dropped, g_sync_stats["drops_detected"])
+            else:
+                log.info("Sync #%d OK: %d/%d received", seq, received, expect)
+        except Exception as e:
+            log.warning("Sync parse error: %s", e)
+        return
+
+    # Regular data message — count for sync tracking (regardless of live subscription state)
+    g_sync_stats["received_since"] += 1
+    g_sync_stats["total_received"] += 1
+
     now = time.monotonic()
     g_live_window = [t for t in g_live_window if now - t < 1.0]
     g_live_window.append(now)

@@ -388,8 +388,11 @@ static std::mutex                        g_mutex;
 static std::condition_variable           g_flush_cv;
 static std::atomic<bool>                 g_shutdown{false};
 static const Config*                     g_cfg{nullptr};
-static size_t                            g_total_buffered{0};   // total rows in g_buffers (under g_mutex)
-static std::atomic<uint64_t>             g_overflow_drops{0};   // rows dropped due to buffer full
+static size_t                            g_total_buffered{0};    // total rows in g_buffers (under g_mutex)
+static std::atomic<uint64_t>             g_overflow_drops{0};    // rows dropped due to buffer full
+static uint64_t                          g_received_since_sync{0}; // msgs received since last _sync (under g_mutex)
+static uint64_t                          g_sync_drops_detected{0}; // cumulative drops reported via sync
+static std::string                       g_sync_session_id;      // detect stress_runner restarts
 
 static void do_flush(std::map<PartitionKey, Partition> to_flush,
                      std::map<SensorKey, Row>          cs_snapshot) {
@@ -505,11 +508,62 @@ static void on_connect(struct mosquitto*, void*, int rc) {
     }
 }
 
+// Called under g_mutex when a _sync message arrives.
+static void handle_sync_message(const std::string& payload) {
+    thread_local simdjson::dom::parser sj;
+    simdjson::dom::element doc;
+    if (sj.parse(payload).get(doc) != simdjson::SUCCESS) return;
+
+    std::string_view session_sv;
+    int64_t seq = 0, interval_pub = 0, total_pub = 0;
+    doc["session_id"].get(session_sv);
+    doc["seq"].get(seq);
+    doc["interval_published"].get(interval_pub);
+    doc["total_published"].get(total_pub);
+
+    std::string session(session_sv);
+
+    // New session = stress_runner restarted; reset counters and note it.
+    if (session != g_sync_session_id) {
+        if (!g_sync_session_id.empty())
+            std::cout << "[sync] new session " << session
+                      << " (was " << g_sync_session_id << ") — counters reset\n";
+        g_sync_session_id     = session;
+        g_received_since_sync = 0;
+        return;  // skip comparison for first sync of a new session
+    }
+
+    int64_t received = static_cast<int64_t>(g_received_since_sync);
+    int64_t dropped  = interval_pub - received;
+    g_received_since_sync = 0;
+
+    if (dropped > 0) {
+        g_sync_drops_detected += static_cast<uint64_t>(dropped);
+        std::cerr << "[sync] #" << seq
+                  << "  DROPS: expected=" << interval_pub
+                  << "  received=" << received
+                  << "  dropped=" << dropped
+                  << "  cumulative=" << g_sync_drops_detected << "\n";
+    } else {
+        std::cout << "[sync] #" << seq
+                  << "  OK  received=" << received
+                  << "  expected=" << interval_pub
+                  << "  total_published=" << total_pub << "\n";
+    }
+}
+
 static void on_message(struct mosquitto*, void*, const struct mosquitto_message* msg) {
     if (!msg->payloadlen) return;
 
     std::string topic(msg->topic);
     std::string payload(static_cast<const char*>(msg->payload), msg->payloadlen);
+
+    // Intercept sync messages before normal processing
+    if (topic == "_sync") {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        handle_sync_message(payload);
+        return;
+    }
 
     auto info_opt = parse_topic(topic);
     if (!info_opt) return;
@@ -551,6 +605,7 @@ static void on_message(struct mosquitto*, void*, const struct mosquitto_message*
     auto& part = g_buffers[key];
     part.rows.push_back(std::move(row));
     ++g_total_buffered;
+    ++g_received_since_sync;
     if (static_cast<int>(part.rows.size()) >= g_cfg->max_messages_per_part)
         g_flush_cv.notify_one();
 }

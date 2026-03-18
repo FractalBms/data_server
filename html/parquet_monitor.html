@@ -278,6 +278,11 @@ h2.section-title {
           <button onclick="setStressMode('per_cell_item')" class="btn-rate" id="btn-mode-per-cell-item">per_cell_item</button>
           <span class="dim" style="font-size:0.8em;margin-left:4px" id="gen-mode-note"></span>
         </div>
+        <div class="metric" style="margin-top:4px;border-top:1px solid #30363d;padding-top:4px;font-size:0.85em">
+          <!-- Chain of custody: sync heartbeat published every 10s on _sync topic -->
+          Sync&nbsp; <span id="gen-session" class="dim">—</span>
+          &nbsp;#<span id="gen-sync-seq">—</span>
+        </div>
       </div>
       <div class="sites-grid" id="gen-sites"></div>
     </div>
@@ -531,6 +536,11 @@ h2.section-title {
         <div class="metric">Avg latency   <span id="sub-flux-avg">—</span> ms</div>
         <div class="metric">WS clients    <span id="sub-wsclients">—</span></div>
         <div class="metric">MQTT :1884    <span id="sub-mqtt">—</span></div>
+        <div class="metric" style="margin-top:4px;border-top:1px solid #30363d;padding-top:4px;font-size:0.85em">
+          <!-- sync tracking: received vs expected on the :1884 path -->
+          Received  <span id="sub-sync-total">—</span>
+          &nbsp;Drops <span id="sub-sync-drops" style="font-weight:600">—</span>
+        </div>
       </div>
     </div>
   </div>
@@ -757,6 +767,8 @@ function updateGen(d) {
   if (btnCell)     btnCell.classList.toggle('active',     mode === 'per_cell');
   if (btnCellItem) btnCellItem.classList.toggle('active', mode === 'per_cell_item');
   setText('gen-mode-note', mode === 'per_cell_item' ? '(~8× msgs — matches production)' : '(bundled payload)');
+  if (d.session_id) setText('gen-session', d.session_id);
+  if (d.sync_seq !== undefined) setText('gen-sync-seq', d.sync_seq);
 
   // FlashMQ :1883 & host writer — inferred from generator + bridge
   const bridgeOk = subData && subData.mqtt_connected && mps > 0;
@@ -850,6 +862,13 @@ function updateSubStats(d) {
   if (d.rsync)   updateRsyncStats(d.rsync);
   if (d.s3sync)  updateS3SyncStats(d.s3sync);
   if (d.router)  updateRouterStats(d.router);
+  if (d.sync) {
+    const s = d.sync;
+    setText('sub-sync-total', s.total_received != null ? fmtNum(s.total_received) : '—');
+    const drops = s.drops_detected ?? 0;
+    setText('sub-sync-drops', drops > 0 ? drops.toLocaleString() : '0');
+    setClass('sub-sync-drops', drops > 0 ? 'error' : 'ok');
+  }
   if (d.flux_queries_run !== undefined) {
     setText('flux-queries',  fmtNum(d.flux_queries_run));
     if (d.flux_queries_run > 0) {
