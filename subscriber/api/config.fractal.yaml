@@ -27,6 +27,17 @@ influx:
   port: 8086
   passthrough: true
 
+# S3 / MinIO store (boto3 upload — Start/Stop button in parquet_monitor)
+# Set endpoint_url to real AWS endpoint or leave for MinIO local sim
+s3:
+  endpoint_url: "http://localhost:9000"
+  bucket:       battery-data
+  region:       us-east-1
+  access_key:   minioadmin
+  secret_key:   minioadmin
+  prefix:       ""
+  sync_interval: 10   # seconds between upload sweeps
+
 # rsync control (parquet_monitor Start/Stop button)
 rsync:
   src:      /srv/data/parquet/

@@ -167,6 +167,109 @@ def stop_rsync() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# S3 sync state (boto3 upload to MinIO / real S3)
+# ---------------------------------------------------------------------------
+_s3sync_state: dict = {
+    "running":        False,
+    "start_time":     None,
+    "elapsed_s":      0,
+    "run_count":      0,
+    "files_uploaded": 0,
+    "bytes_uploaded": 0,
+    "last_ms":        0.0,
+    "last_error":     None,
+}
+_s3sync_task: asyncio.Task = None
+
+def get_s3sync_stats() -> dict:
+    s = dict(_s3sync_state)
+    if s["running"] and s["start_time"]:
+        s["elapsed_s"] = round(time.time() - s["start_time"])
+    return s
+
+def _s3_client(s3_cfg: dict):
+    import boto3 as _boto3
+    kwargs = dict(
+        region_name           = s3_cfg.get("region", "us-east-1"),
+        aws_access_key_id     = s3_cfg.get("access_key", "minioadmin"),
+        aws_secret_access_key = s3_cfg.get("secret_key", "minioadmin"),
+    )
+    if s3_cfg.get("endpoint_url"):
+        kwargs["endpoint_url"] = s3_cfg["endpoint_url"]
+    return _boto3.client("s3", **kwargs)
+
+async def _s3sync_loop(src: str, s3_cfg: dict, interval: int) -> None:
+    bucket  = s3_cfg["bucket"]
+    prefix  = s3_cfg.get("prefix", "").strip("/")
+    log.info("S3 sync loop started: %s → s3://%s/%s every %ds", src, bucket, prefix, interval)
+    while True:
+        t0 = time.monotonic()
+        uploaded = 0
+        uploaded_bytes = 0
+        error = None
+        try:
+            client = _s3_client(s3_cfg)
+            # Build set of existing S3 keys → etag for change detection
+            existing = {}
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix or ""):
+                for obj in page.get("Contents", []):
+                    existing[obj["Key"]] = obj["ETag"].strip('"')
+            # Walk local src, upload new or changed files
+            for dirpath, _, filenames in os.walk(src):
+                for fn in filenames:
+                    if not fn.endswith(".parquet"):
+                        continue
+                    local_fp = os.path.join(dirpath, fn)
+                    rel      = os.path.relpath(local_fp, src)
+                    s3_key   = "{}/{}".format(prefix, rel).lstrip("/") if prefix else rel
+                    try:
+                        st = os.stat(local_fp)
+                        if s3_key not in existing:
+                            client.upload_file(local_fp, bucket, s3_key)
+                            uploaded += 1
+                            uploaded_bytes += st.st_size
+                    except OSError:
+                        pass
+        except Exception as exc:
+            error = str(exc)
+            log.error("S3 sync error: %s", exc)
+        elapsed = round((time.monotonic() - t0) * 1000, 0)
+        _s3sync_state["run_count"]      += 1
+        _s3sync_state["files_uploaded"] += uploaded
+        _s3sync_state["bytes_uploaded"] += uploaded_bytes
+        _s3sync_state["last_ms"]         = elapsed
+        _s3sync_state["last_error"]      = error
+        if uploaded:
+            log.info("S3 sync: +%d files (+%.1f MB) in %.0fms",
+                     uploaded, uploaded_bytes / 1_048_576, elapsed)
+        await asyncio.sleep(interval)
+
+def start_s3sync(src: str, s3_cfg: dict, interval: int = 10) -> dict:
+    global _s3sync_task
+    if _s3sync_state["running"]:
+        return {"ok": False, "msg": "already running"}
+    _s3sync_state.update({"running": True, "start_time": time.time(),
+                           "elapsed_s": 0, "run_count": 0,
+                           "files_uploaded": 0, "bytes_uploaded": 0})
+    _s3sync_task = asyncio.get_event_loop().create_task(_s3sync_loop(src, s3_cfg, interval))
+    log.info("S3 sync started")
+    return {"ok": True, "msg": "started"}
+
+def stop_s3sync() -> dict:
+    global _s3sync_task
+    if not _s3sync_state["running"]:
+        return {"ok": False, "msg": "not running"}
+    if _s3sync_task:
+        _s3sync_task.cancel()
+        _s3sync_task = None
+    _s3sync_state["running"] = False
+    log.info("S3 sync stopped after %d runs, %d files uploaded",
+             _s3sync_state["run_count"], _s3sync_state["files_uploaded"])
+    return {"ok": True, "msg": "stopped"}
+
+
+# ---------------------------------------------------------------------------
 # Flux parser helpers
 # ---------------------------------------------------------------------------
 
@@ -705,6 +808,30 @@ async def _handle(reader, writer, cfg, duckdb_conn):
         if path.startswith("/route"):
             _http_response(writer, 200, cors + [("Content-Type", "application/json")],
                            _json.dumps({"mode": _router["mode"], **_router}).encode())
+            return
+
+        if path.startswith("/s3sync/start"):
+            src     = cfg.get("rsync", {}).get("src", "/srv/data/parquet/")
+            s3_cfg  = cfg.get("s3") or {}
+            ivl     = int(cfg.get("s3", {}).get("sync_interval", 10))
+            if not s3_cfg.get("bucket"):
+                _http_response(writer, 400, cors,
+                               b'{"ok":false,"msg":"no s3 config in config.yaml"}')
+                return
+            result = start_s3sync(src, s3_cfg, ivl)
+            _http_response(writer, 200, cors + [("Content-Type", "application/json")],
+                           _json.dumps(result).encode())
+            return
+
+        if path.startswith("/s3sync/stop"):
+            result = stop_s3sync()
+            _http_response(writer, 200, cors + [("Content-Type", "application/json")],
+                           _json.dumps(result).encode())
+            return
+
+        if path.startswith("/s3sync/status"):
+            _http_response(writer, 200, cors + [("Content-Type", "application/json")],
+                           _json.dumps(get_s3sync_stats()).encode())
             return
 
         if path.startswith("/rsync/start"):

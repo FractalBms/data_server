@@ -418,6 +418,27 @@ h2.section-title {
       </div>
     </div>
 
+    <!-- S3 / MinIO sync -->
+    <div class="comp-box dim" id="box-s3sync">
+      <div class="box-title">
+        <span class="dot dim" id="dot-s3sync"></span>
+        S3 / MinIO Sync
+        <span class="box-port">:9000</span>
+      </div>
+      <div class="box-sub">boto3 upload /srv/data/parquet/ → s3://battery-data/</div>
+      <div class="metrics">
+        <div class="metric" style="margin-bottom:4px">
+          s3sync <span id="s3sync-state" class="dim">stopped</span>
+          &nbsp;<button id="btn-s3sync-toggle" style="padding:2px 10px;font-size:0.82em;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer">▶ Start S3 sync</button>
+        </div>
+        <div class="metric">Elapsed   <span id="s3sync-elapsed">—</span></div>
+        <div class="metric">Runs      <span id="s3sync-runs">—</span></div>
+        <div class="metric">Uploaded  <span id="s3sync-files">—</span> files · <span id="s3sync-mb">—</span> MB</div>
+        <div class="metric">Last run  <span id="s3sync-last-ms">—</span> ms</div>
+        <div class="metric" id="s3sync-error-row" style="display:none;color:#f85149">Error <span id="s3sync-error">—</span></div>
+      </div>
+    </div>
+
     <!-- Gap writer (optional) -->
     <div class="comp-box dim" id="box-gap">
       <div class="box-title">
@@ -738,8 +759,9 @@ function updateSubStats(d) {
   if (d.last_query_ms !== undefined) setText('store-last-ms', d.last_query_ms.toFixed(0));
   if (d.avg_query_ms  !== undefined) setText('store-avg-ms',  d.avg_query_ms.toFixed(0));
   setBoxState('box-store-aws','dot-store-aws', d.queries_run > 0 ? 'ok' : 'warn');
-  if (d.rsync)  updateRsyncStats(d.rsync);
-  if (d.router) updateRouterStats(d.router);
+  if (d.rsync)   updateRsyncStats(d.rsync);
+  if (d.s3sync)  updateS3SyncStats(d.s3sync);
+  if (d.router)  updateRouterStats(d.router);
   if (d.flux_queries_run !== undefined) {
     setText('flux-queries',  fmtNum(d.flux_queries_run));
     if (d.flux_queries_run > 0) {
@@ -838,6 +860,46 @@ document.getElementById('btn-rsync-toggle').addEventListener('click', async () =
     const d = await r.json();
     if (!d.ok) console.warn('rsync', endpoint, d.msg);
   } catch(e) { console.error('rsync toggle failed', e); }
+});
+
+// ── S3 sync control ──────────────────────────────────────────────────────────
+function updateS3SyncStats(r) {
+  if (!r) return;
+  const running = r.running;
+  setText('s3sync-state',   running ? 'running' : 'stopped');
+  setClass('s3sync-state',  running ? 'ok' : 'dim');
+  setText('s3sync-elapsed', fmtElapsed(r.elapsed_s));
+  setText('s3sync-runs',    r.run_count ?? '—');
+  setText('s3sync-files',   (r.files_uploaded ?? 0).toLocaleString());
+  setText('s3sync-mb',      r.bytes_uploaded ? (r.bytes_uploaded / 1048576).toFixed(1) : '0.0');
+  setText('s3sync-last-ms', r.last_ms ? r.last_ms + ' ms' : '—');
+  const errRow = document.getElementById('s3sync-error-row');
+  if (r.last_error) {
+    if (errRow) errRow.style.display = '';
+    setText('s3sync-error', r.last_error);
+  } else {
+    if (errRow) errRow.style.display = 'none';
+  }
+  const btn = document.getElementById('btn-s3sync-toggle');
+  if (running) {
+    btn.textContent = '■ Stop S3 sync';
+    btn.style.background = '#da3633';
+  } else {
+    btn.textContent = '▶ Start S3 sync';
+    btn.style.background = '#238636';
+  }
+  setBoxState('box-s3sync','dot-s3sync',
+    running ? 'ok' : (r.files_uploaded > 0 ? 'warn' : 'dim'));
+}
+
+document.getElementById('btn-s3sync-toggle').addEventListener('click', async () => {
+  const aws = getConfig().aws;
+  const running = document.getElementById('s3sync-state').textContent === 'running';
+  const endpoint = running ? 'stop' : 'start';
+  try {
+    await fetch(`http://${aws}:8768/s3sync/${endpoint}`,
+                {method:'POST', signal: AbortSignal.timeout(5000)});
+  } catch(e) { console.error('s3sync toggle failed', e); }
 });
 
 // ── Query router controls ─────────────────────────────────────────────────────
