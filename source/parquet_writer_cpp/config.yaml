@@ -40,4 +40,4 @@ output:
   # Rsynced to S3 on a short cron (every 60-90s) to cover the gap between
   # partitioned-file rsyncs for DuckDB near-real-time queries.
   # Leave empty to disable.  Not recommended on memory-constrained targets.
-  hot_file_path: /srv/data/parquet/hot.parquet
+  hot_file_path: ""

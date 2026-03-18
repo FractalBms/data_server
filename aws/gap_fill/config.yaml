@@ -1,35 +1,33 @@
-# Gap-fill Parquet Writer — runs on AWS, consumes from AWS NATS JetStream.
+# Gap writer (current_state mode) — runs on aws-sim, subscribes to FlashMQ aws-sim :1884.
 #
-# Writes parquet files to the gap-fill/ prefix in S3.  Under normal operation
-# the site parquet writer covers every 60-second window, so this writer's
-# output is almost never queried.  It activates automatically during site
-# outages (power loss / WAN down) because those windows will be missing from
-# the primary prefix.
+# Writes a single current_state.parquet into /srv/data/parquet-aws-sim/ (the root
+# of the aws-sim store).  DuckDB globs **/*.parquet and finds it automatically
+# alongside the date-partitioned files delivered by rsync-sim.
 #
-# Run with the same writer binary as the site writer:
-#   python ../../source/parquet_writer/writer.py --config config.yaml
+# This fills the ≤60 s rsync lag window — the most recent readings that haven't
+# yet appeared in a completed partitioned file from the host writer.
 #
-# The Subscriber API merges primary + gap-fill at query time, deduplicating
-# by (timestamp, site_id, rack_id, module_id, cell_id) with primary winning.
+# Run with the same binary as the edge writer:
+#   cd source/parquet_writer_cpp
+#   ./parquet_writer --config ../../aws/gap_fill/config.yaml
 
-nats:
-  url: "nats://localhost:4222"   # AWS NATS server
-  stream_name: BATTERY_DATA
-  consumer_name: gap-fill-writer  # separate durable consumer — does not interfere with site writer
-  subject_filter: "batteries.>"
+mqtt:
+  host: localhost
+  port: 1884                    # FlashMQ aws-sim (receives bridged data from host)
+  client_id: gap-fill-writer    # distinct from subscriber-api and edge writer
+  topic: "#"
+  qos: 1
 
-buffer:
-  flush_interval_seconds: 60
-  max_messages: 50000
-  fetch_batch: 5000
+  topic_kv_map:
+    site:   site_id
+    rack:   rack_id
+    module: module_id
+    cell:   cell_id
 
-s3:
-  endpoint_url: ""               # leave empty for real AWS S3; set for MinIO
-  bucket: battery-data
-  region: us-east-1
-  access_key: ""
-  secret_key: ""
-  prefix: "gap-fill"             # all output lands under gap-fill/ — never collides with site uploads
+  partition_field: site_id
+
+output:
+  base_path: /srv/data/parquet-aws-sim
   project_id: 0
   partitions:
     - "project={project_id}"
@@ -37,6 +35,11 @@ s3:
     - "{year}"
     - "{month}"
     - "{day}"
-
-parquet:
   compression: snappy
+  flush_interval_seconds: 60
+  max_messages_per_part: 50000
+
+  # current_state mode — one row per unique sensor (latest reading).
+  # Sits at the store root; DuckDB union_by_name picks it up with all history.
+  current_state_path: /srv/data/parquet-aws-sim/current_state.parquet
+  hot_file_path: ""

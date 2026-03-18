@@ -162,18 +162,28 @@ def run_history_query(cfg: dict, proj_id: str, site_id: str, from_ts: float, to_
     local = _local_path(cfg)
     if local:
         base      = local.rstrip("/") + "/"
-        gap_prefix = ""
+        gap_base  = ""
     else:
         bucket     = cfg["s3"]["bucket"]
         prefix     = cfg["s3"].get("prefix", "").strip("/")
         gap_prefix = cfg["s3"].get("gap_fill_prefix", "").strip("/")
         base     = f"s3://{bucket}/{prefix + '/' if prefix else ''}"
+        gap_base = f"s3://{bucket}/{gap_prefix + '/' if gap_prefix else ''}" if gap_prefix else ""
 
-    primary_paths  = _date_paths(base,     proj_id, site_id, from_ts, to_ts)
-    primary_list   = "[" + ", ".join(f"'{p}'" for p in primary_paths) + "]"
-    where          = f"timestamp >= {from_ts} AND timestamp <= {to_ts}"
+    primary_paths = _date_paths(base, proj_id, site_id, from_ts, to_ts)
 
-    if not local and gap_prefix and _gap_fill_exists(cfg):
+    # Include current_state.parquet (gap writer output) if present — covers the
+    # most recent flush-interval window not yet in the date-partitioned files.
+    if local:
+        import os
+        cs = local.rstrip("/") + "/current_state.parquet"
+        if os.path.exists(cs):
+            primary_paths.append(cs)
+
+    primary_list = "[" + ", ".join(f"'{p}'" for p in primary_paths) + "]"
+    where        = f"timestamp >= {from_ts} AND timestamp <= {to_ts}"
+
+    if not local and gap_base and _gap_fill_exists(cfg):
         gap_paths = _date_paths(gap_base, proj_id, site_id, from_ts, to_ts)
         gap_list  = "[" + ", ".join(f"'{p}'" for p in gap_paths) + "]"
         # UNION primary + gap-fill, deduplicate keeping primary (src=0) over gap-fill (src=1).

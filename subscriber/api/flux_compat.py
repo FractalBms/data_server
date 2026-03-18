@@ -170,7 +170,11 @@ def flux_to_sql(flux: str, cfg: dict):
 
 
 def _gap_fill_exists_flux(cfg: dict) -> bool:
-    """Same cheap S3 check as server.py — reused here for the Flux path."""
+    """Check whether gap-fill data exists (local dir or S3 prefix)."""
+    local_gap = (cfg.get("local") or {}).get("gap_fill_path") or None
+    if local_gap:
+        import os
+        return os.path.isdir(local_gap)
     gap_prefix = cfg["s3"].get("gap_fill_prefix", "").strip("/")
     if not gap_prefix:
         return False
