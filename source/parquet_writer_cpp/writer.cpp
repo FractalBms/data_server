@@ -519,7 +519,7 @@ static void handle_sync_message(const std::string& payload) {
     if (doc["session_id"].get(session_sv)        != simdjson::SUCCESS) return;
     if (doc["seq"].get(seq)                       != simdjson::SUCCESS) return;
     if (doc["interval_published"].get(interval_pub) != simdjson::SUCCESS) return;
-    (void)doc["total_published"].get(total_pub);  // optional, used only for logging
+    if (doc["total_published"].get(total_pub) != simdjson::SUCCESS) total_pub = 0;
 
     std::string session(session_sv);
 
