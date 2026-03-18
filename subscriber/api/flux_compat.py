@@ -74,6 +74,30 @@ def _update_path_stats(path: str, elapsed_ms: float) -> None:
     _router[f"{path}_avg_ms"]  = round(
         _router[f"{path}_avg_ms"] * (n - 1) / n + elapsed_ms / n, 1)
 
+def _flux_count_from_csv(csv_text: str) -> int:
+    """Extract the integer count from a Flux count()|sum() CSV response.
+
+    The annotated CSV looks like:
+      #group,false,false,true
+      #datatype,string,long,long
+      #default,_result,,
+      ,result,table,_value
+      ,_result,0,92160         ← we want the last column of the last data row
+    """
+    last_val = None
+    for line in csv_text.splitlines():
+        if not line or line.startswith("#") or line.startswith(",result"):
+            continue
+        parts = line.split(",")
+        # Data rows start with an empty first field; take the last column
+        if parts and parts[0] == "":
+            try:
+                last_val = int(parts[-1].strip())
+            except (ValueError, IndexError):
+                pass
+    return last_val if last_val is not None else 0
+
+
 def _latest_ts_from_csv(csv_text: str) -> float:
     """Extract the newest _time value from an InfluxDB CSV response."""
     from datetime import datetime, timezone as _tz
@@ -1018,6 +1042,99 @@ async def _handle(reader, writer, cfg, duckdb_conn):
                 None, _telegraf_set_buffer, conf_path, binary, new_limit)
             _http_response(writer, 200, cors + [("Content-Type", "application/json")],
                            _json.dumps(result).encode())
+            return
+
+        if path.startswith("/compare"):
+            # Run an identical time-range COUNT query against both InfluxDB and DuckDB,
+            # then return the comparison as JSON so the monitor can highlight mismatches.
+            #
+            # Query params:
+            #   window  — window length in seconds (default 120)
+            #   offset  — how far in the past the window *ends*, in seconds (default 90)
+            #             Must be > flush_interval (60 s) for Parquet rows to be on disk.
+            # Example: /compare?window=120&offset=90
+            #          counts rows in [now-210s, now-90s]
+            from urllib.parse import parse_qs as _parse_qs
+            qs_raw   = path.split("?", 1)[1] if "?" in path else ""
+            qp       = _parse_qs(qs_raw)
+            window_s = int(qp.get("window", ["120"])[0])
+            offset_s = int(qp.get("offset", ["90"])[0])
+
+            now     = time.time()
+            t_end   = now - offset_s
+            t_start = t_end - window_s
+
+            influx_cfg = cfg.get("influx", {})
+            local_path = (cfg.get("local") or {}).get("path", "")
+
+            def _influx_count():
+                host   = influx_cfg.get("host", "localhost")
+                port   = influx_cfg.get("port", 8086)
+                token  = influx_cfg.get("token", "")
+                org    = influx_cfg.get("org",   "battery-org")
+                bucket = influx_cfg.get("bucket", "battery-data")
+                start_rfc = datetime.fromtimestamp(t_start, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                stop_rfc  = datetime.fromtimestamp(t_end,   tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                flux_q = (
+                    f'from(bucket: "{bucket}")\n'
+                    f'  |> range(start: {start_rfc}, stop: {stop_rfc})\n'
+                    f'  |> filter(fn: (r) => r._measurement == "battery_cell")\n'
+                    f'  |> count()\n'
+                    f'  |> group()\n'
+                    f'  |> sum(column: "_value")\n'
+                )
+                try:
+                    hdrs = {"Authorization": f"Token {token}",
+                            "Content-Type": "application/vnd.flux"}
+                    req = urllib.request.Request(
+                        f"http://{host}:{port}/api/v2/query?org={org}",
+                        data=flux_q.encode(), headers=hdrs, method="POST")
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        csv_text = resp.read().decode(errors="replace")
+                    return {"ok": True, "count": _flux_count_from_csv(csv_text), "error": None}
+                except Exception as exc:
+                    return {"ok": False, "count": None, "error": str(exc)}
+
+            def _duckdb_count():
+                if not local_path:
+                    return {"ok": False, "count": None, "error": "no local.path in config"}
+                pq = "{}/project=*/**/*.parquet".format(local_path.rstrip("/"))
+                try:
+                    cur = duckdb_conn.execute(
+                        "SELECT COUNT(*) FROM read_parquet(?, hive_partitioning=true, "
+                        "union_by_name=true) WHERE timestamp >= ? AND timestamp < ?",
+                        [pq, t_start, t_end])
+                    row = cur.fetchone()
+                    return {"ok": True, "count": int(row[0]) if row else 0, "error": None}
+                except Exception as exc:
+                    return {"ok": False, "count": None, "error": str(exc)}
+
+            loop = asyncio.get_running_loop()
+            t0 = time.monotonic()
+            i_res, d_res = await asyncio.gather(
+                loop.run_in_executor(None, _influx_count),
+                loop.run_in_executor(None, _duckdb_count),
+            )
+            elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
+
+            i_count = i_res.get("count")
+            d_count = d_res.get("count")
+            delta   = (d_count - i_count) if (i_count is not None and d_count is not None) else None
+            match   = delta == 0
+
+            _http_response(writer, 200, cors + [("Content-Type", "application/json")],
+                           _json.dumps({
+                               "t_start":    t_start,
+                               "t_end":      t_end,
+                               "window_s":   window_s,
+                               "offset_s":   offset_s,
+                               "influx":     i_res,
+                               "duckdb":     d_res,
+                               "match":      match,
+                               "delta":      delta,   # +ve = DuckDB has more (parquet captured what influx dropped)
+                               "elapsed_ms": elapsed_ms,
+                               "queried_at": now,
+                           }).encode())
             return
 
         _http_response(writer, 404, cors, b"Not Found")

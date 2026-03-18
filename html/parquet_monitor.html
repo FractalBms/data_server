@@ -630,6 +630,69 @@ h2.section-title {
 
 </div>
 
+<!-- ── Backend Comparison ── -->
+<h2 class="section-title">Backend Comparison — InfluxDB vs DuckDB</h2>
+<div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px;margin-bottom:20px" id="cmp-box">
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px">
+    <span style="font-size:0.83em;color:#8b949e">Window</span>
+    <select id="cmp-window" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.82em;padding:2px 6px">
+      <option value="60">60 s</option>
+      <option value="120" selected>2 min</option>
+      <option value="300">5 min</option>
+      <option value="600">10 min</option>
+    </select>
+    <span style="font-size:0.83em;color:#8b949e">Offset (must be &gt; 60 s flush)</span>
+    <select id="cmp-offset" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.82em;padding:2px 6px">
+      <option value="90" selected>90 s</option>
+      <option value="120">2 min</option>
+      <option value="180">3 min</option>
+    </select>
+    <button id="btn-cmp-run" onclick="runCompare()" style="padding:4px 14px;font-size:0.82em;background:#238636;border:none;border-radius:5px;color:#fff;cursor:pointer">▶ Compare now</button>
+    <button id="btn-cmp-auto" onclick="toggleCmpAuto()" style="padding:4px 14px;font-size:0.82em;background:#30363d;border:none;border-radius:5px;color:#8b949e;cursor:pointer">Auto off</button>
+    <span style="font-size:0.75em;color:#8b949e;margin-left:auto" id="cmp-time">—</span>
+  </div>
+
+  <!-- Result row -->
+  <div style="display:grid;grid-template-columns:1fr 40px 1fr 40px auto;gap:8px;align-items:center">
+
+    <!-- InfluxDB side -->
+    <div style="background:#0d1117;border:1px solid #f0883e44;border-radius:6px;padding:10px 14px">
+      <div style="font-size:0.72em;font-weight:700;color:#f0883e;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">InfluxDB2</div>
+      <div style="font-size:1.6em;font-weight:700;font-family:monospace;color:#e6edf3" id="cmp-influx-count">—</div>
+      <div style="font-size:0.72em;color:#8b949e;margin-top:2px">rows in window</div>
+      <div style="font-size:0.72em;color:#8b949e;margin-top:4px" id="cmp-influx-err"></div>
+    </div>
+
+    <!-- VS -->
+    <div style="text-align:center;font-size:0.75em;color:#6e7681;font-weight:600">vs</div>
+
+    <!-- DuckDB side -->
+    <div style="background:#0d1117;border:1px solid #58a6ff44;border-radius:6px;padding:10px 14px">
+      <div style="font-size:0.72em;font-weight:700;color:#58a6ff;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">DuckDB / Parquet</div>
+      <div style="font-size:1.6em;font-weight:700;font-family:monospace;color:#e6edf3" id="cmp-duckdb-count">—</div>
+      <div style="font-size:0.72em;color:#8b949e;margin-top:2px">rows in window</div>
+      <div style="font-size:0.72em;color:#8b949e;margin-top:4px" id="cmp-duckdb-err"></div>
+    </div>
+
+    <!-- Arrow -->
+    <div style="text-align:center;font-size:1.2em;color:#6e7681" id="cmp-arrow">→</div>
+
+    <!-- Result badge -->
+    <div style="min-width:140px">
+      <div style="font-size:1.1em;font-weight:700;font-family:monospace" id="cmp-result">—</div>
+      <div style="font-size:0.75em;color:#8b949e;margin-top:3px" id="cmp-delta-note"></div>
+      <div style="font-size:0.72em;color:#6e7681;margin-top:6px" id="cmp-window-note"></div>
+      <div style="font-size:0.72em;color:#6e7681" id="cmp-elapsed"></div>
+    </div>
+  </div>
+
+  <!-- History sparkline (last 10 deltas) -->
+  <div style="margin-top:10px;border-top:1px solid #21262d;padding-top:8px">
+    <div style="font-size:0.72em;color:#6e7681;margin-bottom:4px">Delta history (DuckDB − InfluxDB)  positive = parquet captured more</div>
+    <div id="cmp-history" style="display:flex;gap:4px;align-items:flex-end;height:28px"></div>
+  </div>
+</div>
+
 <!-- Status bar -->
 <div class="status-bar">
   <div class="status-item">Host <strong id="sb-host">—</strong></div>
@@ -883,6 +946,106 @@ function updateSubStats(d) {
   }
   const genMps = genData ? (genData.mps ?? 0) : 0;
   setBoxState('box-sub','dot-sub', genMps > 0 || (subData && subData.mqtt_connected) ? 'ok' : 'warn');
+}
+
+// ── Backend comparison (:8768/compare) ───────────────────────────────────────
+let cmpAutoTimer  = null;
+let cmpHistory    = [];   // last 10 {delta, match} records
+
+function toggleCmpAuto() {
+  const btn = $('btn-cmp-auto');
+  if (cmpAutoTimer) {
+    clearInterval(cmpAutoTimer);
+    cmpAutoTimer = null;
+    btn.textContent = 'Auto off';
+    btn.style.background = '#30363d';
+    btn.style.color = '#8b949e';
+  } else {
+    runCompare();
+    cmpAutoTimer = setInterval(runCompare, 30000);
+    btn.textContent = 'Auto on';
+    btn.style.background = '#1f6feb';
+    btn.style.color = '#fff';
+  }
+}
+
+async function runCompare() {
+  const cfg     = getConfig();
+  const window_s = $('cmp-window').value;
+  const offset_s = $('cmp-offset').value;
+  const url = `http://${cfg.aws}:8768/compare?window=${window_s}&offset=${offset_s}`;
+
+  setText('cmp-result', 'querying…');
+  try {
+    const r = await fetch(url, {signal: AbortSignal.timeout(15000)});
+    const d = await r.json();
+
+    const ic = d.influx?.count;
+    const dc = d.duckdb?.count;
+    const delta = d.delta;
+
+    setText('cmp-influx-count', ic != null ? ic.toLocaleString() : '—');
+    setText('cmp-duckdb-count', dc != null ? dc.toLocaleString() : '—');
+    setText('cmp-influx-err',   d.influx?.error  || '');
+    setText('cmp-duckdb-err',   d.duckdb?.error  || '');
+
+    const t0  = new Date(d.t_start * 1000);
+    const t1  = new Date(d.t_end   * 1000);
+    const fmt = ts => ts.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    setText('cmp-window-note', `window ${fmt(t0)} – ${fmt(t1)}`);
+    setText('cmp-elapsed', `query ${d.elapsed_ms} ms`);
+    setText('cmp-time', new Date(d.queried_at * 1000).toLocaleTimeString());
+
+    const resEl = $('cmp-result');
+    const arrEl = $('cmp-arrow');
+    const noteEl = $('cmp-delta-note');
+    if (ic == null || dc == null) {
+      resEl.textContent = 'error';
+      resEl.style.color = '#f85149';
+      noteEl.textContent = d.influx?.error || d.duckdb?.error || '';
+      arrEl.textContent = '→';
+      arrEl.style.color = '#6e7681';
+    } else if (d.match) {
+      resEl.textContent = '✓ MATCH';
+      resEl.style.color = '#3fb950';
+      noteEl.textContent = `both ${ic.toLocaleString()} rows`;
+      arrEl.textContent = '=';
+      arrEl.style.color = '#3fb950';
+    } else if (delta > 0) {
+      resEl.textContent = `+${delta.toLocaleString()} Parquet`;
+      resEl.style.color = '#58a6ff';
+      noteEl.textContent = `Parquet captured ${delta.toLocaleString()} rows InfluxDB missed`;
+      arrEl.textContent = '>';
+      arrEl.style.color = '#58a6ff';
+    } else {
+      resEl.textContent = `${delta.toLocaleString()} Parquet`;
+      resEl.style.color = '#f0883e';
+      noteEl.textContent = `InfluxDB has more — Parquet may still be flushing`;
+      arrEl.textContent = '<';
+      arrEl.style.color = '#f0883e';
+    }
+
+    // Append to history and redraw sparkline
+    cmpHistory.push({delta: delta ?? 0, match: d.match});
+    if (cmpHistory.length > 12) cmpHistory.shift();
+    _drawCmpHistory();
+  } catch(e) {
+    setText('cmp-result', 'fetch error');
+    $('cmp-result').style.color = '#f85149';
+    setText('cmp-delta-note', String(e));
+  }
+}
+
+function _drawCmpHistory() {
+  const el = $('cmp-history');
+  if (!el || !cmpHistory.length) return;
+  const maxAbs = Math.max(1, ...cmpHistory.map(h => Math.abs(h.delta)));
+  el.innerHTML = cmpHistory.map(h => {
+    const pct  = Math.round(Math.abs(h.delta) / maxAbs * 24);
+    const col  = h.match ? '#3fb950' : (h.delta > 0 ? '#58a6ff' : '#f0883e');
+    const tip  = `delta=${h.delta}`;
+    return `<div title="${tip}" style="width:18px;height:${Math.max(3,pct)}px;background:${col};border-radius:2px 2px 0 0;align-self:flex-end"></div>`;
+  }).join('');
 }
 
 // ── InfluxDB2 health (CORS fetch) ─────────────────────────────────────────────
