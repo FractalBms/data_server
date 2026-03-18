@@ -322,6 +322,16 @@
     <span class="value" id="val-generator">—</span>
   </div>
   <div class="sind">
+    <div class="dot grey" id="dot-nats"></div>
+    <span class="label">nats</span>
+    <span class="value" id="val-nats">—</span>
+  </div>
+  <div class="sind">
+    <div class="dot grey" id="dot-parquet_writer"></div>
+    <span class="label">parquet_writer</span>
+    <span class="value" id="val-parquet_writer">—</span>
+  </div>
+  <div class="sind">
     <div class="dot grey" id="dot-writer_cpp"></div>
     <span class="label">writer_cpp</span>
     <span class="value" id="val-writer_cpp">—</span>
@@ -547,12 +557,12 @@
     </ul>
   </div>
   <div class="concept-card">
-    <h3>Two Machines</h3>
+    <h3>Three Machines</h3>
     <ul>
-      <li><strong style="color:#79c0ff;">phil-dev</strong> — development machine, generator source, pipeline work</li>
-      <li><strong style="color:#79c0ff;">spark-22b6 / .51</strong> — writer.cpp running 24/7, stress runner active, Parquet accumulating in <code>/home/phil/data_server/parquet/</code></li>
-      <li>Process manager WebSocket :8761 (phil-dev) and :8762 (spark-22b6)</li>
-      <li>Host defaults stored in <code>localStorage</code> keys <code>ds_host</code> / <code>aws_host</code></li>
+      <li><strong style="color:#79c0ff;">phil-dev</strong> — development machine, generator source, pipeline work; manager :8761</li>
+      <li><strong style="color:#79c0ff;">fractal-phil</strong> (192.168.86.51) — NATS stack: NATS native MQTT :1883, Python parquet_writer, subscriber_api; manager :8761</li>
+      <li><strong style="color:#79c0ff;">spark-22b6</strong> — writer.cpp stack running 24/7, stress runner active, Parquet in <code>/home/phil/data_server/parquet/</code>; manager :8762</li>
+      <li>Host defaults stored in <code>localStorage</code> keys <code>ds_host</code> / <code>aws_host</code> / <code>fractal_host</code></li>
     </ul>
   </div>
   <div class="concept-card">
@@ -1851,7 +1861,7 @@ await js.publish(subject, message.payload)   <span class="hl"># bytes — untouc
 let mgr = null, mgrPort = null;
 
 const COMPONENT_KEYS = [
-  'generator', 'writer_cpp',
+  'generator', 'nats', 'parquet_writer', 'writer_cpp',
   'subscriber_api', 'aws_server', 'stress_runner'
 ];
 
