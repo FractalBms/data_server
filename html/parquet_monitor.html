@@ -372,6 +372,10 @@ h2.section-title {
       <div class="metrics">
         <div class="metric">Status <span id="fmq-aws-status">—</span></div>
         <div class="metric">Config <span class="dim">flashmq-aws-sim.conf</span></div>
+        <div class="metric" style="margin-top:6px;border-top:1px solid #30363d;padding-top:4px">
+          CPU&nbsp;<span id="fmq-cpu">—</span>%
+          &nbsp;&nbsp;RAM&nbsp;<span id="fmq-mem">—</span>&nbsp;MB
+        </div>
       </div>
     </div>
 
@@ -404,6 +408,14 @@ h2.section-title {
         <div class="metric" style="color:#f85149">
           Dropped <span id="tg-dropped" style="font-weight:600">—</span>
           <span style="color:#8b949e;font-size:0.82em"> (cumulative · silent)</span>
+        </div>
+        <div class="metric" style="margin-top:6px;border-top:1px solid #30363d;padding-top:4px">
+          Telegraf&nbsp;&nbsp;CPU&nbsp;<span id="tg-cpu">—</span>%
+          &nbsp;&nbsp;RAM&nbsp;<span id="tg-mem">—</span>&nbsp;MB
+        </div>
+        <div class="metric">
+          InfluxDB&nbsp;&nbsp;CPU&nbsp;<span id="influx-proc-cpu">—</span>%
+          &nbsp;&nbsp;RAM&nbsp;<span id="influx-proc-mem">—</span>&nbsp;MB
         </div>
         <div class="metric" style="margin-top:6px">
           Limit&nbsp;
@@ -1068,6 +1080,32 @@ function _drawCmpHistory() {
   }).join('');
 }
 
+// ── Process CPU / RAM stats ───────────────────────────────────────────────────
+async function checkProcStats(aws) {
+  try {
+    const r = await fetch(`http://${aws}:8768/proc_stats`, {signal: AbortSignal.timeout(3000)});
+    const d = await r.json();
+
+    const tg = d.telegraf;
+    if (tg && tg.cpu_pct != null) {
+      setText('tg-cpu', tg.cpu_pct.toFixed(1));
+      setText('tg-mem', tg.rss_mb != null ? tg.rss_mb.toFixed(0) : '—');
+    }
+
+    const ix = d.influxd;
+    if (ix && ix.cpu_pct != null) {
+      setText('influx-proc-cpu', ix.cpu_pct.toFixed(1));
+      setText('influx-proc-mem', ix.rss_mb != null ? ix.rss_mb.toFixed(0) : '—');
+    }
+
+    const fmq = d.flashmq;
+    if (fmq && fmq.cpu_pct != null) {
+      setText('fmq-cpu', fmq.cpu_pct.toFixed(1));
+      setText('fmq-mem', fmq.rss_mb != null ? fmq.rss_mb.toFixed(0) : '—');
+    }
+  } catch(e) {}
+}
+
 // ── InfluxDB2 health (CORS fetch) ─────────────────────────────────────────────
 async function checkInflux(aws) {
   try {
@@ -1427,6 +1465,7 @@ function doConnect() {
   checkInflux(cfg.aws);
   checkFluxShim(cfg.aws);
   checkParquetStats(cfg.aws);
+  checkProcStats(cfg.aws);
   checkTelegrafStats(cfg.aws);
   document.getElementById('flux-curl-cmd').textContent = fluxCurlCmd(cfg.aws);
 
@@ -1437,6 +1476,7 @@ function doConnect() {
     checkInflux(c.aws);
     checkFluxShim(c.aws);
     checkParquetStats(c.aws);
+    checkProcStats(c.aws);
     updateQueryPaths();
   }, 2000);
   // telegraf buffer stats on slower cadence (10s) — InfluxDB internal metrics lag by ~10s

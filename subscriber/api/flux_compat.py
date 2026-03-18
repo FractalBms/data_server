@@ -46,6 +46,69 @@ def update_server_state(d: dict) -> None:
 flux_stats: dict = {"flux_queries_run": 0, "flux_last_ms": 0.0, "flux_avg_ms": 0.0}
 
 # ---------------------------------------------------------------------------
+# Per-process CPU / memory sampling (no psutil needed — reads /proc directly)
+# ---------------------------------------------------------------------------
+_CLK_TCK: int = os.sysconf("SC_CLK_TCK")   # usually 100
+_proc_prev: dict = {}                        # pid -> (ticks, monotonic_time)
+
+
+def _proc_find_pid(comm: str, cmdline_fragment: str = "") -> int | None:
+    """Return PID of a process whose /proc/{pid}/comm matches *comm*.
+    If *cmdline_fragment* is given, also require it to appear in the cmdline."""
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            try:
+                with open(f"/proc/{pid}/comm") as f:
+                    if f.read().strip() != comm:
+                        continue
+                if cmdline_fragment:
+                    with open(f"/proc/{pid}/cmdline") as f:
+                        if cmdline_fragment not in f.read():
+                            continue
+                return pid
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return None
+
+
+def _proc_sample(pid: int) -> dict:
+    """Return {pid, cpu_pct, rss_mb} for *pid*, computing CPU% from delta since
+    the last call.  First call always returns cpu_pct=0.0."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            fields = f.read().split()
+        ticks = int(fields[13]) + int(fields[14])   # utime + stime
+    except (OSError, IndexError, ValueError):
+        return {"pid": pid, "cpu_pct": None, "rss_mb": None, "error": "stat read failed"}
+
+    try:
+        rss_kb = 0
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    rss_kb = int(line.split()[1])
+                    break
+    except (OSError, ValueError):
+        rss_kb = 0
+
+    now = time.monotonic()
+    prev = _proc_prev.get(pid)
+    if prev:
+        prev_ticks, prev_time = prev
+        elapsed = now - prev_time
+        cpu_pct = round(((ticks - prev_ticks) / _CLK_TCK) / elapsed * 100, 1) if elapsed > 0 else 0.0
+    else:
+        cpu_pct = 0.0
+    _proc_prev[pid] = (ticks, now)
+
+    return {"pid": pid, "cpu_pct": cpu_pct, "rss_mb": round(rss_kb / 1024, 1)}
+
+# ---------------------------------------------------------------------------
 # Query router state  (mode: influx | duckdb | both)
 # ---------------------------------------------------------------------------
 _router: dict = {
@@ -1014,6 +1077,24 @@ async def _handle(reader, writer, cfg, duckdb_conn):
             _http_response(writer, 200,
                            cors + [("Content-Type", "application/json")],
                            body)
+            return
+
+        if path.startswith("/proc_stats"):
+            # CPU% and RSS for the three key processes on this host.
+            # FlashMQ has two instances; select the aws-sim one by cmdline.
+            targets = {
+                "influxd":  (_proc_find_pid("influxd"),              None),
+                "telegraf": (_proc_find_pid("telegraf"),             None),
+                "flashmq":  (_proc_find_pid("flashmq", "aws-sim"),   None),
+            }
+            result = {}
+            for name, (pid, _) in targets.items():
+                if pid:
+                    result[name] = _proc_sample(pid)
+                else:
+                    result[name] = {"pid": None, "cpu_pct": None, "rss_mb": None, "error": "not found"}
+            _http_response(writer, 200, cors + [("Content-Type", "application/json")],
+                           _json.dumps(result).encode())
             return
 
         if path.startswith("/telegraf/stats"):
