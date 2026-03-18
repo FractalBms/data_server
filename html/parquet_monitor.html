@@ -640,7 +640,7 @@ function updateGen(d) {
   setBoxState('box-writer-host','dot-writer-host', mps > 0 ? 'ok' : 'warn');
   setText('wh-rate', mps > 0 ? mps.toLocaleString() : '0');
   setText('wh-status', mps > 0 ? 'writing' : 'idle');
-  setBoxState('box-store-host','dot-store-host', mps > 0 ? 'ok' : 'warn');
+  // box-store-host state owned by updateRsyncStats
   setText('rsync-status', mps > 0 ? 'active' : 'idle');
 
   // Bridge arrow
@@ -780,7 +780,7 @@ async function checkParquetStats(aws) {
     setText('pq-file-count', d.file_count.toLocaleString());
     setText('pq-total-mb',   d.total_mb.toLocaleString());
     setText('pq-latest-age', d.latest_age_s !== null ? d.latest_age_s : '—');
-    setBoxState('box-store-host','dot-store-host', d.file_count > 0 ? 'ok' : 'warn');
+    // box-store-host state owned by updateRsyncStats
   } catch(e) { /* host unreachable — leave as dim */ }
 }
 
