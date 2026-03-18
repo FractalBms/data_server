@@ -771,10 +771,15 @@ function age(ts) {
 }
 
 // ── Generator WS (:8769) ─────────────────────────────────────────────────────
+let genReconnectPending = false;
 function connectGen(host) {
+  genReconnectPending = false;
   if (genWS) { try { genWS.close(); } catch(e){} }
   const url = `ws://${host}:8769`;
-  try { genWS = new WebSocket(url); } catch(e) { return; }
+  try { genWS = new WebSocket(url); } catch(e) {
+    _scheduleGenReconnect();
+    return;
+  }
 
   genWS.onopen = () => {
     setText('sb-gen-ws', 'connected');
@@ -789,14 +794,20 @@ function connectGen(host) {
       updateGen(d);
     } catch(e) {}
   };
-  genWS.onclose = genWS.onerror = () => {
+  genWS.onerror = () => {};  // onclose always follows; handle there
+  genWS.onclose = () => {
     setText('sb-gen-ws', 'disconnected');
     setBoxState('box-gen','dot-gen','error');
     setText('gen-mps','—'); setText('gen-total','—'); setText('gen-tasks','—');
     genData = null;
     genWS = null;
-    if (pollTimer) setTimeout(() => { const cfg = getConfig(); connectGen(cfg.host); }, 3000);
+    _scheduleGenReconnect();
   };
+}
+function _scheduleGenReconnect() {
+  if (genReconnectPending || !pollTimer) return;
+  genReconnectPending = true;
+  setTimeout(() => { const cfg = getConfig(); connectGen(cfg.host); }, 3000);
 }
 
 const RATE_BTNS = {2.0:'2s', 1.0:'1s', 0.5:'05s', 0.25:'025s', 0.1:'01s'};
@@ -872,17 +883,21 @@ function updateGen(d) {
 }
 
 // ── Subscriber WS (:8767) ─────────────────────────────────────────────────────
+let subReconnectPending = false;
 function connectSub(aws) {
+  subReconnectPending = false;
   if (subWS) { try { subWS.close(); } catch(e){} }
   const url = `ws://${aws}:8767`;
-  try { subWS = new WebSocket(url); } catch(e) { return; }
+  try { subWS = new WebSocket(url); } catch(e) {
+    _scheduleSubReconnect();
+    return;
+  }
 
   subWS.onopen = () => {
     setText('sb-sub-ws', 'connected');
     setBoxState('box-sub','dot-sub','ok');
     setBoxState('box-fmq-aws','dot-fmq-aws','ok');
     setText('fmq-aws-status', 'reachable');
-    // Request status immediately
     subWS.send(JSON.stringify({type: 'get_status'}));
   };
   subWS.onmessage = (ev) => {
@@ -897,7 +912,8 @@ function connectSub(aws) {
       }
     } catch(e) {}
   };
-  subWS.onclose = subWS.onerror = () => {
+  subWS.onerror = () => {};  // onclose always follows; handle there
+  subWS.onclose = () => {
     setText('sb-sub-ws', 'disconnected');
     setBoxState('box-sub','dot-sub','error');
     setBoxState('box-fmq-aws','dot-fmq-aws','error');
@@ -905,9 +921,13 @@ function connectSub(aws) {
     setText('sub-mqtt','—'); setText('sub-mps','—'); setText('sub-total','—');
     subData = null;
     subWS = null;
-    // Auto-reconnect after 3 s if the monitor is still in connected state
-    if (pollTimer) setTimeout(() => { const cfg = getConfig(); connectSub(cfg.aws); }, 3000);
+    _scheduleSubReconnect();
   };
+}
+function _scheduleSubReconnect() {
+  if (subReconnectPending || !pollTimer) return;
+  subReconnectPending = true;
+  setTimeout(() => { const cfg = getConfig(); connectSub(cfg.aws); }, 3000);
 }
 
 function updateSubStatus(d) {
