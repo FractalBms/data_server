@@ -36,10 +36,12 @@ h1   { color: #58a6ff; font-size: 1.6em; margin-bottom: 4px; }
 /* ── Monitor grid ── */
 .monitor-grid {
   display: grid;
-  grid-template-columns: 1fr 110px 1fr;
-  gap: 0;
+  grid-template-columns: 1fr 110px 1fr 1fr;
+  gap: 0 10px;
   align-items: start;
 }
+.col-label.flux  { color: #f0883e; border-bottom: 1px solid #f0883e44; }
+.col-label.duck  { color: #58a6ff; border-bottom: 1px solid #58a6ff44; }
 
 /* ── Column labels ── */
 .col-label {
@@ -319,9 +321,9 @@ h2.section-title {
     </div>
   </div>
 
-  <!-- ═══ AWS-SIM column ═══ -->
+  <!-- ═══ AWS-SIM col A: original MQTT → Flux path ═══ -->
   <div>
-    <div class="col-label aws">AWS-sim</div>
+    <div class="col-label flux">AWS-sim · Flux / InfluxDB2 path</div>
 
     <!-- FlashMQ :1884 -->
     <div class="comp-box dim" id="box-fmq-aws">
@@ -330,26 +332,10 @@ h2.section-title {
         FlashMQ aws-sim
         <span class="box-port">:1884</span>
       </div>
-      <div class="box-sub">real-time hub · receives bridge from host</div>
+      <div class="box-sub">receives bridge · fan-out to Telegraf + subscriber</div>
       <div class="metrics">
         <div class="metric">Status <span id="fmq-aws-status">—</span></div>
         <div class="metric">Config <span class="dim">flashmq-aws-sim.conf</span></div>
-      </div>
-    </div>
-
-    <!-- subscriber_api (live) -->
-    <div class="comp-box dim" id="box-sub">
-      <div class="box-title">
-        <span class="dot dim" id="dot-sub"></span>
-        subscriber_api
-        <span class="box-port">:8767</span>
-      </div>
-      <div class="box-sub">aiomqtt live · DuckDB history · WebSocket clients</div>
-      <div class="metrics">
-        <div class="metric">MQTT   <span id="sub-mqtt">—</span></div>
-        <div class="metric">Live   <span id="sub-mps">—</span> msg/s</div>
-        <div class="metric">Total  <span id="sub-total">—</span></div>
-        <div class="metric">WS cli <span id="sub-wsclients">—</span></div>
       </div>
     </div>
 
@@ -360,10 +346,42 @@ h2.section-title {
         Telegraf → InfluxDB2
         <span class="box-port">:8086</span>
       </div>
-      <div class="box-sub">legacy path · always running · Flux / InfluxQL</div>
+      <div class="box-sub">MQTT :1884 → InfluxDB2 · telegraf-aws-sim.conf</div>
       <div class="metrics">
         <div class="metric">Health <span id="influx-health">—</span></div>
-        <div class="metric">Config <span class="dim">telegraf-aws-sim.conf</span></div>
+        <div class="metric">Bucket <span class="dim">battery-data</span></div>
+      </div>
+    </div>
+
+    <!-- Flux query path (browser → InfluxDB2) -->
+    <div class="comp-box dim" id="box-flux-query">
+      <div class="box-title">
+        <span class="dot dim" id="dot-flux-query"></span>
+        Flux query API
+        <span class="box-port">:8086</span>
+      </div>
+      <div class="box-sub">browser → POST /api/v2/query → InfluxDB2 · orig_aws.html</div>
+      <div class="metrics">
+        <div class="metric">Status <span id="flux-query-status">—</span></div>
+        <div class="metric">Page   <span class="dim">orig_aws.html</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ AWS-SIM col B: new Parquet / DuckDB path ═══ -->
+  <div>
+    <div class="col-label duck">AWS-sim · Parquet / DuckDB path</div>
+
+    <!-- aws-sim Parquet Store -->
+    <div class="comp-box dim" id="box-store-aws">
+      <div class="box-title">
+        <span class="dot dim" id="dot-store-aws"></span>
+        aws-sim Parquet Store
+      </div>
+      <div class="box-sub">/srv/data/parquet-aws-sim/ · fed by rsync-sim + gap writer</div>
+      <div class="metrics">
+        <div class="metric">Queries <span id="store-queries">—</span> total</div>
+        <div class="metric">Source  <span class="dim">rsync + gap writer</span></div>
       </div>
     </div>
 
@@ -381,16 +399,19 @@ h2.section-title {
       </div>
     </div>
 
-    <!-- aws-sim Parquet Store -->
-    <div class="comp-box dim" id="box-store-aws">
+    <!-- subscriber_api -->
+    <div class="comp-box dim" id="box-sub">
       <div class="box-title">
-        <span class="dot dim" id="dot-store-aws"></span>
-        aws-sim Parquet Store
+        <span class="dot dim" id="dot-sub"></span>
+        subscriber_api
+        <span class="box-port">:8767</span>
       </div>
-      <div class="box-sub">/srv/data/parquet-aws-sim/ · DuckDB **/*.parquet</div>
+      <div class="box-sub">WS live (MQTT :1884) · WS history (DuckDB → Parquet)</div>
       <div class="metrics">
-        <div class="metric">Source <span class="dim">rsync-sim + gap writer</span></div>
-        <div class="metric">Query  <span id="store-queries">—</span> total</div>
+        <div class="metric">MQTT   <span id="sub-mqtt">—</span></div>
+        <div class="metric">Live   <span id="sub-mps">—</span> msg/s</div>
+        <div class="metric">Total  <span id="sub-total">—</span></div>
+        <div class="metric">WS cli <span id="sub-wsclients">—</span></div>
       </div>
     </div>
   </div>
@@ -693,6 +714,8 @@ async function checkInflux(aws) {
     setText('influx-health', ok ? 'healthy' : 'degraded');
     setClass('influx-health', ok ? 'ok' : 'warn');
     setBoxState('box-influx','dot-influx', ok ? 'ok' : 'warn');
+    setBoxState('box-flux-query','dot-flux-query', ok ? 'ok' : 'warn');
+    setText('flux-query-status', ok ? 'ready' : 'degraded');
     setText('sb-influx', ok ? 'healthy' : 'degraded');
   } catch(e) {
     setText('influx-health', 'unreachable');
@@ -815,7 +838,7 @@ function doDisconnect() {
   btnConnect.style.display    = '';
   btnDisconnect.style.display = 'none';
   // Reset all to dim
-  ['gen','fmq-host','writer-host','store-host','fmq-aws','sub','influx','gap','store-aws']
+  ['gen','fmq-host','writer-host','store-host','fmq-aws','sub','influx','gap','store-aws','flux-query']
     .forEach(id => setBoxState(`box-${id}`, `dot-${id}`, 'dim'));
   setText('sb-gen-ws','disconnected');
   setText('sb-sub-ws','disconnected');
