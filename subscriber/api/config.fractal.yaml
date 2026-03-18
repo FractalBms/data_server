@@ -8,7 +8,7 @@ mqtt:
   client_id: subscriber-api
 
 local:
-  path: /srv/data/parquet-aws-sim
+  path: /srv/data/parquet-aws-sim/batteries
 
 # WebSocket server (subscriber.html)
 websocket:
