@@ -257,6 +257,36 @@
 
       <div class="card">
         <div class="card-title">History Query</div>
+
+        <!-- Source selector -->
+        <div class="form-row">
+          <label>Source</label>
+          <div style="display:flex;gap:6px">
+            <button class="btn primary" id="srcDuck"   onclick="setHistSource('duck')"   style="flex:1;padding:5px 8px;font-size:12px">DuckDB / S3</button>
+            <button class="btn"         id="srcInflux" onclick="setHistSource('influx')" style="flex:1;padding:5px 8px;font-size:12px">InfluxDB2</button>
+          </div>
+        </div>
+
+        <!-- InfluxDB connection settings (hidden when DuckDB selected) -->
+        <div id="influxSettings" style="display:none">
+          <div class="form-row">
+            <label>InfluxDB URL</label>
+            <input id="influxUrl" value="http://localhost:8086" />
+          </div>
+          <div class="form-row">
+            <label>Org</label>
+            <input id="influxOrg" value="battery-org" />
+          </div>
+          <div class="form-row">
+            <label>Token</label>
+            <input id="influxToken" value="battery-token-secret" />
+          </div>
+          <div class="form-row">
+            <label>Bucket / DB</label>
+            <input id="influxBucket" value="battery-data" />
+          </div>
+        </div>
+
         <div class="form-row">
           <label>Site ID (blank = all)</label>
           <input id="hSite" placeholder="e.g. 0" />
@@ -380,7 +410,7 @@
       document.getElementById('btnConnect').disabled = false;
       document.getElementById('btnSub').disabled   = false;
       document.getElementById('btnUnsub').disabled = false;
-      document.getElementById('btnQuery').disabled = false;
+      document.getElementById('btnQuery').disabled = false;  // enabled regardless of histSource
       document.getElementById('btnLogs').disabled  = false;
       ws.send(JSON.stringify({ type: 'get_status' }));
       startPing();
@@ -394,7 +424,8 @@
       setS3Pill('bad', 'OFFLINE');
       document.getElementById('btnConnect').textContent = 'Connect';
       document.getElementById('btnConnect').disabled = false;
-      ['btnSub','btnUnsub','btnQuery','btnLogs'].forEach(id => document.getElementById(id).disabled = true);
+      ['btnSub','btnUnsub','btnLogs'].forEach(id => document.getElementById(id).disabled = true);
+      if (histSource !== 'influx') document.getElementById('btnQuery').disabled = true;
       setLogAutoRefresh(false);
       document.getElementById('pingVal').textContent = '—';
       document.getElementById('lastMsgVal').textContent = '—';
@@ -555,7 +586,21 @@
     ws.send(JSON.stringify({ type: 'unsubscribe' }));
   }
 
+  // ── History source toggle ────────────────────────────────────
+  let histSource = 'duck';
+
+  function setHistSource(src) {
+    histSource = src;
+    document.getElementById('srcDuck').className   = 'btn' + (src === 'duck'   ? ' primary' : '');
+    document.getElementById('srcInflux').className = 'btn' + (src === 'influx' ? ' primary' : '');
+    document.getElementById('influxSettings').style.display = src === 'influx' ? '' : 'none';
+    // InfluxDB can be queried without a subscriber connection
+    if (src === 'influx') document.getElementById('btnQuery').disabled = false;
+    else document.getElementById('btnQuery').disabled = !connected;
+  }
+
   function queryHistory() {
+    if (histSource === 'influx') { queryInflux(); return; }
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     const fromVal = document.getElementById('hFrom').value;
@@ -576,6 +621,58 @@
       to_ts,
       limit:    parseInt(document.getElementById('hLimit').value) || 500,
     }));
+  }
+
+  async function queryInflux() {
+    const url    = (document.getElementById('influxUrl').value.trim()    || 'http://localhost:8086').replace(/\/$/, '');
+    const token  = document.getElementById('influxToken').value.trim();
+    const bucket = document.getElementById('influxBucket').value.trim() || 'battery-data';
+    const site_id = document.getElementById('hSite').value.trim();
+    const limit   = parseInt(document.getElementById('hLimit').value) || 500;
+
+    const fromVal = document.getElementById('hFrom').value;
+    const toVal   = document.getElementById('hTo').value;
+    const from_ts = Math.floor(fromVal ? new Date(fromVal).getTime() / 1000 : Date.now() / 1000 - 3600);
+    const to_ts   = Math.floor(toVal   ? new Date(toVal).getTime()   / 1000 : Date.now() / 1000);
+
+    let where = `time >= ${from_ts}s AND time <= ${to_ts}s`;
+    if (site_id) where += ` AND site_id='${site_id}'`;
+
+    const q = `SELECT * FROM battery_cell WHERE ${where} ORDER BY time ASC LIMIT ${limit}`;
+
+    const btn = document.getElementById('btnQuery');
+    btn.innerHTML = '<span class="spinner"></span>Querying…';
+    btn.disabled = true;
+
+    const t0 = Date.now();
+    try {
+      const resp = await fetch(
+        `${url}/query?db=${encodeURIComponent(bucket)}&epoch=s&q=${encodeURIComponent(q)}`,
+        { headers: { 'Authorization': `Token ${token}` } }
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+
+      const data    = await resp.json();
+      const elapsed = Date.now() - t0;
+      const series  = data?.results?.[0]?.series?.[0];
+
+      if (!series) {
+        handleHistory({ query_id: 'influx', columns: [], rows: [], total: 0, elapsed_ms: elapsed });
+        return;
+      }
+      handleHistory({
+        query_id:   'influx',
+        columns:    series.columns,
+        rows:       series.values,
+        total:      series.values.length,
+        elapsed_ms: elapsed,
+      });
+    } catch(err) {
+      handleError({ query_id: 'influx', message: err.message });
+    } finally {
+      btn.textContent = 'Run Query';
+      btn.disabled = false;
+    }
   }
 
   function switchTab(name) {
