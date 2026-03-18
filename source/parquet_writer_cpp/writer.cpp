@@ -79,6 +79,7 @@ struct Config {
     std::string compression    {"snappy"};
     int flush_interval_seconds {60};
     int max_messages_per_part  {50000};
+    int max_total_buffer_rows  {500000};  // global OOM guard — drop + flush when exceeded
 
     // Hot file — flat parquet written on every flush, rsynced separately at higher frequency.
     // Empty string disables the feature.  Covers the gap between rsync cycles for DuckDB.
@@ -116,6 +117,7 @@ Config load_config(const std::string& path) {
             if (o["compression"])            cfg.compression            = o["compression"].as<std::string>();
             if (o["flush_interval_seconds"]) cfg.flush_interval_seconds = o["flush_interval_seconds"].as<int>();
             if (o["max_messages_per_part"])  cfg.max_messages_per_part  = o["max_messages_per_part"].as<int>();
+            if (o["max_total_buffer_rows"])   cfg.max_total_buffer_rows   = o["max_total_buffer_rows"].as<int>();
             if (o["hot_file_path"])          cfg.hot_file_path          = o["hot_file_path"].as<std::string>();
             if (o["current_state_path"])     cfg.current_state_path     = o["current_state_path"].as<std::string>();
             if (o["partitions"]) {
@@ -172,6 +174,7 @@ struct Partition {
 struct TopicInfo {
     std::string              source_type;
     std::map<std::string, int> kv;   // site, rack, module, cell
+    std::string              field_name; // per_cell_item: last non-kv segment (e.g. "voltage")
 };
 
 std::optional<TopicInfo> parse_topic(const std::string& topic) {
@@ -190,6 +193,9 @@ std::optional<TopicInfo> parse_topic(const std::string& topic) {
         if (eq != std::string::npos) {
             try { info.kv[segment.substr(0, eq)] = std::stoi(segment.substr(eq + 1)); }
             catch (...) {}
+        } else if (!segment.empty()) {
+            // No '=' — per_cell_item field name (e.g. "voltage" in .../cell=3/voltage)
+            info.field_name = segment;
         }
     }
     if (info.source_type.empty()) return std::nullopt;
@@ -382,6 +388,8 @@ static std::mutex                        g_mutex;
 static std::condition_variable           g_flush_cv;
 static std::atomic<bool>                 g_shutdown{false};
 static const Config*                     g_cfg{nullptr};
+static size_t                            g_total_buffered{0};   // total rows in g_buffers (under g_mutex)
+static std::atomic<uint64_t>             g_overflow_drops{0};   // rows dropped due to buffer full
 
 static void do_flush(std::map<PartitionKey, Partition> to_flush,
                      std::map<SensorKey, Row>          cs_snapshot) {
@@ -394,12 +402,24 @@ static void do_flush(std::map<PartitionKey, Partition> to_flush,
         if (want_hot)
             for (const auto& r : part.rows) hot_rows.push_back(r);
 
-        auto path   = make_output_path(*g_cfg, key.source_type, key.partition_value);
-        auto status = flush_partition(path, part.rows, g_cfg->compression);
+        auto path = make_output_path(*g_cfg, key.source_type, key.partition_value);
+        arrow::Status status;
+        constexpr int MAX_RETRIES = 3;
+        for (int attempt = 0; attempt <= MAX_RETRIES; ++attempt) {
+            if (attempt > 0) {
+                std::cerr << "[flush] retry " << attempt << "/" << MAX_RETRIES
+                          << " for " << path << "\n";
+                std::this_thread::sleep_for(std::chrono::seconds(1 << (attempt - 1))); // 1s, 2s, 4s
+            }
+            status = flush_partition(path, part.rows, g_cfg->compression);
+            if (status.ok()) break;
+            std::cerr << "[flush] attempt " << attempt + 1 << " failed: " << status.ToString() << "\n";
+        }
         if (status.ok())
             std::cout << "[flush] " << part.rows.size() << " rows → " << path << "\n";
         else
-            std::cerr << "[flush] ERROR " << key.source_type << "/" << g_cfg->partition_field
+            std::cerr << "[flush] PERMANENT ERROR — " << part.rows.size() << " rows LOST for "
+                      << key.source_type << "/" << g_cfg->partition_field
                       << "=" << key.partition_value << ": " << status.ToString() << "\n";
     }
 
@@ -449,15 +469,17 @@ static void flush_thread_fn() {
         std::unique_lock<std::mutex> lock(g_mutex);
         g_flush_cv.wait_for(lock, std::chrono::seconds(g_cfg->flush_interval_seconds));
         auto to_flush  = std::exchange(g_buffers, {});
-        auto cs_snap   = g_current_state;          // copy under same lock — atomic with buffer swap
+        g_total_buffered = 0;                       // reset counter atomically with buffer swap
+        auto cs_snap   = g_current_state;           // copy under same lock — atomic with buffer swap
         lock.unlock();                              // release before slow I/O
         do_flush(std::move(to_flush), std::move(cs_snap));
     }
 
     // Final flush on shutdown
     std::unique_lock<std::mutex> lock(g_mutex);
-    auto to_flush = std::exchange(g_buffers, {});
-    auto cs_snap  = g_current_state;
+    auto to_flush    = std::exchange(g_buffers, {});
+    g_total_buffered = 0;
+    auto cs_snap     = g_current_state;
     lock.unlock();
     do_flush(std::move(to_flush), std::move(cs_snap));
 }
@@ -466,12 +488,18 @@ static void flush_thread_fn() {
 // MQTT callbacks
 // ---------------------------------------------------------------------------
 
+static struct mosquitto* g_mosq{nullptr};  // set in main before loop_start
+
 static void on_connect(struct mosquitto*, void*, int rc) {
     if (rc == 0) {
         std::cout << "[mqtt] connected to " << g_cfg->mqtt_host
                   << ":" << g_cfg->mqtt_port << "\n";
-        // Subscribe from on_connect so resubscription happens automatically on reconnect
-        // (mosquitto_loop_start reconnects but doesn't resubscribe; handle in on_connect)
+        // Subscribe here so reconnect after broker restart automatically resubscribes.
+        // mosquitto_loop_start handles TCP reconnect but not resubscription.
+        int sub_rc = mosquitto_subscribe(g_mosq, nullptr,
+                                         g_cfg->mqtt_topic.c_str(), g_cfg->mqtt_qos);
+        if (sub_rc != MOSQ_ERR_SUCCESS)
+            std::cerr << "[mqtt] subscribe failed: " << mosquitto_strerror(sub_rc) << "\n";
     } else {
         std::cerr << "[mqtt] connect failed: " << mosquitto_connack_string(rc) << "\n";
     }
@@ -487,6 +515,17 @@ static void on_message(struct mosquitto*, void*, const struct mosquitto_message*
     if (!info_opt) return;
 
     Row row = parse_payload(payload, *info_opt, g_cfg->project_id, *g_cfg);
+
+    // per_cell_item mode: rename generic "value" field to the actual measurement name
+    // (e.g. topic .../cell=3/voltage → field_name="voltage", payload {"value": 3.7})
+    if (!info_opt->field_name.empty()) {
+        auto it = row.floats.find("value");
+        if (it != row.floats.end()) {
+            row.floats[info_opt->field_name] = it->second;
+            row.floats.erase(it);
+        }
+    }
+
     int pval = 0;
     if (auto it = row.ints.find(g_cfg->partition_field); it != row.ints.end())
         pval = static_cast<int>(it->second);
@@ -495,12 +534,23 @@ static void on_message(struct mosquitto*, void*, const struct mosquitto_message*
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
+    // Overflow guard: drop incoming row if buffer is full, wake flush thread immediately.
+    if (g_total_buffered >= static_cast<size_t>(g_cfg->max_total_buffer_rows)) {
+        auto drops = g_overflow_drops.fetch_add(1) + 1;
+        if (drops == 1 || drops % 10000 == 0)
+            std::cerr << "[buffer] OVERFLOW — dropped " << drops
+                      << " rows (max_total_buffer_rows=" << g_cfg->max_total_buffer_rows << ")\n";
+        g_flush_cv.notify_one();
+        return;
+    }
+
     // Maintain current-state map: always keep the latest row per unique sensor.
     if (!g_cfg->current_state_path.empty())
         g_current_state[SensorKey{info_opt->source_type, row.ints}] = row;
 
     auto& part = g_buffers[key];
     part.rows.push_back(std::move(row));
+    ++g_total_buffered;
     if (static_cast<int>(part.rows.size()) >= g_cfg->max_messages_per_part)
         g_flush_cv.notify_one();
 }
@@ -548,6 +598,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "[mqtt] mosquitto_new failed\n";
         return 1;
     }
+    g_mosq = mosq;  // make available to on_connect for resubscription
 
     mosquitto_connect_callback_set(mosq, on_connect);
     mosquitto_message_callback_set(mosq, on_message);
@@ -555,7 +606,7 @@ int main(int argc, char* argv[]) {
     mosquitto_log_callback_set(mosq, on_log);
     mosquitto_reconnect_delay_set(mosq, 2, 30, /*exponential=*/true);
 
-    // Initial connect (retry until broker is up)
+    // Initial connect (retry until broker is up); subscription happens in on_connect
     while (!g_shutdown) {
         int rc = mosquitto_connect(mosq, cfg.mqtt_host.c_str(), cfg.mqtt_port, /*keepalive=*/60);
         if (rc == MOSQ_ERR_SUCCESS) break;
@@ -563,15 +614,10 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
 
-    int rc = mosquitto_subscribe(mosq, nullptr, cfg.mqtt_topic.c_str(), cfg.mqtt_qos);
-    if (rc != MOSQ_ERR_SUCCESS)
-        std::cerr << "[mqtt] subscribe failed: " << mosquitto_strerror(rc) << "\n";
-
-    std::cout << "[mqtt] subscribed to '" << cfg.mqtt_topic
-              << "' on " << cfg.mqtt_host << ":" << cfg.mqtt_port << "\n";
-    std::cout << "[writer] flushing to " << cfg.base_path
-              << " every " << cfg.flush_interval_seconds << "s"
-              << " / " << cfg.max_messages_per_part << " msgs per partition\n";
+    std::cout << "[writer] topic='" << cfg.mqtt_topic
+              << "'  flush every " << cfg.flush_interval_seconds << "s"
+              << "  max_per_part=" << cfg.max_messages_per_part
+              << "  max_total=" << cfg.max_total_buffer_rows << "\n";
 
     // Background MQTT network loop (handles reconnects automatically)
     mosquitto_loop_start(mosq);
