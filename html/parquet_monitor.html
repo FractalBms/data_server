@@ -271,6 +271,13 @@ h2.section-title {
           &nbsp;<button onclick="document.getElementById('drop-demo-popup').style.display='flex'"
             style="padding:1px 7px;font-size:0.82em;border:1px solid #30363d;border-radius:10px;background:transparent;color:#8b949e;cursor:pointer" title="Silent drop demo">?</button>
         </div>
+        <div class="metric">
+          Mode&nbsp;
+          <!-- per_cell = 1 msg/cell (all fields bundled); per_cell_item = 1 msg/field (matches production) -->
+          <button onclick="setStressMode('per_cell')"      class="btn-rate" id="btn-mode-per-cell">per_cell</button>
+          <button onclick="setStressMode('per_cell_item')" class="btn-rate" id="btn-mode-per-cell-item">per_cell_item</button>
+          <span class="dim" style="font-size:0.8em;margin-left:4px" id="gen-mode-note"></span>
+        </div>
       </div>
       <div class="sites-grid" id="gen-sites"></div>
     </div>
@@ -465,10 +472,9 @@ h2.section-title {
       </div>
       <div class="box-sub">/srv/data/parquet-aws-sim/ · fed by rsync-sim + gap writer</div>
       <div class="metrics">
-        <div class="metric">Queries <span id="store-queries">—</span> total</div>
-        <div class="metric">Last    <span id="store-last-ms">—</span> ms</div>
-        <div class="metric">Avg     <span id="store-avg-ms">—</span> ms</div>
-        <div class="metric">Source  <span class="dim">rsync + gap writer</span></div>
+        <div class="metric">Files   <span id="aws-store-files">—</span> · <span id="aws-store-mb">—</span> MB</div>
+        <div class="metric">DuckDB  <span id="aws-store-duckdb-q">—</span> queries · avg <span id="aws-store-duckdb-avg">—</span> ms</div>
+        <div class="metric">Last    <span id="aws-store-duckdb-last">—</span> ms</div>
       </div>
     </div>
 
@@ -726,6 +732,11 @@ function setStressRate(interval) {
   genWS.send(JSON.stringify({type: 'set_rate', interval}));
 }
 
+function setStressMode(mode) {
+  if (!genWS || genWS.readyState !== WebSocket.OPEN) return;
+  genWS.send(JSON.stringify({type: 'set_mode', mode}));
+}
+
 function updateGen(d) {
   const mps      = d.mps ?? 0;
   const interval = d.interval ?? null;
@@ -739,6 +750,13 @@ function updateGen(d) {
     const btn = document.getElementById('btn-rate-' + id);
     if (btn) btn.classList.toggle('active', interval !== null && Math.abs(interval - parseFloat(iv)) < 0.01);
   });
+  // highlight active mode button + show note
+  const mode = d.topic_mode ?? 'per_cell';
+  const btnCell     = document.getElementById('btn-mode-per-cell');
+  const btnCellItem = document.getElementById('btn-mode-per-cell-item');
+  if (btnCell)     btnCell.classList.toggle('active',     mode === 'per_cell');
+  if (btnCellItem) btnCellItem.classList.toggle('active', mode === 'per_cell_item');
+  setText('gen-mode-note', mode === 'per_cell_item' ? '(~8× msgs — matches production)' : '(bundled payload)');
 
   // FlashMQ :1883 & host writer — inferred from generator + bridge
   const bridgeOk = subData && subData.mqtt_connected && mps > 0;
@@ -829,10 +847,6 @@ function updateSubStats(d) {
   setText('sub-wsclients', d.ws_clients ?? '—');
   setText('sub-mqtt',    d.mqtt_connected ? 'connected' : 'disconnected');
   setClass('sub-mqtt',   d.mqtt_connected ? 'ok' : 'warn');
-  setText('store-queries', fmtNum(d.queries_run));
-  if (d.last_query_ms !== undefined) setText('store-last-ms', d.last_query_ms.toFixed(0));
-  if (d.avg_query_ms  !== undefined) setText('store-avg-ms',  d.avg_query_ms.toFixed(0));
-  setBoxState('box-store-aws','dot-store-aws', d.queries_run > 0 ? 'ok' : 'warn');
   if (d.rsync)   updateRsyncStats(d.rsync);
   if (d.s3sync)  updateS3SyncStats(d.s3sync);
   if (d.router)  updateRouterStats(d.router);
@@ -950,8 +964,12 @@ function updateRsyncStats(r) {
   setClass('rsync-state',  running ? 'ok' : 'dim');
   setText('rsync-elapsed', fmtElapsed(r.elapsed_s));
   setText('rsync-runs',    r.run_count ?? '—');
-  setText('rsync-files',   (r.file_count ?? '—').toLocaleString());
-  setText('rsync-mb',      r.total_mb ?? '—');
+  setText('rsync-files',      (r.file_count ?? '—').toLocaleString());
+  setText('rsync-mb',        r.total_mb ?? '—');
+  // also populate aws-sim Parquet Store box (rsync dst = parquet-aws-sim)
+  if (r.file_count != null) setText('aws-store-files', r.file_count.toLocaleString());
+  if (r.total_mb   != null) setText('aws-store-mb',    r.total_mb);
+  if (r.file_count > 0) setBoxState('box-store-aws', 'dot-store-aws', 'ok');
   setText('rsync-last-ms', r.last_ms ? r.last_ms + ' ms' : '—');
   const btn = document.getElementById('btn-rsync-toggle');
   if (running) {
@@ -1051,6 +1069,13 @@ function updateRouterStats(r) {
   setText('duckdb-q-count', r.duckdb_count ?? '—');
   setText('duckdb-q-last',  r.duckdb_last_ms ?? '—');
   setText('duckdb-q-avg',   r.duckdb_avg_ms  ?? '—');
+  // aws-sim Parquet Store box — DuckDB query counters
+  if (r.duckdb_count   != null) setText('aws-store-duckdb-q',    r.duckdb_count);
+  if (r.duckdb_last_ms != null) setText('aws-store-duckdb-last', r.duckdb_last_ms);
+  if (r.duckdb_avg_ms  != null) setText('aws-store-duckdb-avg',  r.duckdb_avg_ms);
+  // box state: ok once files arrive (file count driven by rsync) or queries run
+  const awsHasData = (r.duckdb_count != null && r.duckdb_count > 0);
+  setBoxState('box-store-aws', 'dot-store-aws', awsHasData ? 'ok' : 'warn');
   if (r.gap_s !== null && r.gap_s !== undefined && r.gap_s >= 0) {
     // gap_s = time.time() - duckdb_max_ts = DuckDB data age (always ≥ 0)
     let val, unit;
@@ -1132,8 +1157,8 @@ function updateQueryPaths() {
   setText('qd-live-status', subMqttOk ? (liveMps > 0 ? liveMps + ' msg/s' : 'connected') : '—');
   setClass('qd-live-status', subMqttOk ? (liveMps > 0 ? 'ok' : 'warn') : 'dim');
 
-  // DuckDB history path — inferred from query count
-  const queries = parseInt($('store-queries') && $('store-queries').textContent) || 0;
+  // DuckDB history path — inferred from duckdb query count in router stats
+  const queries = parseInt($('aws-store-duckdb-q') && $('aws-store-duckdb-q').textContent) || 0;
   setText('qd-hist-status', subWS && subWS.readyState === WebSocket.OPEN ? 'ready' : '—');
   setClass('qd-hist-status', subWS && subWS.readyState === WebSocket.OPEN ? 'ok' : 'dim');
 

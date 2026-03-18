@@ -75,6 +75,7 @@ g_ws_clients:      Set = set()
 g_mqtt_client:     Optional[mqtt.Client] = None
 g_stop:            asyncio.Event
 g_interval:        float = 1.0   # seconds between publish sweeps — set_rate changes this live
+g_topic_mode:      str   = "per_cell"  # "per_cell" | "per_cell_item" — set_mode changes this live
 
 
 # ---------------------------------------------------------------------------
@@ -137,11 +138,25 @@ async def site_publish_loop(project_id: int, site_cfg: dict, config: dict,
             interval = g_interval          # read live — set_rate updates this
             batch    = 0
 
+            mode = g_topic_mode   # read live — set_mode updates this
             for cell in cells:
                 if g_stop.is_set():
                     break
-                g_mqtt_client.publish(cell.topic, json.dumps(cell.payload()), qos=1)
-                batch += 1
+                if mode == "per_cell_item":
+                    ts     = time.time()
+                    values = {name: state.step() for name, state in cell.measurements.items()}
+                    if "voltage" in values and "current" in values:
+                        values["power"] = round(values["voltage"] * values["current"], 4)
+                    for name, val in values.items():
+                        g_mqtt_client.publish(
+                            f"{cell.topic}/{name}",
+                            json.dumps({"timestamp": ts, "value": val}),
+                            qos=1,
+                        )
+                        batch += 1
+                else:
+                    g_mqtt_client.publish(cell.topic, json.dumps(cell.payload()), qos=1)
+                    batch += 1
 
             g_site_counters[key] += batch
             g_total_published    += batch
@@ -177,12 +192,13 @@ def build_stats_message() -> dict:
         "mps":             g_mps,
         "active_tasks":    g_active_tasks,
         "interval":        g_interval,
+        "topic_mode":      g_topic_mode,
         "projects":        projects_out,
     }
 
 
 async def ws_handler(websocket) -> None:
-    global g_interval
+    global g_interval, g_topic_mode
     g_ws_clients.add(websocket)
     log.info("WebSocket client connected (%d total)", len(g_ws_clients))
     await websocket.send(json.dumps(build_stats_message()))
@@ -200,6 +216,15 @@ async def ws_handler(websocket) -> None:
                 g_interval = new_interval
                 log.info("Rate changed → interval=%.2fs (~%.0f mps)", g_interval,
                          sum(s["cells"] for p in g_topology for s in p["sites"]) / g_interval)
+                await websocket.send(json.dumps(build_stats_message()))
+            elif msg.get("type") == "set_mode":
+                new_mode = msg.get("mode", "per_cell")
+                if new_mode in ("per_cell", "per_cell_item"):
+                    g_topic_mode = new_mode
+                    total_cells = sum(s["cells"] for p in g_topology for s in p["sites"])
+                    fields_est  = 8  # typical fields per cell (voltage/current/temp/soc/soh/res/cap/power)
+                    est_mps     = total_cells * (fields_est if new_mode == "per_cell_item" else 1) / g_interval
+                    log.info("Mode changed → %s (~%.0f mps estimated)", g_topic_mode, est_mps)
                 await websocket.send(json.dumps(build_stats_message()))
     except websockets.exceptions.ConnectionClosed:
         pass
@@ -229,10 +254,11 @@ async def stats_broadcaster() -> None:
 # ---------------------------------------------------------------------------
 
 async def main_async(config: dict) -> None:
-    global g_mqtt_client, g_stop, g_topology, g_interval
+    global g_mqtt_client, g_stop, g_topology, g_interval, g_topic_mode
 
-    g_stop     = asyncio.Event()
-    g_interval = float(config.get("sample_interval_seconds", 1.0))
+    g_stop       = asyncio.Event()
+    g_interval   = float(config.get("sample_interval_seconds", 1.0))
+    g_topic_mode = config.get("topic_mode", "per_cell")
 
     loop = asyncio.get_event_loop()
     loop.add_signal_handler(signal.SIGINT,  lambda: (log.info("SIGINT"),  g_stop.set()))
