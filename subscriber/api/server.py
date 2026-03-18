@@ -530,6 +530,10 @@ async def main_async(cfg: dict) -> None:
     g_config = cfg
     g_duckdb = build_duckdb(cfg)
 
+    default_route = cfg.get("flux_http", {}).get("default_route", "influx")
+    from flux_compat import set_route_mode
+    set_route_mode(default_route)
+
     ws_cfg  = cfg.get("websocket", {})
     ws_host = ws_cfg.get("host", "0.0.0.0")
     ws_port = ws_cfg.get("port", 8767)

@@ -76,21 +76,22 @@ def _update_path_stats(path: str, elapsed_ms: float) -> None:
 
 def _latest_ts_from_csv(csv_text: str) -> float:
     """Extract the newest _time value from an InfluxDB CSV response."""
+    from datetime import datetime, timezone as _tz
+    _fmts = ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ")
     latest = 0.0
     for line in csv_text.splitlines():
         if not line or line.startswith("#") or line.startswith(",result"):
             continue
-        cols = line.split(",")
-        # _time is typically column index 5 in annotated CSV
-        for val in cols[3:7]:
+        for val in line.split(",")[3:7]:
             val = val.strip()
-            if "T" in val and val.endswith("Z"):
+            if "T" not in val or not val.endswith("Z"):
+                continue
+            for fmt in _fmts:
                 try:
-                    from datetime import datetime, timezone
-                    ts = datetime.strptime(val, "%Y-%m-%dT%H:%M:%S.%fZ") \
-                                 .replace(tzinfo=timezone.utc).timestamp()
+                    ts = datetime.strptime(val, fmt).replace(tzinfo=_tz.utc).timestamp()
                     if ts > latest:
                         latest = ts
+                    break
                 except ValueError:
                     pass
     return latest

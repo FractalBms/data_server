@@ -18,6 +18,7 @@ websocket:
 # Flux-compatible HTTP API (orig_aws.html)
 flux_http:
   port: 8768
+  default_route: both    # influx | duckdb | both  (persists across monitor reconnects)
 
 # InfluxDB2 proxy (for /influx_health — avoids browser CORS on :8086)
 # passthrough: true  = Phase 1 (proxy Flux queries to InfluxDB, track stats)
