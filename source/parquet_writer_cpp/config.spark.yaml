@@ -1,0 +1,32 @@
+mqtt:
+  host: localhost
+  port: 1884                   # Mosquitto on spark-22b6 / .51
+  client_id: parquet-writer-cpp  # distinct from bridge.py / Telegraf
+  topic: "#"
+  qos: 1
+
+  topic_kv_map:
+    site:   site_id
+    rack:   rack_id
+    module: module_id
+    cell:   cell_id
+
+  partition_field: site_id
+
+output:
+  base_path: /home/phil/data_server/parquet
+  project_id: 0
+  partitions:
+    - "project={project_id}"
+    - "site={site_id}"
+    - "{year}"
+    - "{month}"
+    - "{day}"
+  compression: snappy
+  flush_interval_seconds: 60
+  max_messages_per_part: 50000
+
+  current_state_path: "/home/phil/data_server/parquet/current_state.parquet"
+
+  # hot_file disabled — current_state covers the real-time gap
+  hot_file_path: ""
