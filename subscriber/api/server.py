@@ -301,7 +301,9 @@ async def ws_handler(websocket) -> None:
         "subscribed":     bool(g_live_subject),
         "subject":        g_live_subject,
     }))
-    await websocket.send(json.dumps({"type": "stats", **g_stats}))
+    await websocket.send(json.dumps({"type": "stats", **g_stats, **flux_stats,
+                                     "rsync": get_rsync_stats(), "s3sync": get_s3sync_stats(),
+                                     "router": dict(_router)}))
 
     try:
         async for raw in websocket:
@@ -320,7 +322,9 @@ async def ws_handler(websocket) -> None:
                     "subscribed":     bool(g_live_subject),
                     "subject":        g_live_subject,
                 }))
-                await websocket.send(json.dumps({"type": "stats", **g_stats}))
+                await websocket.send(json.dumps({"type": "stats", **g_stats, **flux_stats,
+                                                 "rsync": get_rsync_stats(), "s3sync": get_s3sync_stats(),
+                                                 "router": dict(_router)}))
 
             elif t == "subscribe":
                 topic = msg.get("subject", g_config.get("mqtt", {}).get("default_topic", "batteries/#"))
