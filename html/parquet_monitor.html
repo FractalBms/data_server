@@ -295,8 +295,10 @@ h2.section-title {
       </div>
       <div class="box-sub">/srv/data/parquet/ · rsync-sim copies → aws-sim every 5 s</div>
       <div class="metrics">
-        <div class="metric">rsync <span id="rsync-status">—</span></div>
-        <div class="metric">Lag   <span class="dim">≤ 5 s</span></div>
+        <div class="metric">Files  <span id="pq-file-count">—</span></div>
+        <div class="metric">Size   <span id="pq-total-mb">—</span> MB</div>
+        <div class="metric">Latest <span id="pq-latest-age">—</span> s ago</div>
+        <div class="metric">rsync  <span id="rsync-status">—</span></div>
       </div>
     </div>
   </div>
@@ -754,6 +756,19 @@ async function checkFluxShim(aws) {
   }
 }
 
+// ── Host Parquet file stats ───────────────────────────────────────────────────
+async function checkParquetStats(aws) {
+  try {
+    const r = await fetch(`http://${aws}:8768/parquet_stats`, {signal: AbortSignal.timeout(4000)});
+    if (!r.ok) return;
+    const d = await r.json();
+    setText('pq-file-count', d.file_count.toLocaleString());
+    setText('pq-total-mb',   d.total_mb.toLocaleString());
+    setText('pq-latest-age', d.latest_age_s !== null ? d.latest_age_s : '—');
+    setBoxState('box-store-host','dot-store-host', d.file_count > 0 ? 'ok' : 'warn');
+  } catch(e) { /* host unreachable — leave as dim */ }
+}
+
 // ── Query path status update ──────────────────────────────────────────────────
 function updateQueryPaths() {
   // Flux → InfluxDB2 direct
@@ -830,6 +845,7 @@ function doConnect() {
   connectSub(cfg.aws);
   checkInflux(cfg.aws);
   checkFluxShim(cfg.aws);
+  checkParquetStats(cfg.aws);
 
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(() => {
@@ -837,6 +853,7 @@ function doConnect() {
     const c = getConfig();
     checkInflux(c.aws);
     checkFluxShim(c.aws);
+    checkParquetStats(c.aws);
     updateQueryPaths();
   }, 2000);
 

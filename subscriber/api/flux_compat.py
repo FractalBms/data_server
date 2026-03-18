@@ -462,6 +462,46 @@ async def _handle(reader, writer, cfg, duckdb_conn):
                 _http_response(writer, 500, cors, str(exc).encode())
             return
 
+        if path.startswith("/parquet_stats"):
+            parquet_path = cfg.get("local", {}).get("path", "/srv/data/parquet")
+            def _scan():
+                import os
+                total_files = 0
+                total_bytes = 0
+                latest_mtime = 0.0
+                latest_file  = ""
+                try:
+                    for dirpath, _, filenames in os.walk(parquet_path):
+                        for fn in filenames:
+                            if not fn.endswith(".parquet"):
+                                continue
+                            fp = os.path.join(dirpath, fn)
+                            try:
+                                st = os.stat(fp)
+                                total_files += 1
+                                total_bytes += st.st_size
+                                if st.st_mtime > latest_mtime:
+                                    latest_mtime = st.st_mtime
+                                    latest_file  = fp
+                            except OSError:
+                                pass
+                except OSError:
+                    pass
+                return {
+                    "path":         parquet_path,
+                    "file_count":   total_files,
+                    "total_mb":     round(total_bytes / 1_048_576, 1),
+                    "latest_file":  latest_file.replace(parquet_path, "").lstrip("/"),
+                    "latest_age_s": round(time.time() - latest_mtime, 0) if latest_mtime else None,
+                }
+            loop = asyncio.get_running_loop()
+            info = await loop.run_in_executor(None, _scan)
+            body = _json.dumps(info).encode()
+            _http_response(writer, 200,
+                           cors + [("Content-Type", "application/json")],
+                           body)
+            return
+
         _http_response(writer, 404, cors, b"Not Found")
 
     except Exception as exc:
