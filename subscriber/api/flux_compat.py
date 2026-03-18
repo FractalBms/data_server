@@ -46,6 +46,56 @@ def update_server_state(d: dict) -> None:
 flux_stats: dict = {"flux_queries_run": 0, "flux_last_ms": 0.0, "flux_avg_ms": 0.0}
 
 # ---------------------------------------------------------------------------
+# Query router state  (mode: influx | duckdb | both)
+# ---------------------------------------------------------------------------
+_router: dict = {
+    "mode":           "influx",   # current routing mode
+    "influx_count":   0,
+    "influx_last_ms": 0.0,
+    "influx_avg_ms":  0.0,
+    "duckdb_count":   0,
+    "duckdb_last_ms": 0.0,
+    "duckdb_avg_ms":  0.0,
+    "gap_s":          None,       # newest influx ts − newest duckdb ts
+    "gap_updated":    None,       # unix ts of last gap measurement
+}
+
+def set_route_mode(mode: str) -> dict:
+    if mode not in ("influx", "duckdb", "both"):
+        return {"ok": False, "msg": f"unknown mode: {mode}"}
+    _router["mode"] = mode
+    log.info("Query route mode → %s", mode)
+    return {"ok": True, "mode": mode}
+
+def _update_path_stats(path: str, elapsed_ms: float) -> None:
+    _router[f"{path}_count"] += 1
+    n = _router[f"{path}_count"]
+    _router[f"{path}_last_ms"] = elapsed_ms
+    _router[f"{path}_avg_ms"]  = round(
+        _router[f"{path}_avg_ms"] * (n - 1) / n + elapsed_ms / n, 1)
+
+def _latest_ts_from_csv(csv_text: str) -> float:
+    """Extract the newest _time value from an InfluxDB CSV response."""
+    latest = 0.0
+    for line in csv_text.splitlines():
+        if not line or line.startswith("#") or line.startswith(",result"):
+            continue
+        cols = line.split(",")
+        # _time is typically column index 5 in annotated CSV
+        for val in cols[3:7]:
+            val = val.strip()
+            if "T" in val and val.endswith("Z"):
+                try:
+                    from datetime import datetime, timezone
+                    ts = datetime.strptime(val, "%Y-%m-%dT%H:%M:%S.%fZ") \
+                                 .replace(tzinfo=timezone.utc).timestamp()
+                    if ts > latest:
+                        latest = ts
+                except ValueError:
+                    pass
+    return latest
+
+# ---------------------------------------------------------------------------
 # rsync control state
 # ---------------------------------------------------------------------------
 _rsync_state: dict = {
@@ -520,51 +570,85 @@ async def _handle(reader, writer, cfg, duckdb_conn):
             return
 
         if method == "POST" and "/api/v2/query" in path:
-            flux = body.decode(errors="replace")
-            influx_cfg  = cfg.get("influx", {})
-            passthrough = influx_cfg.get("passthrough", False)
-            t0 = time.monotonic()
+            flux       = body.decode(errors="replace")
+            influx_cfg = cfg.get("influx", {})
+            mode       = _router["mode"]
+            qs         = "?" + path.split("?", 1)[1] if "?" in path else ""
+            fwd_hdrs   = {k: v for k, v in headers.items()
+                          if k.lower() in ("authorization", "content-type", "accept")}
+            loop       = asyncio.get_running_loop()
+
+            def _influx_query():
+                influx_host = influx_cfg.get("host", "localhost")
+                influx_port = influx_cfg.get("port", 8086)
+                req = urllib.request.Request(
+                    f"http://{influx_host}:{influx_port}/api/v2/query{qs}",
+                    data=flux.encode(), headers=fwd_hdrs, method="POST")
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.status, resp.read().decode(errors="replace")
+
+            def _duckdb_query():
+                return 200, run_flux_query(flux, cfg, duckdb_conn)
+
             try:
-                loop = asyncio.get_running_loop()
-                if passthrough:
-                    # Phase 1: proxy straight to InfluxDB, track stats
-                    influx_host = influx_cfg.get("host", "localhost")
-                    influx_port = influx_cfg.get("port", 8086)
-                    qs = "?" + path.split("?", 1)[1] if "?" in path else ""
-                    def _proxy():
-                        import urllib.request as _ur
-                        req = _ur.Request(
-                            f"http://{influx_host}:{influx_port}/api/v2/query{qs}",
-                            data=flux.encode(),
-                            headers={k: v for k, v in headers.items()
-                                     if k.lower() in ("authorization","content-type","accept")},
-                            method="POST",
-                        )
-                        with _ur.urlopen(req, timeout=10) as resp:
-                            return resp.status, resp.read()
-                    status, resp_body = await loop.run_in_executor(None, _proxy)
-                    elapsed = round((time.monotonic() - t0) * 1000, 1)
-                    log.info("Flux proxy → InfluxDB  %.1fms", elapsed)
+                if mode == "influx":
+                    t0 = time.monotonic()
+                    status, csv = await loop.run_in_executor(None, _influx_query)
+                    _update_path_stats("influx", round((time.monotonic() - t0) * 1000, 1))
                     _http_response(writer, status,
                                    cors + [("Content-Type", "application/csv; charset=utf-8")],
-                                   resp_body)
-                else:
-                    # Phase 3+: translate Flux → DuckDB SQL
-                    csv_text = await loop.run_in_executor(
-                        None, run_flux_query, flux, cfg, duckdb_conn
-                    )
-                    elapsed = round((time.monotonic() - t0) * 1000, 1)
+                                   csv.encode())
+
+                elif mode == "duckdb":
+                    t0 = time.monotonic()
+                    _, csv = await loop.run_in_executor(None, _duckdb_query)
+                    _update_path_stats("duckdb", round((time.monotonic() - t0) * 1000, 1))
                     _http_response(writer, 200,
                                    cors + [("Content-Type", "application/csv; charset=utf-8")],
-                                   csv_text.encode())
+                                   csv.encode())
+
+                elif mode == "both":
+                    t0 = time.monotonic()
+                    (i_status, i_csv), (_, d_csv) = await asyncio.gather(
+                        loop.run_in_executor(None, _influx_query),
+                        loop.run_in_executor(None, _duckdb_query),
+                    )
+                    elapsed = round((time.monotonic() - t0) * 1000, 1)
+                    _update_path_stats("influx", elapsed)
+                    _update_path_stats("duckdb", elapsed)
+                    # measure gap: newest influx ts − newest duckdb ts
+                    i_ts = _latest_ts_from_csv(i_csv)
+                    d_ts = _latest_ts_from_csv(d_csv)
+                    if i_ts and d_ts:
+                        _router["gap_s"]      = round(i_ts - d_ts, 1)
+                        _router["gap_updated"] = time.time()
+                        log.info("Gap: %.1fs  (influx %.0f  duckdb %.0f)", _router["gap_s"], i_ts, d_ts)
+                    # return influx result to caller
+                    _http_response(writer, i_status,
+                                   cors + [("Content-Type", "application/csv; charset=utf-8")],
+                                   i_csv.encode())
+
                 flux_stats["flux_queries_run"] += 1
                 n = flux_stats["flux_queries_run"]
-                flux_stats["flux_last_ms"] = elapsed
+                last_ms = _router.get("influx_last_ms") or _router.get("duckdb_last_ms") or 0
+                flux_stats["flux_last_ms"] = last_ms
                 flux_stats["flux_avg_ms"]  = round(
-                    flux_stats["flux_avg_ms"] * (n - 1) / n + elapsed / n, 1)
+                    flux_stats["flux_avg_ms"] * (n - 1) / n + last_ms / n, 1)
             except Exception as exc:
                 log.error("Flux query error: %s", exc)
                 _http_response(writer, 500, cors, str(exc).encode())
+            return
+
+        if path.startswith("/route/"):
+            mode = path.split("/route/", 1)[1].split("?")[0].strip()
+            result = set_route_mode(mode)
+            _http_response(writer, 200, cors + [("Content-Type", "application/json")],
+                           _json.dumps(result).encode())
+            return
+
+        if path.startswith("/route"):
+            _http_response(writer, 200, cors + [("Content-Type", "application/json")],
+                           _json.dumps({"mode": _router["mode"], **_router}).encode())
             return
 
         if path.startswith("/rsync/start"):

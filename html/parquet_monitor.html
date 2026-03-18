@@ -362,19 +362,32 @@ h2.section-title {
       </div>
     </div>
 
-    <!-- Flux query path (browser → InfluxDB2) -->
+    <!-- Flux query path / router -->
     <div class="comp-box dim" id="box-flux-query">
       <div class="box-title">
         <span class="dot dim" id="dot-flux-query"></span>
-        Flux query API
+        Flux query router
         <span class="box-port">:8768</span>
       </div>
-      <div class="box-sub">monitor → POST /api/v2/query → flux_compat :8768 → InfluxDB2</div>
+      <div class="box-sub">monitor → flux_compat :8768 → <span id="route-dest">InfluxDB2</span></div>
       <div class="metrics">
-        <div class="metric">Status  <span id="flux-query-status">—</span></div>
-        <div class="metric">Queries <span id="flux-queries">—</span> total</div>
-        <div class="metric">Last    <span id="flux-last-ms">—</span> ms</div>
-        <div class="metric">Avg     <span id="flux-avg-ms">—</span> ms</div>
+        <div class="metric" style="margin-bottom:4px">
+          Route&nbsp;
+          <button class="btn-route" id="btn-route-influx"  onclick="setRoute('influx')"  style="padding:2px 8px;font-size:0.8em;border:none;border-radius:4px;cursor:pointer;background:#1f6feb;color:#fff">Influx</button>
+          <button class="btn-route" id="btn-route-duckdb"  onclick="setRoute('duckdb')"  style="padding:2px 8px;font-size:0.8em;border:none;border-radius:4px;cursor:pointer;background:#30363d;color:#8b949e">DuckDB</button>
+          <button class="btn-route" id="btn-route-both"    onclick="setRoute('both')"    style="padding:2px 8px;font-size:0.8em;border:none;border-radius:4px;cursor:pointer;background:#30363d;color:#8b949e">Both</button>
+        </div>
+        <div class="metric">Status   <span id="flux-query-status">—</span></div>
+        <div class="metric">Queries  <span id="flux-queries">—</span> total</div>
+        <div class="metric" style="border-top:1px solid #30363d;margin-top:3px;padding-top:3px">
+          <span style="color:#58a6ff">Influx</span>  <span id="influx-q-count">—</span> · last <span id="influx-q-last">—</span> ms · avg <span id="influx-q-avg">—</span> ms
+        </div>
+        <div class="metric">
+          <span style="color:#3fb950">DuckDB</span> <span id="duckdb-q-count">—</span> · last <span id="duckdb-q-last">—</span> ms · avg <span id="duckdb-q-avg">—</span> ms
+        </div>
+        <div class="metric" style="border-top:1px solid #30363d;margin-top:3px;padding-top:3px;font-size:1em">
+          Gap <span id="gap-value" style="font-weight:600;font-size:1.1em">—</span> <span id="gap-unit" style="color:#8b949e;font-size:0.85em"></span>
+        </div>
         <div class="metric" style="margin-top:6px">
           <button id="btn-flux-toggle" style="padding:2px 10px;font-size:0.82em;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer">▶ Start queries</button>
         </div>
@@ -725,7 +738,8 @@ function updateSubStats(d) {
   if (d.last_query_ms !== undefined) setText('store-last-ms', d.last_query_ms.toFixed(0));
   if (d.avg_query_ms  !== undefined) setText('store-avg-ms',  d.avg_query_ms.toFixed(0));
   setBoxState('box-store-aws','dot-store-aws', d.queries_run > 0 ? 'ok' : 'warn');
-  if (d.rsync) updateRsyncStats(d.rsync);
+  if (d.rsync)  updateRsyncStats(d.rsync);
+  if (d.router) updateRouterStats(d.router);
   if (d.flux_queries_run !== undefined) {
     setText('flux-queries',  fmtNum(d.flux_queries_run));
     if (d.flux_queries_run > 0) {
@@ -825,6 +839,54 @@ document.getElementById('btn-rsync-toggle').addEventListener('click', async () =
     if (!d.ok) console.warn('rsync', endpoint, d.msg);
   } catch(e) { console.error('rsync toggle failed', e); }
 });
+
+// ── Query router controls ─────────────────────────────────────────────────────
+const ROUTE_COLORS = {influx:'#1f6feb', duckdb:'#238636', both:'#9e6a03'};
+const ROUTE_LABELS = {influx:'InfluxDB2', duckdb:'DuckDB (Parquet)', both:'Influx + DuckDB'};
+
+async function setRoute(mode) {
+  const aws = getConfig().aws;
+  try {
+    await fetch(`http://${aws}:8768/route/${mode}`,
+                {method:'POST', signal: AbortSignal.timeout(4000)});
+  } catch(e) { console.error('setRoute failed', e); }
+  updateRouteButtons(mode);
+}
+
+function updateRouteButtons(mode) {
+  ['influx','duckdb','both'].forEach(m => {
+    const btn = document.getElementById(`btn-route-${m}`);
+    if (btn) {
+      btn.style.background = m === mode ? ROUTE_COLORS[m] : '#30363d';
+      btn.style.color      = m === mode ? '#fff' : '#8b949e';
+    }
+  });
+  const dest = document.getElementById('route-dest');
+  if (dest) dest.textContent = ROUTE_LABELS[mode] || mode;
+}
+
+function updateRouterStats(r) {
+  if (!r) return;
+  updateRouteButtons(r.mode);
+  setText('influx-q-count', r.influx_count ?? '—');
+  setText('influx-q-last',  r.influx_last_ms ?? '—');
+  setText('influx-q-avg',   r.influx_avg_ms  ?? '—');
+  setText('duckdb-q-count', r.duckdb_count ?? '—');
+  setText('duckdb-q-last',  r.duckdb_last_ms ?? '—');
+  setText('duckdb-q-avg',   r.duckdb_avg_ms  ?? '—');
+  if (r.gap_s !== null && r.gap_s !== undefined) {
+    const abs = Math.abs(r.gap_s);
+    let val, unit;
+    if (abs >= 3600)      { val = (abs / 3600).toFixed(1); unit = 'h'; }
+    else if (abs >= 60)   { val = (abs / 60).toFixed(1);   unit = 'm'; }
+    else                  { val = abs.toFixed(1);           unit = 's'; }
+    setText('gap-value', (r.gap_s < 0 ? '-' : '') + val);
+    setText('gap-unit',  unit + (r.gap_s > 0 ? ' behind' : ' ahead'));
+    setClass('gap-value', abs > 120 ? 'warn' : abs > 30 ? 'ok' : 'ok');
+  } else {
+    setText('gap-value', '—'); setText('gap-unit', '');
+  }
+}
 
 // ── Flux query runner (fires against flux_compat :8768) ──────────────────────
 const FLUX_QUERY = `from(bucket:"battery-data") |> range(start: -5m) |> filter(fn:(r) => r._field == "voltage") |> limit(n:50)`;
