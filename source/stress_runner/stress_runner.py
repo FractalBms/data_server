@@ -128,7 +128,7 @@ async def site_publish_loop(project_id: int, site_cfg: dict, config: dict,
     g_site_counters[key] = 0
 
     log.info("Project %d site %d: %d cells  interval=%.1fs  schema=%s",
-             project_id, site_id, len(cells), interval, list(cell_data.keys()))
+             project_id, site_id, len(cells), g_interval, list(cell_data.keys()))
 
     g_active_tasks += 1
     try:
