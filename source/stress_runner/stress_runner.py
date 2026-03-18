@@ -142,6 +142,10 @@ async def site_publish_loop(project_id: int, site_cfg: dict, config: dict,
             for cell in cells:
                 if g_stop.is_set():
                     break
+                # QoS 0 (fire-and-forget) avoids PUBACK backlog that causes FlashMQ to
+                # drop messages for slow subscribers before they even reach telegraf.
+                # TODO: discuss QoS tradeoffs with team — QoS 1 is correct for production
+                # but at high rates the PUBACK round-trip saturates broker queues.
                 if mode == "per_cell_item":
                     ts     = time.time()
                     values = {name: state.step() for name, state in cell.measurements.items()}
@@ -151,11 +155,11 @@ async def site_publish_loop(project_id: int, site_cfg: dict, config: dict,
                         g_mqtt_client.publish(
                             f"{cell.topic}/{name}",
                             json.dumps({"timestamp": ts, "value": val}),
-                            qos=1,
+                            qos=0,
                         )
                         batch += 1
                 else:
-                    g_mqtt_client.publish(cell.topic, json.dumps(cell.payload()), qos=1)
+                    g_mqtt_client.publish(cell.topic, json.dumps(cell.payload()), qos=0)
                     batch += 1
 
             g_site_counters[key] += batch
