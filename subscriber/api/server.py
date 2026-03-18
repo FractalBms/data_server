@@ -90,8 +90,15 @@ g_live_buffer: collections.deque = collections.deque(maxlen=BUFFER_MAXLEN)
 # DuckDB / S3
 # ---------------------------------------------------------------------------
 
+def _local_path(cfg: dict) -> str | None:
+    """Return configured local Parquet directory, or None if using S3."""
+    return (cfg.get("local") or {}).get("path") or None
+
+
 def build_duckdb(cfg: dict) -> duckdb.DuckDBPyConnection:
     conn = duckdb.connect()
+    if _local_path(cfg):
+        return conn   # local filesystem — no httpfs or S3 credentials needed
     conn.execute("INSTALL httpfs; LOAD httpfs;")
     s3 = cfg["s3"]
     if s3.get("endpoint_url"):
@@ -115,6 +122,9 @@ def build_duckdb(cfg: dict) -> duckdb.DuckDBPyConnection:
 
 
 def check_s3(cfg: dict) -> bool:
+    if _local_path(cfg):
+        import os
+        return os.path.isdir(_local_path(cfg))
     try:
         import boto3
         s3_cfg = cfg["s3"]
@@ -151,17 +161,21 @@ def _date_paths(base: str, proj_id: str, site_id: str, from_ts: float, to_ts: fl
 
 
 def run_history_query(cfg: dict, proj_id: str, site_id: str, from_ts: float, to_ts: float, limit: int) -> dict:
-    bucket     = cfg["s3"]["bucket"]
-    prefix     = cfg["s3"].get("prefix", "").strip("/")
-    gap_prefix = cfg["s3"].get("gap_fill_prefix", "").strip("/")
-    base     = f"s3://{bucket}/{prefix + '/' if prefix else ''}"
-    gap_base = f"s3://{bucket}/{gap_prefix + '/' if gap_prefix else ''}"
+    local = _local_path(cfg)
+    if local:
+        base      = local.rstrip("/") + "/"
+        gap_prefix = ""
+    else:
+        bucket     = cfg["s3"]["bucket"]
+        prefix     = cfg["s3"].get("prefix", "").strip("/")
+        gap_prefix = cfg["s3"].get("gap_fill_prefix", "").strip("/")
+        base     = f"s3://{bucket}/{prefix + '/' if prefix else ''}"
 
     primary_paths  = _date_paths(base,     proj_id, site_id, from_ts, to_ts)
     primary_list   = "[" + ", ".join(f"'{p}'" for p in primary_paths) + "]"
     where          = f"timestamp >= {from_ts} AND timestamp <= {to_ts}"
 
-    if gap_prefix and _gap_fill_exists(cfg):
+    if not local and gap_prefix and _gap_fill_exists(cfg):
         gap_paths = _date_paths(gap_base, proj_id, site_id, from_ts, to_ts)
         gap_list  = "[" + ", ".join(f"'{p}'" for p in gap_paths) + "]"
         # UNION primary + gap-fill, deduplicate keeping primary (src=0) over gap-fill (src=1).

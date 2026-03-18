@@ -1,0 +1,109 @@
+websocket:
+  host: 0.0.0.0
+  port: 8761
+
+# Phase 1 migration testbed on fractal-phil (192.168.86.51)
+#
+# Architecture overview:
+#
+#   Generator / stress_runner
+#         │
+#         ▼  MQTT
+#   FlashMQ :1883 (edge broker, systemd)
+#         │
+#    ┌────┴──────────────────────────────────────────┐
+#    │                                               │
+#    ▼  OLD PATH                                     ▼  NEW EDGE PATH
+#  Telegraf :1883                              writer.cpp :1883
+#    → InfluxDB2 :8086                               │
+#   (AWS-sim old path)                               ▼
+#                                          /srv/data/parquet (local)
+#                                               │
+#                                          rsync-sim (5 s loop)
+#                                               │
+#                                          /srv/data/parquet-aws-sim
+#                                               │
+#                                          subscriber_api DuckDB :8767
+#                                         (AWS-sim new path)
+#
+# migration_compare.py (manual script) compares both paths on demand.
+#
+# Start order — infra first, then old path, then edge path:
+
+order:
+  # ── Shared broker (infra) ───────────────────────────────────────
+  - flashmq
+  # ── Old path (systemd services — log-follow only) ───────────────
+  - influxdb
+  - telegraf
+  # ── Edge path (managed processes) ──────────────────────────────
+  - writer_cpp
+  - rsync_sim
+  - subscriber_api
+  # ── Load generation ─────────────────────────────────────────────
+  - stress_runner
+  - generator
+
+components:
+
+  # ── Shared edge MQTT broker (systemd — log follow) ─────────────
+
+  flashmq:
+    label: "FlashMQ MQTT Broker :1883 [systemd log]"
+    cmd: ["journalctl", "-fu", "flashmq", "--no-pager", "--output=short"]
+    cwd: "."
+
+  # ── Old path — systemd services (log follow, not managed) ──────
+
+  influxdb:
+    label: "InfluxDB2 :8086 [systemd log]"
+    cmd: ["journalctl", "-fu", "influxdb", "--no-pager", "--output=short"]
+    cwd: "."
+
+  telegraf:
+    label: "Telegraf — FlashMQ → InfluxDB2 [systemd log]"
+    cmd: ["journalctl", "-fu", "telegraf", "--no-pager", "--output=short"]
+    cwd: "."
+
+  # ── Edge path — managed processes ──────────────────────────────
+
+  # Writes Parquet files locally from FlashMQ MQTT stream
+  writer_cpp:
+    label: "writer.cpp — FlashMQ → /srv/data/parquet"
+    cmd: ["./parquet_writer", "--config", "config.yaml"]
+    cwd: "source/parquet_writer_cpp"
+
+  # Simulates S3 upload: rsync local Parquet → aws-sim directory every 5 s
+  rsync_sim:
+    label: "rsync-sim  /srv/data/parquet → parquet-aws-sim  [5 s loop]"
+    cmd:
+      - "bash"
+      - "-c"
+      - >-
+        mkdir -p /srv/data/parquet-aws-sim &&
+        while true; do
+          rsync -a --delete /srv/data/parquet/ /srv/data/parquet-aws-sim/;
+          sleep 5;
+        done
+    cwd: "."
+
+  # DuckDB over rsync-sim Parquet tree — simulates the AWS query layer
+  subscriber_api:
+    label: "Subscriber API (DuckDB → parquet-aws-sim) :8767"
+    cmd: [".venv/bin/python", "server.py", "--config", "config.fractal.yaml"]
+    cwd: "subscriber/api"
+    ports: [8767]
+
+  # ── Load generators ─────────────────────────────────────────────
+
+  stress_runner:
+    label: "Stress Runner (sustained MQTT load) :8769"
+    cmd: [".venv/bin/python", "stress_runner.py", "--config", "config.yaml"]
+    cwd: "source/stress_runner"
+    ports: [8769]
+
+  generator:
+    label: "Data Generator :8765"
+    cmd: [".venv/bin/python", "generator.py", "--config", "config.yaml"]
+    cwd: "source/generator"
+    ports: [8765]
