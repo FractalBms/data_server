@@ -192,7 +192,7 @@
     </div>
     <div class="header-right">
       Server: <span id="serverPill" class="pill bad">DISCONNECTED</span><br>
-      NATS: <span id="natsPill" class="pill bad">OFFLINE</span>
+      MQTT: <span id="mqttPill" class="pill bad">OFFLINE</span>
       &nbsp;S3: <span id="s3Pill" class="pill bad">OFFLINE</span>
     </div>
   </div>
@@ -247,7 +247,7 @@
         <div class="card-title">Live Subscription</div>
         <div class="form-row">
           <label>Topic filter</label>
-          <input id="subTopic" value="batteries.>" />
+          <input id="subTopic" value="batteries/#" />
         </div>
         <div style="display:flex; gap:6px; margin-top:4px">
           <button class="btn primary btn-full" id="btnSub" disabled onclick="subscribe()">Subscribe</button>
@@ -420,7 +420,7 @@
     ws.onclose = () => {
       connected = false;
       setServerPill('bad', 'DISCONNECTED');
-      setNatsPill('bad', 'OFFLINE');
+      setMqttPill('bad', 'OFFLINE');
       setS3Pill('bad', 'OFFLINE');
       document.getElementById('btnConnect').textContent = 'Connect';
       document.getElementById('btnConnect').disabled = false;
@@ -481,7 +481,7 @@
   // ── Message handlers ────────────────────────────────────────
 
   function handleStatus(msg) {
-    setNatsPill(msg.nats_connected ? 'ok' : 'bad', msg.nats_connected ? 'ONLINE' : 'OFFLINE');
+    setMqttPill(msg.mqtt_connected ? 'ok' : 'bad', msg.mqtt_connected ? 'ONLINE' : 'OFFLINE');
     setS3Pill(msg.s3_connected ? 'ok' : 'bad', msg.s3_connected ? 'ONLINE' : 'OFFLINE');
     const sub = msg.subscribed ? (msg.subject || 'batteries.>') : '—';
     document.getElementById('sbTopic').textContent = sub;
@@ -685,7 +685,7 @@
   // ── Pills ────────────────────────────────────────────────────
 
   function setServerPill(cls, text) { const e = document.getElementById('serverPill'); e.className=`pill ${cls}`; e.textContent=text; }
-  function setNatsPill(cls, text)   { const e = document.getElementById('natsPill');   e.className=`pill ${cls}`; e.textContent=text; }
+  function setMqttPill(cls, text)   { const e = document.getElementById('mqttPill');   e.className=`pill ${cls}`; e.textContent=text; }
   function setS3Pill(cls, text)     { const e = document.getElementById('s3Pill');     e.className=`pill ${cls}`; e.textContent=text; }
 
   // ── Host persistence + stack selector ────────────────────────

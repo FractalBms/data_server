@@ -1,8 +1,9 @@
-# NATS JetStream (live data source — replaces direct MQTT)
-nats:
-  url: "nats://localhost:4222"
-  stream_name: BATTERY_DATA
-  default_subject: ">"              # default topic for live subscription
+# MQTT broker (live data source)
+mqtt:
+  host: localhost
+  port: 1883
+  client_id: subscriber-api
+  default_topic: "batteries/#"     # default topic for live subscription
 
 # S3 / MinIO (historical data source)
 s3:

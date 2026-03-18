@@ -2,15 +2,15 @@
 Subscriber API server — single WebSocket interface for both real-time and
 historical battery data.
 
-Real-time:  consumes live messages from NATS JetStream (push consumer, new
-            messages only) and forwards them to connected WebSocket clients.
-Historical: queries S3 Parquet files via embedded DuckDB.
+Real-time:  subscribes to an MQTT broker (FlashMQ / Mosquitto) and forwards
+            incoming messages to all connected WebSocket clients.
+Historical: queries Parquet files via embedded DuckDB (S3/MinIO or local path).
 
 WebSocket API (ws://localhost:8767):
 
   Client → Server:
     {"type": "get_status"}
-    {"type": "subscribe",   "subject": "batteries.>"}   # start live stream
+    {"type": "subscribe",   "subject": "batteries/#"}   # start live stream (MQTT topic)
     {"type": "unsubscribe"}                              # stop live stream
     {"type": "query_history",
        "query_id": "q1",
@@ -21,14 +21,14 @@ WebSocket API (ws://localhost:8767):
        "limit":    1000}
 
   Server → Client:
-    {"type": "status",  "nats_connected": bool, "s3_connected": bool, "subscribed": bool, "subject": str}
+    {"type": "status",  "mqtt_connected": bool, "s3_connected": bool, "subscribed": bool, "subject": str}
     {"type": "live",    "subject": str, "payload": {...}}
     {"type": "stats",   "live_total": int, "live_per_sec": int, "queries_run": int}
     {"type": "history", "query_id": str, "columns": [...], "rows": [...], "total": int, "elapsed_ms": float}
     {"type": "error",   "query_id": str, "message": str}
 
 Usage:
-  pip install nats-py duckdb websockets boto3 pyyaml
+  pip install aiomqtt duckdb websockets boto3 pyyaml
   python server.py
   python server.py --config config.yaml
 """
@@ -41,11 +41,10 @@ import logging
 import time
 from typing import Optional, Set
 
+import aiomqtt
 import duckdb
-import nats
 import websockets
 import yaml
-from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
 
 from flux_compat import serve_flux_api, update_server_state, _gap_fill_exists_flux as _gap_fill_exists
 
@@ -69,11 +68,10 @@ logging.getLogger().addHandler(_buf_handler)
 
 g_config: dict = {}
 g_connected: Set = set()
-g_nc: Optional[object] = None        # NATS connection
-g_nats_connected: bool = False
+g_mqtt_client: Optional[aiomqtt.Client] = None   # active MQTT client
+g_mqtt_connected: bool = False
 g_s3_connected: bool = False
-g_live_sub: Optional[object] = None  # NATS push subscription
-g_live_subject: str = ""
+g_live_subject: str = ""                          # active MQTT subscription topic
 g_stats = {"live_total": 0, "live_per_sec": 0, "queries_run": 0}
 g_live_window: list = []
 g_start_time = time.time()
@@ -227,58 +225,33 @@ def run_history_query(cfg: dict, proj_id: str, site_id: str, from_ts: float, to_
 
 
 # ---------------------------------------------------------------------------
-# NATS live subscription
+# MQTT live subscription helpers
 # ---------------------------------------------------------------------------
 
-async def start_live_sub(subject: str) -> None:
-    global g_live_sub, g_live_subject
-    await stop_live_sub()
-
-    js = g_nc.jetstream()
-    stream_name = g_config["nats"]["stream_name"]
-
-    async def message_handler(msg):
-        global g_stats, g_live_window
-        await msg.ack()
-        now = time.monotonic()
-        g_live_window = [t for t in g_live_window if now - t < 1.0]
-        g_live_window.append(now)
-        g_stats["live_total"]   += 1
-        g_stats["live_per_sec"]  = len(g_live_window)
+async def start_live_sub(topic: str) -> None:
+    """Subscribe to an MQTT topic. Replaces any active subscription."""
+    global g_live_subject
+    if g_mqtt_client is None:
+        raise RuntimeError("MQTT not connected")
+    if g_live_subject:
         try:
-            raw = json.loads(msg.data)
-            # Flatten {value, unit} measurement objects to plain scalars
-            payload = {k: (v["value"] if isinstance(v, dict) and "value" in v else v)
-                       for k, v in raw.items()}
+            await g_mqtt_client.unsubscribe(g_live_subject)
         except Exception:
-            payload = {"raw": msg.data.decode(errors="replace")}
-        g_live_buffer.append(payload)
-        await broadcast({"type": "live", "subject": msg.subject, "payload": payload})
-
-    # Push consumer — deliver only NEW messages (not historical backlog)
-    g_live_sub = await js.subscribe(
-        subject,
-        stream  = stream_name,
-        config  = ConsumerConfig(
-            deliver_policy = DeliverPolicy.NEW,
-            ack_policy     = AckPolicy.EXPLICIT,
-        ),
-        cb = message_handler,
-    )
-    g_live_subject = subject
-    log.info("Live subscription started: subject=%s stream=%s", subject, stream_name)
+            pass
+    await g_mqtt_client.subscribe(topic)
+    g_live_subject = topic
+    log.info("MQTT subscribed: %s", topic)
 
 
 async def stop_live_sub() -> None:
-    global g_live_sub, g_live_subject
-    if g_live_sub:
+    global g_live_subject
+    if g_mqtt_client and g_live_subject:
         try:
-            await g_live_sub.unsubscribe()
+            await g_mqtt_client.unsubscribe(g_live_subject)
         except Exception:
             pass
-        g_live_sub     = None
-        g_live_subject = ""
-        log.info("Live subscription stopped")
+    g_live_subject = ""
+    log.info("MQTT unsubscribed")
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +268,9 @@ async def broadcast(msg: dict) -> None:
 async def broadcast_status() -> None:
     await broadcast({
         "type":           "status",
-        "nats_connected": g_nats_connected,
+        "mqtt_connected": g_mqtt_connected,
         "s3_connected":   g_s3_connected,
-        "subscribed":     g_live_sub is not None,
+        "subscribed":     bool(g_live_subject),
         "subject":        g_live_subject,
     })
 
@@ -312,9 +285,9 @@ async def ws_handler(websocket) -> None:
 
     await websocket.send(json.dumps({
         "type":           "status",
-        "nats_connected": g_nats_connected,
+        "mqtt_connected": g_mqtt_connected,
         "s3_connected":   g_s3_connected,
-        "subscribed":     g_live_sub is not None,
+        "subscribed":     bool(g_live_subject),
         "subject":        g_live_subject,
     }))
     await websocket.send(json.dumps({"type": "stats", **g_stats}))
@@ -331,18 +304,18 @@ async def ws_handler(websocket) -> None:
             if t == "get_status":
                 await websocket.send(json.dumps({
                     "type":           "status",
-                    "nats_connected": g_nats_connected,
+                    "mqtt_connected": g_mqtt_connected,
                     "s3_connected":   g_s3_connected,
-                    "subscribed":     g_live_sub is not None,
+                    "subscribed":     bool(g_live_subject),
                     "subject":        g_live_subject,
                 }))
                 await websocket.send(json.dumps({"type": "stats", **g_stats}))
 
             elif t == "subscribe":
-                subject = msg.get("subject", g_config["nats"].get("default_subject", "batteries.>"))
-                if g_nats_connected:
+                topic = msg.get("subject", g_config.get("mqtt", {}).get("default_topic", "batteries/#"))
+                if g_mqtt_connected:
                     try:
-                        await start_live_sub(subject)
+                        await start_live_sub(topic)
                         await broadcast_status()
                     except Exception as exc:
                         log.error("Subscribe failed: %s", exc)
@@ -351,7 +324,7 @@ async def ws_handler(websocket) -> None:
                         }))
                 else:
                     await websocket.send(json.dumps({
-                        "type": "error", "query_id": "", "message": "NATS not connected"
+                        "type": "error", "query_id": "", "message": "MQTT not connected"
                     }))
 
             elif t == "unsubscribe":
@@ -406,7 +379,7 @@ async def ws_handler(websocket) -> None:
 async def stats_loop() -> None:
     while True:
         update_server_state({
-            "nats_connected": g_nats_connected,
+            "mqtt_connected": g_mqtt_connected,
             "s3_connected":   g_s3_connected,
             "live_per_sec":   g_stats["live_per_sec"],
             "live_total":     g_stats["live_total"],
@@ -419,53 +392,63 @@ async def stats_loop() -> None:
         await asyncio.sleep(1)
 
 
-async def nats_connect_loop() -> None:
-    global g_nc, g_nats_connected
-    nats_url = g_config["nats"]["url"]
+async def mqtt_connect_loop() -> None:
+    """Maintain a persistent MQTT connection; re-subscribe on reconnect."""
+    global g_mqtt_client, g_mqtt_connected
+    mqtt_cfg  = g_config.get("mqtt", {})
+    host      = mqtt_cfg.get("host", "localhost")
+    port      = int(mqtt_cfg.get("port", 1883))
+    client_id = mqtt_cfg.get("client_id", "subscriber-api")
 
     while True:
         try:
-            if g_nc is None or g_nc.is_closed:
-                g_nc = await nats.connect(
-                    nats_url,
-                    disconnected_cb = on_nats_disconnect,
-                    reconnected_cb  = on_nats_reconnect,
-                    error_cb        = on_nats_error,
-                )
-                g_nats_connected = True
-                log.info("Connected to NATS at %s", nats_url)
+            async with aiomqtt.Client(
+                host, port=port, identifier=client_id
+            ) as client:
+                g_mqtt_client    = client
+                g_mqtt_connected = True
+                log.info("MQTT connected: %s:%d", host, port)
                 await broadcast_status()
-        except Exception as exc:
-            g_nats_connected = False
-            log.warning("NATS connection failed: %s — retrying in 5s", exc)
+
+                # Restore active subscription after reconnect
+                if g_live_subject:
+                    await client.subscribe(g_live_subject)
+                    log.info("MQTT subscription restored: %s", g_live_subject)
+
+                async for message in client.messages:
+                    await _handle_mqtt_message(
+                        str(message.topic), bytes(message.payload)
+                    )
+
+        except aiomqtt.MqttError as exc:
+            g_mqtt_client    = None
+            g_mqtt_connected = False
+            log.warning("MQTT error: %s — retrying in 5s", exc)
             await broadcast_status()
-        await asyncio.sleep(5)
-
-
-async def on_nats_disconnect() -> None:
-    global g_nats_connected
-    g_nats_connected = False
-    log.warning("NATS disconnected")
-    await broadcast_status()
-
-
-async def on_nats_reconnect() -> None:
-    global g_nats_connected, g_live_sub
-    g_nats_connected = True
-    log.info("NATS reconnected")
-    # Re-establish live subscription if one was active
-    if g_live_subject:
-        g_live_sub = None  # old sub is dead
-        try:
-            await start_live_sub(g_live_subject)
-            log.info("Live subscription restored after reconnect: %s", g_live_subject)
+            await asyncio.sleep(5)
         except Exception as exc:
-            log.warning("Could not restore live subscription: %s", exc)
-    await broadcast_status()
+            g_mqtt_client    = None
+            g_mqtt_connected = False
+            log.warning("MQTT unexpected error: %s — retrying in 5s", exc)
+            await broadcast_status()
+            await asyncio.sleep(5)
 
 
-async def on_nats_error(e) -> None:
-    log.warning("NATS error: %s", e)
+async def _handle_mqtt_message(topic: str, payload: bytes) -> None:
+    global g_stats, g_live_window
+    now = time.monotonic()
+    g_live_window = [t for t in g_live_window if now - t < 1.0]
+    g_live_window.append(now)
+    g_stats["live_total"]  += 1
+    g_stats["live_per_sec"] = len(g_live_window)
+    try:
+        raw = json.loads(payload)
+        flat = {k: (v["value"] if isinstance(v, dict) and "value" in v else v)
+                for k, v in raw.items()}
+    except Exception:
+        flat = {"raw": payload.decode(errors="replace")}
+    g_live_buffer.append(flat)
+    await broadcast({"type": "live", "subject": topic, "payload": flat})
 
 
 def run_buffer_query(from_ts: float, to_ts: float, proj_id: str, site_id: str, limit: int) -> dict:
@@ -507,33 +490,6 @@ def run_buffer_query(from_ts: float, to_ts: float, proj_id: str, site_id: str, l
     return {"columns": columns, "rows": rows, "total": len(rows), "elapsed_ms": elapsed_ms}
 
 
-async def stream_first_ts_loop() -> None:
-    """Periodically refresh g_stream_first_ts from the NATS monitoring endpoint."""
-    global g_stream_first_ts
-    import urllib.request
-    from datetime import datetime, timezone
-    stream_name = g_config["nats"]["stream_name"]
-    nats_mon    = g_config["nats"].get("monitor_url", "http://localhost:8222")
-
-    while True:
-        try:
-            def _fetch():
-                url = f"{nats_mon}/jsz?streams=1"
-                with urllib.request.urlopen(url, timeout=3) as r:
-                    return json.load(r)
-            data = await asyncio.get_event_loop().run_in_executor(None, _fetch)
-            for acc in data.get("account_details", []):
-                for s in acc.get("stream_detail", []):
-                    if s["name"] == stream_name:
-                        ts_str = s["state"].get("first_ts", "")
-                        if ts_str:
-                            g_stream_first_ts = datetime.fromisoformat(
-                                ts_str.replace("Z", "+00:00")
-                            ).timestamp()
-        except Exception as exc:
-            log.debug("stream_first_ts refresh failed: %s", exc)
-        await asyncio.sleep(30)
-
 
 async def s3_check_loop() -> None:
     global g_s3_connected
@@ -563,7 +519,7 @@ async def main_async(cfg: dict) -> None:
     async with websockets.serve(ws_handler, ws_host, ws_port):
         await asyncio.gather(
             stats_loop(),
-            nats_connect_loop(),
+            mqtt_connect_loop(),
             s3_check_loop(),
             serve_flux_api(cfg, g_duckdb),
         )
@@ -582,5 +538,3 @@ if __name__ == "__main__":
         asyncio.run(main_async(load_config(args.config)))
     except KeyboardInterrupt:
         log.info("Shutting down")
-        if g_nc:
-            asyncio.run(g_nc.drain())

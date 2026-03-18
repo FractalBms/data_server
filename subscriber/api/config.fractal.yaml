@@ -1,19 +1,18 @@
 # Subscriber API — fractal-phil Phase 1 edge simulation
-# DuckDB reads from /srv/data/parquet-aws-sim (populated by rsync-sim from writer.cpp output)
-# NATS not available in this config — live subscription disabled
+# Live data: MQTT from host FlashMQ :1883
+# History:   DuckDB reads /srv/data/parquet-aws-sim (rsync-sim from writer.cpp output)
 
-nats:
-  url: "nats://localhost:4222"       # not running in edge sim; connection will fail gracefully
-  stream_name: BATTERY_DATA
-  default_subject: ">"
+mqtt:
+  host: localhost
+  port: 1884                         # FlashMQ aws-sim (receives bridged data from host)
+  client_id: subscriber-api-fractal
+  default_topic: "batteries/#"
 
 # Local filesystem path — no S3 needed on fractal-phil
 # DuckDB glob: {local_path}/project={project_id}/site={site_id}/{date}/*.parquet
 local:
   path: "/srv/data/parquet-aws-sim"
-  project_id: 0
 
-# S3 section left empty — server falls back to local path when endpoint_url is absent
 s3:
   endpoint_url: ""
   bucket: ""
