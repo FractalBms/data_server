@@ -327,6 +327,11 @@
     <span class="value" id="val-nats">—</span>
   </div>
   <div class="sind">
+    <div class="dot grey" id="dot-nats_bridge"></div>
+    <span class="label">nats_bridge</span>
+    <span class="value" id="val-nats_bridge">—</span>
+  </div>
+  <div class="sind">
     <div class="dot grey" id="dot-parquet_writer"></div>
     <span class="label">parquet_writer</span>
     <span class="value" id="val-parquet_writer">—</span>
@@ -335,6 +340,11 @@
     <div class="dot grey" id="dot-writer_cpp"></div>
     <span class="label">writer_cpp</span>
     <span class="value" id="val-writer_cpp">—</span>
+  </div>
+  <div class="sind">
+    <div class="dot grey" id="dot-telegraf"></div>
+    <span class="label">telegraf</span>
+    <span class="value" id="val-telegraf">—</span>
   </div>
   <div class="sind">
     <div class="dot grey" id="dot-subscriber_api"></div>
@@ -444,55 +454,60 @@
     <text x="382" y="136" text-anchor="middle" fill="#8b949e" font-size="9">live stream</text>
     <text x="382" y="149" text-anchor="middle" fill="#58a6ff" font-size="10" font-weight="bold">AWS MQTT :8883</text>
 
-    <!-- ══ orig_aws STACK (bottom, dimmer) ═══════════════════════════════ -->
+    <!-- ══ Phase 1 migration label ═══════════════════════════════════════ -->
+    <text x="10" y="200" fill="#d29922" font-size="9" font-style="italic">Phase 1 (fractal-phil): orig_aws + NATS stacks running in parallel with writer.cpp for comparison</text>
 
-    <text x="10" y="200" fill="#484f58" font-size="9" font-style="italic">orig_aws stack:</text>
+    <!-- Generator (orig_aws/NATS shared source) -->
+    <rect x="10" y="208" width="100" height="28" rx="3"
+          fill="#161b22" stroke="#2a3d1e" stroke-width="1"/>
+    <text x="60" y="222" text-anchor="middle" fill="#8b949e" font-size="9">stress_runner /</text>
+    <text x="60" y="233" text-anchor="middle" fill="#8b949e" font-size="8">generator :1883</text>
 
-    <!-- Generator (dim) -->
-    <rect x="10" y="208" width="80" height="28" rx="3"
-          fill="#161b22" stroke="#30363d" stroke-width="1"/>
-    <text x="50" y="226" text-anchor="middle" fill="#484f58" font-size="9">Generator</text>
+    <!-- → NATS :4222 (NATS stack) -->
+    <line x1="110" y1="222" x2="148" y2="222" stroke="#56d364" stroke-width="1" marker-end="url(#arr-grn)"/>
 
-    <!-- → FlashMQ (dim) -->
-    <line x1="90" y1="222" x2="128" y2="222" stroke="#484f58" stroke-width="1" marker-end="url(#arr-dim)"/>
+    <!-- NATS :4222 -->
+    <rect x="150" y="208" width="90" height="28" rx="3"
+          fill="#161b22" stroke="#2a3d1e" stroke-width="1"/>
+    <text x="195" y="220" text-anchor="middle" fill="#56d364" font-size="9" font-weight="bold">NATS :4222</text>
+    <text x="195" y="231" text-anchor="middle" fill="#8b949e" font-size="8">+ bridge.py</text>
 
-    <!-- FlashMQ (dim) -->
-    <rect x="130" y="208" width="80" height="28" rx="3"
-          fill="#161b22" stroke="#30363d" stroke-width="1"/>
-    <text x="170" y="226" text-anchor="middle" fill="#484f58" font-size="9">FlashMQ</text>
+    <!-- → writer.py (NATS → Parquet) -->
+    <line x1="240" y1="222" x2="278" y2="222" stroke="#56d364" stroke-width="1" marker-end="url(#arr-grn)"/>
 
-    <!-- → Telegraf (dim) -->
-    <line x1="210" y1="222" x2="248" y2="222" stroke="#484f58" stroke-width="1" marker-end="url(#arr-dim)"/>
+    <!-- writer.py + writer.cpp (both writing Parquet) -->
+    <rect x="280" y="208" width="120" height="28" rx="3"
+          fill="#161b22" stroke="#2a3d1e" stroke-width="1"/>
+    <text x="340" y="220" text-anchor="middle" fill="#56d364" font-size="9" font-weight="bold">writer.py + writer.cpp</text>
+    <text x="340" y="231" text-anchor="middle" fill="#8b949e" font-size="8">parallel Parquet output</text>
 
-    <!-- Telegraf (dim) -->
-    <rect x="250" y="208" width="80" height="28" rx="3"
-          fill="#161b22" stroke="#30363d" stroke-width="1"/>
-    <text x="290" y="226" text-anchor="middle" fill="#484f58" font-size="9">Telegraf</text>
+    <!-- → migration_compare.py -->
+    <line x1="400" y1="222" x2="438" y2="222" stroke="#d29922" stroke-width="1" marker-end="url(#arr-grn)"/>
 
-    <!-- → InfluxDB2 (dim) -->
-    <line x1="330" y1="222" x2="368" y2="222" stroke="#484f58" stroke-width="1" marker-end="url(#arr-dim)"/>
+    <!-- migration_compare.py -->
+    <rect x="440" y="208" width="120" height="28" rx="3"
+          fill="#1a1500" stroke="#5a4500" stroke-width="1"/>
+    <text x="500" y="220" text-anchor="middle" fill="#d29922" font-size="9" font-weight="bold">migration_compare.py</text>
+    <text x="500" y="231" text-anchor="middle" fill="#8b949e" font-size="8">DuckDB vs InfluxDB2</text>
 
-    <!-- InfluxDB2 :8086 (dim) -->
-    <rect x="370" y="208" width="100" height="28" rx="3"
-          fill="#161b22" stroke="#30363d" stroke-width="1"/>
-    <text x="420" y="226" text-anchor="middle" fill="#484f58" font-size="9">InfluxDB2 :8086</text>
+    <!-- → Telegraf → InfluxDB2 (branch down from NATS/mosquitto source) -->
+    <line x1="195" y1="236" x2="195" y2="248" stroke="#484f58" stroke-width="1" marker-end="url(#arr-dim)"/>
+    <rect x="150" y="250" width="90" height="16" rx="2" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="195" y="262" text-anchor="middle" fill="#484f58" font-size="8">Telegraf → InfluxDB2 :8086</text>
 
     <!-- ══ LEGEND ═══════════════════════════════════════════════════════ -->
 
-    <line x1="10" y1="259" x2="30" y2="259" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arr-grn)"/>
-    <text x="34" y="263" fill="#8b949e" font-size="8">writer.cpp stack (active)</text>
+    <line x1="10" y1="276" x2="30" y2="276" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arr-grn)"/>
+    <text x="34" y="280" fill="#8b949e" font-size="8">writer.cpp stack (spark / target)</text>
 
-    <line x1="190" y1="259" x2="210" y2="259" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arr-blu)"/>
-    <text x="214" y="263" fill="#8b949e" font-size="8">live bridge</text>
+    <line x1="200" y1="276" x2="220" y2="276" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arr-blu)"/>
+    <text x="224" y="280" fill="#8b949e" font-size="8">live bridge</text>
 
-    <line x1="300" y1="259" x2="320" y2="259" stroke="#484f58" stroke-width="1" marker-end="url(#arr-dim)" stroke-dasharray="4 3"/>
-    <text x="324" y="263" fill="#8b949e" font-size="8">orig_aws stack</text>
+    <line x1="310" y1="276" x2="330" y2="276" stroke="#56d364" stroke-width="1" marker-end="url(#arr-grn)"/>
+    <text x="334" y="280" fill="#8b949e" font-size="8">NATS stack (fractal-phil)</text>
 
-    <rect x="430" y="253" width="10" height="8" rx="2" fill="#161b22" stroke="#1e4a6e" stroke-width="1.5"/>
-    <text x="444" y="263" fill="#8b949e" font-size="8">Core component</text>
-
-    <rect x="560" y="253" width="10" height="8" rx="2" fill="#0e1d2d" stroke="#1d3a5c" stroke-width="1.5"/>
-    <text x="574" y="263" fill="#8b949e" font-size="8">Live bridge</text>
+    <line x1="470" y1="276" x2="490" y2="276" stroke="#d29922" stroke-width="1" marker-end="url(#arr-grn)"/>
+    <text x="494" y="280" fill="#8b949e" font-size="8">migration compare</text>
 
   </svg>
 </div>
@@ -560,9 +575,16 @@
     <h3>Three Machines</h3>
     <ul>
       <li><strong style="color:#79c0ff;">phil-dev</strong> — development machine, generator source, pipeline work; manager :8761</li>
-      <li><strong style="color:#79c0ff;">fractal-phil</strong> (192.168.86.51) — NATS stack: NATS native MQTT :1883, Python parquet_writer, subscriber_api; manager :8761</li>
+      <li><strong style="color:#79c0ff;">fractal-phil</strong> (192.168.86.51) — Phase 1 migration testbed; manager :8761:
+        <ul style="margin:4px 0 2px 14px;font-size:0.95em;">
+          <li>NATS stack: nats-host :4222 (native MQTT :1883), bridge.py, writer.py → Parquet</li>
+          <li>writer.cpp running in parallel — same MQTT feed, independent Parquet output</li>
+          <li>Telegraf → InfluxDB2 :8086 (orig_aws stack)</li>
+          <li>nats-aws-sim :4333 (simulates AWS NATS Leaf Node target)</li>
+          <li>stress_runner.py (load), migration_compare.py (validation)</li>
+        </ul>
+      </li>
       <li><strong style="color:#79c0ff;">spark-22b6</strong> — writer.cpp stack running 24/7, stress runner active, Parquet in <code>/home/phil/data_server/parquet/</code>; manager :8762</li>
-      <li>Host defaults stored in <code>localStorage</code> keys <code>ds_host</code> / <code>aws_host</code> / <code>fractal_host</code></li>
     </ul>
   </div>
   <div class="concept-card">
@@ -1861,8 +1883,8 @@ await js.publish(subject, message.payload)   <span class="hl"># bytes — untouc
 let mgr = null, mgrPort = null;
 
 const COMPONENT_KEYS = [
-  'generator', 'nats', 'parquet_writer', 'writer_cpp',
-  'subscriber_api', 'aws_server', 'stress_runner'
+  'generator', 'nats', 'nats_bridge', 'parquet_writer', 'writer_cpp',
+  'telegraf', 'subscriber_api', 'aws_server', 'stress_runner'
 ];
 
 function getHost() {
