@@ -715,108 +715,182 @@ h2.section-title {
 
   <div id="cost-panel" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px">
 
-    <!-- Assumptions row -->
-    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #21262d">
-      <label style="font-size:0.82em;color:#8b949e;display:flex;align-items:center;gap:6px">
-        Msg/s
-        <input id="cost-mps" type="number" min="1" value="1000"
-          style="width:80px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:1em;padding:2px 6px"
+    <!-- Mode switch + shared assumptions -->
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #21262d">
+      <!-- path buttons -->
+      <div style="display:flex;gap:0;border:1px solid #30363d;border-radius:5px;overflow:hidden">
+        <button id="cost-btn-influx" onclick="setCostMode('influx')"
+          style="padding:3px 12px;font-size:0.82em;border:none;cursor:pointer;background:#f0883e;color:#fff">InfluxDB</button>
+        <button id="cost-btn-duckdb" onclick="setCostMode('duckdb')"
+          style="padding:3px 12px;font-size:0.82em;border:none;cursor:pointer;background:#30363d;color:#8b949e">DuckDB</button>
+        <button id="cost-btn-both"   onclick="setCostMode('both')"
+          style="padding:3px 12px;font-size:0.82em;border:none;cursor:pointer;background:#30363d;color:#8b949e">Both</button>
+      </div>
+      <label style="font-size:0.82em;color:#8b949e;display:flex;align-items:center;gap:5px">
+        Msg/s <input id="cost-mps" type="number" min="1" value="1000"
+          style="width:74px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:1em;padding:2px 5px"
           oninput="recalcCost()">
       </label>
-      <label style="font-size:0.82em;color:#8b949e;display:flex;align-items:center;gap:6px">
-        Bytes/msg
-        <input id="cost-msgbytes" type="number" min="1" value="256"
-          style="width:70px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:1em;padding:2px 6px"
+      <label style="font-size:0.82em;color:#8b949e;display:flex;align-items:center;gap:5px">
+        Bytes/msg <input id="cost-msgbytes" type="number" min="1" value="256"
+          style="width:60px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:1em;padding:2px 5px"
           oninput="recalcCost()">
       </label>
-      <label style="font-size:0.82em;color:#8b949e;display:flex;align-items:center;gap:6px">
-        Retention (mo)
-        <input id="cost-retention" type="number" min="1" value="12"
-          style="width:54px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:1em;padding:2px 6px"
+      <label style="font-size:0.82em;color:#8b949e;display:flex;align-items:center;gap:5px">
+        Retention&nbsp;(mo) <input id="cost-retention" type="number" min="1" value="12"
+          style="width:46px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:1em;padding:2px 5px"
           oninput="recalcCost()">
       </label>
-      <button onclick="costSyncRate()" style="padding:2px 10px;font-size:0.8em;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer">↺ Sync from monitor</button>
+      <button onclick="costSyncRate()" style="padding:2px 10px;font-size:0.8em;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer">↺ Live rate</button>
     </div>
 
-    <!-- Cost table -->
-    <table style="width:100%;border-collapse:collapse;font-size:0.84em">
-      <thead>
-        <tr style="color:#8b949e;font-size:0.78em;text-transform:uppercase;letter-spacing:0.06em">
-          <th style="text-align:left;padding:4px 8px 4px 0;width:40%">Service</th>
-          <th style="text-align:left;padding:4px 8px">Config</th>
-          <th style="text-align:right;padding:4px 8px;white-space:nowrap">$/month</th>
-          <th style="text-align:right;padding:4px 0 4px 8px;white-space:nowrap">$/year</th>
-        </tr>
-      </thead>
-      <tbody>
-        <!-- S3 -->
-        <tr style="border-top:1px solid #21262d">
-          <td style="padding:6px 8px 6px 0;color:#e6edf3;font-weight:600">S3 Storage</td>
-          <td style="padding:6px 8px">
-            <span style="color:#8b949e;font-size:0.85em">$</span>
-            <input id="cost-s3-price" type="number" step="0.001" min="0" value="0.023"
-              style="width:56px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.85em;padding:1px 4px"
-              oninput="recalcCost()">
-            <span style="color:#8b949e;font-size:0.82em">/GB &nbsp;·&nbsp; <span id="cost-s3-gb">—</span> GB stored</span>
-          </td>
-          <td style="text-align:right;padding:6px 8px;font-family:monospace;color:#e6edf3" id="cost-s3-mo">—</td>
-          <td style="text-align:right;padding:6px 0 6px 8px;font-family:monospace;color:#8b949e" id="cost-s3-yr">—</td>
-        </tr>
-        <!-- EC2 -->
-        <tr style="border-top:1px solid #21262d">
-          <td style="padding:6px 8px 6px 0;color:#e6edf3;font-weight:600">EC2 Compute</td>
-          <td style="padding:6px 8px">
-            <select id="cost-ec2-type" onchange="recalcCost()"
-              style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.85em;padding:2px 4px">
-              <option value="0.096">t3.xlarge  $0.096/hr</option>
-              <option value="0.192" selected>m5.xlarge  $0.192/hr</option>
-              <option value="0.384">m5.2xlarge $0.384/hr</option>
-              <option value="0.252">r5.xlarge  $0.252/hr</option>
-              <option value="0.504">r5.2xlarge $0.504/hr</option>
-              <option value="custom">custom…</option>
-            </select>
-            <input id="cost-ec2-custom" type="number" step="0.001" min="0" placeholder="$/hr"
-              style="display:none;width:68px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.85em;padding:1px 4px;margin-left:4px"
-              oninput="recalcCost()">
-          </td>
-          <td style="text-align:right;padding:6px 8px;font-family:monospace;color:#e6edf3" id="cost-ec2-mo">—</td>
-          <td style="text-align:right;padding:6px 0 6px 8px;font-family:monospace;color:#8b949e" id="cost-ec2-yr">—</td>
-        </tr>
-        <!-- OpenSearch -->
-        <tr style="border-top:1px solid #21262d">
-          <td style="padding:6px 8px 6px 0;color:#e6edf3;font-weight:600">OpenSearch</td>
-          <td style="padding:6px 8px">
-            <select id="cost-es-type" onchange="recalcCost()"
-              style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.85em;padding:2px 4px">
-              <option value="0.036">t3.small.search  $0.036/hr</option>
-              <option value="0.128" selected>m6g.large.search $0.128/hr</option>
-              <option value="0.167">r6g.large.search $0.167/hr</option>
-              <option value="0.334">r6g.xlarge.search $0.334/hr</option>
-              <option value="custom">custom…</option>
-            </select>
-            <input id="cost-es-custom" type="number" step="0.001" min="0" placeholder="$/hr"
-              style="display:none;width:68px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.85em;padding:1px 4px;margin-left:4px"
-              oninput="recalcCost()">
-            <label style="font-size:0.82em;color:#8b949e;margin-left:6px">
-              ×<input id="cost-es-nodes" type="number" min="1" value="1"
-                style="width:38px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:1em;padding:1px 4px;margin-left:3px"
-                oninput="recalcCost()"> nodes
-            </label>
-          </td>
-          <td style="text-align:right;padding:6px 8px;font-family:monospace;color:#e6edf3" id="cost-es-mo">—</td>
-          <td style="text-align:right;padding:6px 0 6px 8px;font-family:monospace;color:#8b949e" id="cost-es-yr">—</td>
-        </tr>
-        <!-- Total -->
-        <tr style="border-top:2px solid #30363d">
-          <td colspan="2" style="padding:8px 8px 4px 0;color:#58a6ff;font-weight:700;font-size:1.05em">Total</td>
-          <td style="text-align:right;padding:8px 8px 4px;font-family:monospace;font-weight:700;font-size:1.1em;color:#58a6ff" id="cost-total-mo">—</td>
-          <td style="text-align:right;padding:8px 0 4px 8px;font-family:monospace;font-weight:700;font-size:1.1em;color:#58a6ff" id="cost-total-yr">—</td>
-        </tr>
-      </tbody>
-    </table>
+    <!-- InfluxDB path table -->
+    <div id="cost-influx-section">
+      <div style="font-size:0.78em;font-weight:700;color:#f0883e;letter-spacing:0.07em;text-transform:uppercase;margin-bottom:6px" id="cost-influx-label">InfluxDB path</div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.84em">
+        <thead>
+          <tr style="color:#8b949e;font-size:0.78em;text-transform:uppercase;letter-spacing:0.06em">
+            <th style="text-align:left;padding:3px 8px 3px 0;width:38%">Service</th>
+            <th style="text-align:left;padding:3px 8px">Config</th>
+            <th style="text-align:right;padding:3px 8px;white-space:nowrap">$/month</th>
+            <th style="text-align:right;padding:3px 0 3px 8px;white-space:nowrap">$/year</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-top:1px solid #21262d">
+            <td style="padding:5px 8px 5px 0;color:#e6edf3;font-weight:600">S3 Storage</td>
+            <td style="padding:5px 8px">
+              <span style="color:#8b949e;font-size:0.85em">$</span>
+              <input id="cost-ix-s3-price" type="number" step="0.001" min="0" value="0.023"
+                style="width:52px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.85em;padding:1px 4px"
+                oninput="recalcCost()">
+              <span style="color:#8b949e;font-size:0.82em">/GB · <span id="cost-ix-s3-gb">—</span></span>
+            </td>
+            <td style="text-align:right;padding:5px 8px;font-family:monospace;color:#e6edf3" id="cost-ix-s3-mo">—</td>
+            <td style="text-align:right;padding:5px 0 5px 8px;font-family:monospace;color:#8b949e" id="cost-ix-s3-yr">—</td>
+          </tr>
+          <tr style="border-top:1px solid #21262d">
+            <td style="padding:5px 8px 5px 0;color:#e6edf3;font-weight:600">EC2 Compute</td>
+            <td style="padding:5px 8px">
+              <select id="cost-ix-ec2-type" onchange="recalcCost()"
+                style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.82em;padding:2px 3px">
+                <option value="0.096">t3.xlarge $0.096</option>
+                <option value="0.192" selected>m5.xlarge $0.192</option>
+                <option value="0.384">m5.2xlarge $0.384</option>
+                <option value="0.252">r5.xlarge $0.252</option>
+                <option value="0.504">r5.2xlarge $0.504</option>
+                <option value="custom">custom…</option>
+              </select>
+              <input id="cost-ix-ec2-custom" type="number" step="0.001" min="0" placeholder="$/hr"
+                style="display:none;width:60px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.82em;padding:1px 4px;margin-left:3px"
+                oninput="recalcCost()">
+            </td>
+            <td style="text-align:right;padding:5px 8px;font-family:monospace;color:#e6edf3" id="cost-ix-ec2-mo">—</td>
+            <td style="text-align:right;padding:5px 0 5px 8px;font-family:monospace;color:#8b949e" id="cost-ix-ec2-yr">—</td>
+          </tr>
+          <tr style="border-top:1px solid #21262d">
+            <td style="padding:5px 8px 5px 0;color:#e6edf3;font-weight:600">OpenSearch</td>
+            <td style="padding:5px 8px">
+              <select id="cost-ix-es-type" onchange="recalcCost()"
+                style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.82em;padding:2px 3px">
+                <option value="0.036">t3.small.search $0.036</option>
+                <option value="0.128" selected>m6g.large.search $0.128</option>
+                <option value="0.167">r6g.large.search $0.167</option>
+                <option value="0.334">r6g.xlarge.search $0.334</option>
+                <option value="custom">custom…</option>
+              </select>
+              <input id="cost-ix-es-custom" type="number" step="0.001" min="0" placeholder="$/hr"
+                style="display:none;width:60px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.82em;padding:1px 4px;margin-left:3px"
+                oninput="recalcCost()">
+              <label style="font-size:0.82em;color:#8b949e;margin-left:5px">
+                ×<input id="cost-ix-es-nodes" type="number" min="1" value="1"
+                  style="width:34px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:1em;padding:1px 3px;margin-left:2px"
+                  oninput="recalcCost()"> nodes
+              </label>
+            </td>
+            <td style="text-align:right;padding:5px 8px;font-family:monospace;color:#e6edf3" id="cost-ix-es-mo">—</td>
+            <td style="text-align:right;padding:5px 0 5px 8px;font-family:monospace;color:#8b949e" id="cost-ix-es-yr">—</td>
+          </tr>
+          <tr style="border-top:2px solid #30363d">
+            <td colspan="2" style="padding:6px 8px 4px 0;color:#f0883e;font-weight:700">Total</td>
+            <td style="text-align:right;padding:6px 8px 4px;font-family:monospace;font-weight:700;color:#f0883e" id="cost-ix-total-mo">—</td>
+            <td style="text-align:right;padding:6px 0 4px 8px;font-family:monospace;font-weight:700;color:#f0883e" id="cost-ix-total-yr">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Divider shown in Both mode -->
+    <div id="cost-divider" style="display:none;height:1px;background:#30363d;margin:14px 0"></div>
+
+    <!-- DuckDB path table -->
+    <div id="cost-duckdb-section" style="display:none">
+      <div style="font-size:0.78em;font-weight:700;color:#58a6ff;letter-spacing:0.07em;text-transform:uppercase;margin-bottom:6px" id="cost-duckdb-label">DuckDB / Parquet path</div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.84em">
+        <thead>
+          <tr style="color:#8b949e;font-size:0.78em;text-transform:uppercase;letter-spacing:0.06em">
+            <th style="text-align:left;padding:3px 8px 3px 0;width:38%">Service</th>
+            <th style="text-align:left;padding:3px 8px">Config</th>
+            <th style="text-align:right;padding:3px 8px;white-space:nowrap">$/month</th>
+            <th style="text-align:right;padding:3px 0 3px 8px;white-space:nowrap">$/year</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-top:1px solid #21262d">
+            <td style="padding:5px 8px 5px 0;color:#e6edf3;font-weight:600">S3 Storage</td>
+            <td style="padding:5px 8px">
+              <span style="color:#8b949e;font-size:0.85em">$</span>
+              <input id="cost-dk-s3-price" type="number" step="0.001" min="0" value="0.023"
+                style="width:52px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.85em;padding:1px 4px"
+                oninput="recalcCost()">
+              <span style="color:#8b949e;font-size:0.82em">/GB · compress
+                <input id="cost-dk-compress" type="number" min="1" max="50" value="8"
+                  style="width:34px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.85em;padding:1px 3px"
+                  oninput="recalcCost()">×
+                · <span id="cost-dk-s3-gb">—</span>
+              </span>
+            </td>
+            <td style="text-align:right;padding:5px 8px;font-family:monospace;color:#e6edf3" id="cost-dk-s3-mo">—</td>
+            <td style="text-align:right;padding:5px 0 5px 8px;font-family:monospace;color:#8b949e" id="cost-dk-s3-yr">—</td>
+          </tr>
+          <tr style="border-top:1px solid #21262d">
+            <td style="padding:5px 8px 5px 0;color:#e6edf3;font-weight:600">EC2 Writer</td>
+            <td style="padding:5px 8px">
+              <select id="cost-dk-ec2-type" onchange="recalcCost()"
+                style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.82em;padding:2px 3px">
+                <option value="0.021">t3.small $0.021</option>
+                <option value="0.042" selected>t3.medium $0.042</option>
+                <option value="0.083">t3.large $0.083</option>
+                <option value="0.096">t3.xlarge $0.096</option>
+                <option value="custom">custom…</option>
+              </select>
+              <input id="cost-dk-ec2-custom" type="number" step="0.001" min="0" placeholder="$/hr"
+                style="display:none;width:60px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:0.82em;padding:1px 4px;margin-left:3px"
+                oninput="recalcCost()">
+            </td>
+            <td style="text-align:right;padding:5px 8px;font-family:monospace;color:#e6edf3" id="cost-dk-ec2-mo">—</td>
+            <td style="text-align:right;padding:5px 0 5px 8px;font-family:monospace;color:#8b949e" id="cost-dk-ec2-yr">—</td>
+          </tr>
+          <tr style="border-top:2px solid #30363d">
+            <td colspan="2" style="padding:6px 8px 4px 0;color:#58a6ff;font-weight:700">Total</td>
+            <td style="text-align:right;padding:6px 8px 4px;font-family:monospace;font-weight:700;color:#58a6ff" id="cost-dk-total-mo">—</td>
+            <td style="text-align:right;padding:6px 0 4px 8px;font-family:monospace;font-weight:700;color:#58a6ff" id="cost-dk-total-yr">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Savings row — Both mode only -->
+    <div id="cost-savings-row" style="display:none;margin-top:10px;padding:8px 10px;background:#0d1117;border:1px solid #3fb95044;border-radius:6px;display:none">
+      <span style="font-size:0.85em;color:#3fb950;font-weight:700">Monthly savings&nbsp;</span>
+      <span style="font-family:monospace;font-weight:700;color:#3fb950;font-size:1.05em" id="cost-save-mo">—</span>
+      <span style="font-size:0.78em;color:#8b949e;margin-left:12px">yearly&nbsp;</span>
+      <span style="font-family:monospace;color:#3fb950" id="cost-save-yr">—</span>
+      <span style="font-size:0.78em;color:#8b949e;margin-left:12px">(<span id="cost-save-pct">—</span>% reduction)</span>
+    </div>
 
     <div style="font-size:0.72em;color:#6e7681;margin-top:8px">
-      Prices us-east-1 on-demand · S3 at steady-state (retention × monthly ingest) · EC2/OS billed 24×7 · estimates only
+      Prices us-east-1 on-demand · S3 steady-state = retention × monthly ingest · EC2/OS 24×7 · estimates only
     </div>
   </div>
 </div>
@@ -1101,6 +1175,8 @@ let cmpAutoTimer  = null;
 let cmpHistory    = [];   // last 10 {delta, match} records
 
 // ── AWS Cost Estimate ─────────────────────────────────────────────────────────
+let costMode = 'influx';
+
 function toggleCostPanel() {
   const panel = $('cost-panel');
   const chev  = $('cost-chevron');
@@ -1108,6 +1184,24 @@ function toggleCostPanel() {
   panel.style.display = open ? '' : 'none';
   chev.style.transform = open ? 'rotate(90deg)' : '';
   if (open) recalcCost();
+}
+
+function setCostMode(mode) {
+  costMode = mode;
+  const COLORS = {influx:'#f0883e', duckdb:'#58a6ff', both:'#9e6a03'};
+  ['influx','duckdb','both'].forEach(m => {
+    const btn = $('cost-btn-' + m);
+    const active = m === mode || (mode === 'both');
+    btn.style.background = m === mode ? COLORS[m] : '#30363d';
+    btn.style.color      = m === mode ? '#fff' : '#8b949e';
+  });
+  $('cost-influx-section').style.display = (mode === 'influx' || mode === 'both') ? '' : 'none';
+  $('cost-duckdb-section').style.display = (mode === 'duckdb' || mode === 'both') ? '' : 'none';
+  $('cost-divider').style.display        = mode === 'both' ? '' : 'none';
+  $('cost-savings-row').style.display    = mode === 'both' ? '' : 'none';
+  $('cost-influx-label').style.display   = mode === 'both' ? '' : 'none';
+  $('cost-duckdb-label').style.display   = mode === 'both' ? '' : 'none';
+  recalcCost();
 }
 
 function costSyncRate() {
@@ -1130,35 +1224,58 @@ function _fmt$(v) {
   return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
+function _gbLabel(gb) {
+  return gb >= 1000 ? (gb/1000).toFixed(1)+' TB' : gb.toFixed(0)+' GB';
+}
+
 function recalcCost() {
   const mps       = parseFloat($('cost-mps').value)       || 0;
   const bytesMsg  = parseFloat($('cost-msgbytes').value)  || 256;
   const retention = parseFloat($('cost-retention').value) || 12;
-  const s3Price   = parseFloat($('cost-s3-price').value)  || 0.023;
-  const ec2Hr     = _costHrly('cost-ec2-type', 'cost-ec2-custom');
-  const esHr      = _costHrly('cost-es-type',  'cost-es-custom');
-  const esNodes   = parseInt($('cost-es-nodes').value)    || 1;
 
-  // S3: steady-state storage = retention months × GB ingested per month
-  const gbPerMonth   = mps * bytesMsg * 86400 * 30 / 1e9;
-  const totalGb      = gbPerMonth * retention;
-  const s3Mo         = totalGb * s3Price;
+  const gbPerMonth = mps * bytesMsg * 86400 * 30 / 1e9;
 
-  // EC2 + OpenSearch: billed 24×7
-  const ec2Mo  = ec2Hr * 24 * 30;
-  const esMo   = esHr  * 24 * 30 * esNodes;
+  // ── InfluxDB path ──
+  const ixS3Price = parseFloat($('cost-ix-s3-price').value) || 0.023;
+  const ixTotalGb = gbPerMonth * retention;
+  const ixS3Mo    = ixTotalGb * ixS3Price;
+  const ixEc2Mo   = _costHrly('cost-ix-ec2-type', 'cost-ix-ec2-custom') * 24 * 30;
+  const ixEsNodes = parseInt($('cost-ix-es-nodes').value) || 1;
+  const ixEsMo    = _costHrly('cost-ix-es-type', 'cost-ix-es-custom') * 24 * 30 * ixEsNodes;
+  const ixTotalMo = ixS3Mo + ixEc2Mo + ixEsMo;
 
-  const totalMo = s3Mo + ec2Mo + esMo;
+  setText('cost-ix-s3-gb',    _gbLabel(ixTotalGb));
+  setText('cost-ix-s3-mo',    _fmt$(ixS3Mo));
+  setText('cost-ix-s3-yr',    _fmt$(ixS3Mo * 12));
+  setText('cost-ix-ec2-mo',   _fmt$(ixEc2Mo));
+  setText('cost-ix-ec2-yr',   _fmt$(ixEc2Mo * 12));
+  setText('cost-ix-es-mo',    _fmt$(ixEsMo));
+  setText('cost-ix-es-yr',    _fmt$(ixEsMo * 12));
+  setText('cost-ix-total-mo', _fmt$(ixTotalMo));
+  setText('cost-ix-total-yr', _fmt$(ixTotalMo * 12));
 
-  setText('cost-s3-gb',   totalGb >= 1000 ? (totalGb/1000).toFixed(1)+' TB' : totalGb.toFixed(0)+' GB');
-  setText('cost-s3-mo',   _fmt$(s3Mo));
-  setText('cost-s3-yr',   _fmt$(s3Mo * 12));
-  setText('cost-ec2-mo',  _fmt$(ec2Mo));
-  setText('cost-ec2-yr',  _fmt$(ec2Mo * 12));
-  setText('cost-es-mo',   _fmt$(esMo));
-  setText('cost-es-yr',   _fmt$(esMo * 12));
-  setText('cost-total-mo', _fmt$(totalMo));
-  setText('cost-total-yr', _fmt$(totalMo * 12));
+  // ── DuckDB / Parquet path ──
+  const dkS3Price   = parseFloat($('cost-dk-s3-price').value)  || 0.023;
+  const dkCompress  = parseFloat($('cost-dk-compress').value)  || 8;
+  const dkTotalGb   = (gbPerMonth / dkCompress) * retention;
+  const dkS3Mo      = dkTotalGb * dkS3Price;
+  const dkEc2Mo     = _costHrly('cost-dk-ec2-type', 'cost-dk-ec2-custom') * 24 * 30;
+  const dkTotalMo   = dkS3Mo + dkEc2Mo;
+
+  setText('cost-dk-s3-gb',    _gbLabel(dkTotalGb));
+  setText('cost-dk-s3-mo',    _fmt$(dkS3Mo));
+  setText('cost-dk-s3-yr',    _fmt$(dkS3Mo * 12));
+  setText('cost-dk-ec2-mo',   _fmt$(dkEc2Mo));
+  setText('cost-dk-ec2-yr',   _fmt$(dkEc2Mo * 12));
+  setText('cost-dk-total-mo', _fmt$(dkTotalMo));
+  setText('cost-dk-total-yr', _fmt$(dkTotalMo * 12));
+
+  // ── Savings (Both mode) ──
+  const saveMo  = ixTotalMo - dkTotalMo;
+  const savePct = ixTotalMo > 0 ? Math.round(saveMo / ixTotalMo * 100) : 0;
+  setText('cost-save-mo',  _fmt$(saveMo));
+  setText('cost-save-yr',  _fmt$(saveMo * 12));
+  setText('cost-save-pct', savePct);
 }
 
 function toggleCmpAuto() {
