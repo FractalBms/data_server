@@ -178,7 +178,7 @@ g_mqtt_client: Optional[aiomqtt.Client] = None   # active MQTT client
 g_mqtt_connected: bool = False
 g_s3_connected: bool = False
 g_live_subject: str = ""                          # active MQTT subscription topic
-g_stats = {"live_total": 0, "live_per_sec": 0, "queries_run": 0,
+g_stats = {"live_total": 0, "live_per_sec": 0, "live_per_sec_smooth": 0, "queries_run": 0,
            "last_query_ms": 0.0, "avg_query_ms": 0.0}
 # Chain-of-custody: updated when _sync messages arrive from the publisher
 g_sync_stats = {
@@ -193,6 +193,8 @@ g_start_time = time.time()
 # Per-second rate counter — two ints, no list allocation per message.
 _rate_count: int = 0
 _rate_window_start: float = 0.0
+_rate_ema: float = 0.0          # exponential moving average of live_per_sec
+_RATE_EMA_ALPHA  = 0.2          # smoothing factor (0=no change, 1=instant)
 g_duckdb: Optional[duckdb.DuckDBPyConnection] = None
 g_stream_first_ts: float = 0.0   # unix ts of oldest retained message in NATS stream
 
@@ -581,7 +583,7 @@ async def mqtt_connect_loop() -> None:
 
 
 async def _handle_mqtt_message(topic: str, payload: bytes) -> None:
-    global g_stats, g_sync_stats, _rate_count, _rate_window_start, _broadcast_n
+    global g_stats, g_sync_stats, _rate_count, _rate_window_start, _broadcast_n, _rate_ema
 
     # Chain-of-custody sync message — count received vs expected, detect drops
     if topic == "_sync":
@@ -627,6 +629,8 @@ async def _handle_mqtt_message(topic: str, payload: bytes) -> None:
     g_stats["live_total"] += 1
     if now - _rate_window_start >= 1.0:
         g_stats["live_per_sec"] = _rate_count
+        _rate_ema = _rate_ema * (1 - _RATE_EMA_ALPHA) + _rate_count * _RATE_EMA_ALPHA
+        g_stats["live_per_sec_smooth"] = round(_rate_ema)
         _rate_count = 0
         _rate_window_start = now
     try:

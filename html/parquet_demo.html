@@ -293,7 +293,7 @@ body {
   <div class="hero-card capture">
     <div class="hero-label">Rate</div>
     <div class="hero-value" id="hero-rate">—</div>
-    <div class="hero-sub">messages / second</div>
+    <div class="hero-sub" id="hero-rate-sub">messages / second</div>
   </div>
 </div>
 
@@ -526,13 +526,18 @@ function setDot(id, state) {
 // ── Stats handler ─────────────────────────────────────────────────────────────
 function handleStats(d) {
   // MQTT / live stream
-  const mps     = d.live_per_sec ?? 0;
-  const total   = d.live_total   ?? 0;
-  const mqttOk  = d.mqtt_connected;
+  const mps       = d.live_per_sec        ?? 0;
+  const mpsSmooth = d.live_per_sec_smooth ?? mps;
+  const total     = d.live_total          ?? 0;
+  const mqttOk    = d.mqtt_connected;
 
-  setText('hero-rate',          mps > 0 ? fmtNum(mps) : '0');
-  setText('hero-captured',      fmtNum(total));
-  setText('cpu-parquet-rate',   mps > 0 ? fmtNum(mps) + ' msg/s  (t3.large)' : '—');
+  setText('hero-rate',     mpsSmooth > 0 ? fmtNum(mpsSmooth) : '0');
+  setText('hero-rate-sub', mps !== mpsSmooth
+    ? `smooth  •  burst: ${fmtNum(mps)} msg/s`
+    : 'messages / second');
+  setText('hero-captured',    fmtNum(total));
+  setText('cpu-parquet-rate', mpsSmooth > 0
+    ? `${fmtNum(mpsSmooth)} smooth / ${fmtNum(mps)} burst msg/s  (t3.large)` : '—');
   setText('val-parquet-mqtt', mqttOk ? 'active' : 'disconnected');
   setClass('val-parquet-mqtt', mqttOk ? 'ok' : 'warn');
   $('dot-parquet-mqtt').className = 'path-dot ' + (mqttOk ? 'ok' : 'warn');
