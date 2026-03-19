@@ -1,7 +1,7 @@
-# Stress runner — x86 test (local mosquitto on port 1884)
+# Stress runner — dual-host: publishes to host FlashMQ :1883, bridged to fractal-phil :1884
 mqtt:
   host: localhost
-  port: 1884
+  port: 1883
   client_id: stress-runner
   username: ""
   password: ""

@@ -8,6 +8,11 @@ subscriber-api).
 
 ## Changes
 
+### source/stress_runner/config.yaml
+- `mqtt.port`: 1884 → 1883 — stress_runner now publishes to host FlashMQ on phil-dev,
+  which bridges to fractal-phil :1884, rather than publishing directly to :1884.
+  Comment updated to reflect dual-host role.
+
 ### source/bridge/bridge.yaml
 - `aws_live` bridge: changed host from placeholder `flashmq.aws.example.com:1883`
   to `192.168.86.51:1884` (fractal-phil FlashMQ aws-sim)
@@ -68,7 +73,7 @@ subscriber-api).
 
 ## Pending / In-Progress
 
-- [ ] stress_runner/config.yaml: change port 1884 → 1883 (publish to host FlashMQ)
+- [x] stress_runner/config.yaml: change port 1884 → 1883 (publish to host FlashMQ)
 - [ ] Generate FlashMQ bridge config on phil-dev:
       `mkdir -p /etc/flashmq/bridge-conf.d`
       `python3 source/bridge/gen_bridge_conf.py source/bridge/bridge.yaml \`
