@@ -256,6 +256,7 @@ body {
 
   <div class="path-card parquet">
     <div class="path-title">New path — No-Loss Parquet</div>
+    <div style="font-size:0.78em;color:#3fb95099;margin-bottom:10px">Writer runs on the site host — no AWS component required</div>
     <div class="path-row">
       <span class="path-dot" id="dot-parquet-mqtt"></span>
       <span class="path-label">MQTT capture</span>
@@ -263,7 +264,7 @@ body {
     </div>
     <div class="path-row">
       <span class="path-dot" id="dot-parquet-files"></span>
-      <span class="path-label">Files on disk</span>
+      <span class="path-label">Files on host disk</span>
       <span class="path-value" id="val-parquet-files">—</span>
     </div>
     <div class="path-row">
@@ -359,7 +360,7 @@ body {
       <div class="metric-row"><span class="m-label">CPU profiling</span><span class="m-value" id="cpu-influx">pending instrumentation</span></div>
     </div>
     <div>
-      <div style="font-size:0.72em;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#3fb950;margin-bottom:8px">No-loss path — Parquet writer</div>
+      <div style="font-size:0.72em;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#3fb950;margin-bottom:8px">No-loss path — Parquet writer (site host)</div>
       <div class="metric-row"><span class="m-label" title="Writer deserialises raw JSON, appends to in-memory buffer, flushes to columnar file — no schema, no indexing, no transforms">Processing model</span><span class="m-value ok">schema-free serialise + flush</span></div>
       <div class="metric-row"><span class="m-label">Write model</span><span class="m-value ok">batched columnar (Snappy)</span></div>
       <div class="metric-row"><span class="m-label">Instance required</span><span class="m-value ok">t3.large  (2 vCPU / 8 GB)</span></div>
