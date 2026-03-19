@@ -81,7 +81,7 @@ bridges:
     qos: 0
     protocol_version: mqtt3.1.1
     tls: off
-    clientid_prefix: phil-dev-bridge
+    clientid_prefix: pd-bridge
     groups:
       - batteries_all
       - solar_all
