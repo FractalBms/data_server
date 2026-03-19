@@ -24,6 +24,11 @@ groups:
     topics:
       - "batteries/#"
 
+  sync_heartbeat:
+    description: "Chain-of-custody sync heartbeats from the stress runner"
+    topics:
+      - "_sync"
+
   solar_all:
     description: "All solar panel telemetry"
     topics:
@@ -85,6 +90,7 @@ bridges:
     groups:
       - batteries_all
       - solar_all
+      - sync_heartbeat
 
   # Example: a second bridge to an internal monitoring system
   # monitoring:
