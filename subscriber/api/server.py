@@ -42,9 +42,12 @@ import time
 from typing import Optional, Set
 
 try:
+    import numpy as np
     import pandas as pd
+    _NUMPY_OK = True
     _PANDAS_OK = True
 except ImportError:
+    _NUMPY_OK = False
     _PANDAS_OK = False
 
 import aiomqtt
@@ -66,6 +69,103 @@ _buf_handler.setFormatter(_fmt)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Numpy ring buffer
+# ---------------------------------------------------------------------------
+
+# Default schema: matches DEFAULT_CELL_DATA + cell identity fields.
+# timestamp is float64 (unix epoch needs full precision).
+# IDs are int32. Measurements are float32 (4 bytes, plenty of precision).
+# Memory: 1×8 + 5×4 + 8×4 = 60 bytes/entry  vs  ~2 KB for a Python dict.
+_BUFFER_SCHEMA_DEFAULT: dict = {
+    "timestamp":   "float64",
+    "project_id":  "int32",
+    "site_id":     "int32",
+    "rack_id":     "int32",
+    "module_id":   "int32",
+    "cell_id":     "int32",
+    "voltage":     "float32",
+    "current":     "float32",
+    "temperature": "float32",
+    "soc":         "float32",
+    "soh":         "float32",
+    "resistance":  "float32",
+    "capacity":    "float32",
+    "power":       "float32",
+}
+
+
+class _NumpyRingBuffer:
+    """Pre-allocated numpy ring buffer for fixed-schema telemetry.
+
+    ~30x more memory-efficient than a deque of Python dicts.
+    Fields not in the schema are silently ignored on append; they still
+    appear in live WebSocket broadcasts (which use the original flat dict).
+    """
+
+    def __init__(self, maxlen: int, schema: dict):
+        self._maxlen = maxlen
+        self._schema = schema
+        self._ptr    = 0      # next write slot
+        self._count  = 0      # valid entries (< maxlen until buffer fills)
+        self._cols   = {name: np.zeros(maxlen, dtype=np.dtype(dt))
+                        for name, dt in schema.items()}
+
+    def __len__(self)  -> int:  return self._count
+    def __bool__(self) -> bool: return self._count > 0
+
+    def append(self, record: dict) -> None:
+        i = self._ptr
+        for name, arr in self._cols.items():
+            v = record.get(name)
+            try:
+                arr[i] = v if v is not None else 0
+            except (TypeError, ValueError):
+                arr[i] = 0
+        self._ptr = (self._ptr + 1) % self._maxlen
+        if self._count < self._maxlen:
+            self._count += 1
+
+    def _ordered_idx(self) -> "np.ndarray":
+        """Index array into _cols in chronological order (oldest → newest)."""
+        if self._count < self._maxlen:
+            return np.arange(self._count)
+        # Buffer is full — oldest slot is at _ptr.
+        return (np.arange(self._maxlen) + self._ptr) % self._maxlen
+
+    def to_dataframe(self, from_ts: float, to_ts: float,
+                     site_id: str = "", proj_id: str = "") -> "pd.DataFrame":
+        """Return a pandas DataFrame of rows in [from_ts, to_ts], oldest-first.
+        Filtering is fully vectorized — no Python loop."""
+        if self._count == 0:
+            return pd.DataFrame(columns=list(self._schema))
+        idx  = self._ordered_idx()
+        ts   = self._cols["timestamp"][idx]
+        mask = (ts >= from_ts) & (ts <= to_ts)
+        sel  = idx[mask]
+        if not len(sel):
+            return pd.DataFrame(columns=list(self._schema))
+        df = pd.DataFrame({name: arr[sel] for name, arr in self._cols.items()})
+        if site_id:
+            df = df[df["site_id"].astype(str) == site_id]
+        if proj_id:
+            df = df[df["project_id"].astype(str) == proj_id]
+        return df
+
+    def oldest_ts(self) -> float:
+        if self._count == 0:
+            return 0.0
+        if self._count < self._maxlen:
+            return float(self._cols["timestamp"][0])
+        return float(self._cols["timestamp"][self._ptr])
+
+    def newest_ts(self) -> float:
+        if self._count == 0:
+            return 0.0
+        last = (self._ptr - 1) % self._maxlen
+        return float(self._cols["timestamp"][last])
 logging.getLogger().addHandler(_buf_handler)
 
 # ---------------------------------------------------------------------------
@@ -89,8 +189,10 @@ g_sync_stats = {
     "drops_detected":  0,    # cumulative drops detected vs expected
     "total_received":  0,    # total data messages received on this MQTT connection
 }
-g_live_window: list = []
 g_start_time = time.time()
+# Per-second rate counter — two ints, no list allocation per message.
+_rate_count: int = 0
+_rate_window_start: float = 0.0
 g_duckdb: Optional[duckdb.DuckDBPyConnection] = None
 g_stream_first_ts: float = 0.0   # unix ts of oldest retained message in NATS stream
 
@@ -98,6 +200,8 @@ g_stream_first_ts: float = 0.0   # unix ts of oldest retained message in NATS st
 # At ~3000 msgs/s (3 sites), 1_080_000 entries covers ~6 minutes. Each entry is a flat dict.
 BUFFER_MAXLEN = 1_080_000
 g_live_buffer: collections.deque = collections.deque(maxlen=BUFFER_MAXLEN)
+# Subsample counter — incremented per live message, wraps at _broadcast_stride.
+_broadcast_n: int = 0
 
 # Live-state gap fill — optional (config: live_state.enabled).
 # When enabled, buffer rows within the query window are merged into parquet
@@ -360,8 +464,8 @@ async def ws_handler(websocket) -> None:
                                g_config["history"]["max_limit"])
                 g_stats["queries_run"] += 1
                 try:
-                    buf_oldest = float(g_live_buffer[0].get("timestamp", 0)) if g_live_buffer else 0.0
-                    buf_newest = float(g_live_buffer[-1].get("timestamp", 0)) if g_live_buffer else 0.0
+                    buf_oldest = g_live_buffer.oldest_ts()
+                    buf_newest = g_live_buffer.newest_ts()
                     has_buf    = g_live_state_enabled and bool(g_live_buffer)
 
                     if has_buf and from_ts >= buf_oldest:
@@ -477,7 +581,7 @@ async def mqtt_connect_loop() -> None:
 
 
 async def _handle_mqtt_message(topic: str, payload: bytes) -> None:
-    global g_stats, g_live_window, g_sync_stats
+    global g_stats, g_sync_stats, _rate_count, _rate_window_start, _broadcast_n
 
     # Chain-of-custody sync message — count received vs expected, detect drops
     if topic == "_sync":
@@ -519,10 +623,12 @@ async def _handle_mqtt_message(topic: str, payload: bytes) -> None:
     g_sync_stats["total_received"] += 1
 
     now = time.monotonic()
-    g_live_window = [t for t in g_live_window if now - t < 1.0]
-    g_live_window.append(now)
-    g_stats["live_total"]  += 1
-    g_stats["live_per_sec"] = len(g_live_window)
+    _rate_count += 1
+    g_stats["live_total"] += 1
+    if now - _rate_window_start >= 1.0:
+        g_stats["live_per_sec"] = _rate_count
+        _rate_count = 0
+        _rate_window_start = now
     try:
         raw = json.loads(payload)
         flat = {k: (v["value"] if isinstance(v, dict) and "value" in v else v)
@@ -532,43 +638,29 @@ async def _handle_mqtt_message(topic: str, payload: bytes) -> None:
     g_live_buffer.append(flat)
     # Only push live messages to WebSocket clients when someone has explicitly subscribed —
     # the background subscription for sync counting should not generate unsolicited traffic.
+    # Subsample to ~200 msg/s so the event loop isn't saturated at high ingest rates.
     if g_live_subject:
-        await broadcast({"type": "live", "subject": topic, "payload": flat})
+        rate = g_stats["live_per_sec"]
+        stride = max(1, rate // 200)
+        _broadcast_n = (_broadcast_n + 1) % stride
+        if _broadcast_n == 0:
+            await broadcast({"type": "live", "subject": topic, "payload": flat})
 
 
 def run_buffer_query(from_ts: float, to_ts: float, proj_id: str, site_id: str, limit: int) -> dict:
-    """Serve a time-range query from the in-memory live buffer.
-    No NATS consumers, no network — just a deque scan. O(n) but fast.
-    """
-    t0       = time.monotonic()
-    all_rows = []
-    # Deque is ordered oldest→newest; iterate in reverse for newest-first.
-    for msg in reversed(g_live_buffer):
-        ts = float(msg.get("timestamp", 0))
-        if ts > to_ts:
-            continue
-        if ts < from_ts:
-            break   # time-ordered: everything older can be skipped
-        if site_id and str(msg.get("site_id", "")) != site_id:
-            continue
-        if proj_id and str(msg.get("project_id", msg.get("project", ""))) != proj_id:
-            continue
-        all_rows.append(msg)
-        if len(all_rows) >= limit:
-            break
-
+    """Serve a time-range query from the numpy ring buffer. Fully vectorized."""
+    t0 = time.monotonic()
+    df = g_live_buffer.to_dataframe(from_ts, to_ts, site_id=site_id, proj_id=proj_id)
     elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
-    if not all_rows:
+    if df.empty:
         return {"columns": [], "rows": [], "total": 0, "elapsed_ms": elapsed_ms}
-
-    col_set = set()
-    for row in all_rows:
-        col_set.update(row.keys())
-    columns = ["timestamp"] + sorted(col_set - {"timestamp"})
+    df = df.sort_values("timestamp", ascending=False).head(limit)
+    columns = list(df.columns)
     rows = [
-        [float(v) if isinstance(v, (int, float)) else str(v) if v is not None else None
-         for v in (row.get(c) for c in columns)]
-        for row in all_rows
+        [float(v) if isinstance(v, (float, int, np.floating, np.integer)) else
+         str(v) if v is not None else None
+         for v in row]
+        for row in df.itertuples(index=False, name=None)
     ]
     log.info("Buffer query: %d rows in %.0fms (%.0f–%.0f, site=%s)",
              len(rows), elapsed_ms, from_ts, to_ts, site_id or "*")
@@ -588,22 +680,9 @@ def run_hybrid_query(cfg: dict, proj_id: str, site_id: str,
         log.warning("Hybrid query fallback: pandas not installed — using parquet only")
         return run_history_query(cfg, proj_id, site_id, from_ts, to_ts, limit)
 
-    # Snapshot buffer rows in the query window (oldest→newest, then reverse for dedup)
-    buf_rows = []
-    for msg in g_live_buffer:
-        ts = float(msg.get("timestamp", 0))
-        if ts < buf_oldest or ts > to_ts:
-            continue
-        if site_id and str(msg.get("site_id", "")) != site_id:
-            continue
-        if proj_id and str(msg.get("project_id", msg.get("project", ""))) != proj_id:
-            continue
-        buf_rows.append(dict(msg))
-
-    if not buf_rows:
+    buf_df = g_live_buffer.to_dataframe(buf_oldest, to_ts, site_id=site_id, proj_id=proj_id)
+    if buf_df.empty:
         return run_history_query(cfg, proj_id, site_id, from_ts, to_ts, limit)
-
-    buf_df = pd.DataFrame(buf_rows)
     # Ensure dedup key columns exist so PARTITION BY never fails
     for col in ("timestamp", "site_id", "rack_id", "module_id", "cell_id"):
         if col not in buf_df.columns:
@@ -678,10 +757,22 @@ async def s3_check_loop() -> None:
 # ---------------------------------------------------------------------------
 
 async def main_async(cfg: dict) -> None:
-    global g_config, g_duckdb, g_live_state_enabled
+    global g_config, g_duckdb, g_live_state_enabled, g_live_buffer
 
     g_config = cfg
     g_duckdb = build_duckdb(cfg)
+
+    buf_cfg    = cfg.get("buffer", {})
+    buf_maxlen = int(buf_cfg.get("maxlen", BUFFER_MAXLEN))
+    buf_schema = buf_cfg.get("schema", _BUFFER_SCHEMA_DEFAULT)
+    if _NUMPY_OK:
+        g_live_buffer = _NumpyRingBuffer(buf_maxlen, buf_schema)
+        nbytes = buf_maxlen * sum(np.dtype(dt).itemsize for dt in buf_schema.values())
+        log.info("Live buffer: numpy ring, maxlen=%d, pre-alloc=%.0f MB",
+                 buf_maxlen, nbytes / 1e6)
+    else:
+        g_live_buffer = collections.deque(maxlen=buf_maxlen)
+        log.warning("numpy not available — using dict deque buffer (higher memory)")
 
     ls_cfg = cfg.get("live_state", {})
     g_live_state_enabled = bool(ls_cfg.get("enabled", False))
