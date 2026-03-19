@@ -1525,10 +1525,6 @@ function updateRsyncStats(r) {
   setText('rsync-runs',    r.run_count ?? '—');
   setText('rsync-files',      (r.file_count ?? '—').toLocaleString());
   setText('rsync-mb',        r.total_mb ?? '—');
-  // also populate aws-sim Parquet Store box (rsync dst = parquet-aws-sim)
-  if (r.file_count != null) setText('aws-store-files', r.file_count.toLocaleString());
-  if (r.total_mb   != null) setText('aws-store-mb',    r.total_mb);
-  if (r.file_count > 0) setBoxState('box-store-aws', 'dot-store-aws', 'ok');
   setText('rsync-last-ms', r.last_ms ? r.last_ms + ' ms' : '—');
   const btn = document.getElementById('btn-rsync-toggle');
   if (running) {
@@ -1539,7 +1535,8 @@ function updateRsyncStats(r) {
     btn.style.background = '#238636';
   }
   if (r.interval_s) setText('bridge-rsync-interval', r.interval_s);
-  setBoxState('box-store-host','dot-store-host', running ? 'ok' : (r.run_count > 0 ? 'warn' : 'dim'));
+  setBoxState('box-store-host', 'dot-store-host', running ? 'ok' : (r.run_count > 0 ? 'warn' : 'dim'));
+  // aws-store-files/mb owned by checkParquetStats — not updated here
 }
 
 document.getElementById('btn-rsync-toggle').addEventListener('click', async () => {
