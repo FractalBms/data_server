@@ -189,7 +189,11 @@ g_sync_stats = {
     "drops_detected":    0,    # cumulative per-interval drops (noisy at high rates)
     "total_received":    0,    # total data messages received on this MQTT connection
     "total_published":   0,    # total published by stress runner (from latest _sync)
-    "cumulative_loss":   0,    # total_published - total_received (true end-to-end deficit)
+    "cumulative_loss":   0,    # delta-based: (pub_since_baseline - recv_since_baseline)
+    # Internal delta-tracking baselines — set at first _sync of each session so that
+    # stress-runner lifetime counters don't pollute the subscriber's loss metric.
+    "_baseline_pub":     0,
+    "_baseline_recv":    0,
 }
 g_start_time = time.time()
 # Per-second rate counter — two ints, no list allocation per message.
@@ -596,21 +600,31 @@ async def _handle_mqtt_message(topic: str, payload: bytes) -> None:
             expect  = msg.get("interval_published", 0)
 
             if session != g_sync_stats["session_id"]:
-                # New session (restart) — reset per-session counters
+                # New session (restart) — reset per-session counters and establish
+                # delta-tracking baseline so lifetime publisher counters don't pollute loss metric.
                 if g_sync_stats["session_id"]:
                     log.info("Sync: new session %s (was %s) — counters reset",
                              session, g_sync_stats["session_id"])
                 g_sync_stats["session_id"]     = session
                 g_sync_stats["received_since"] = 0
-                g_sync_stats["sync_seq"]       = seq
-                g_sync_stats["last_sync_ts"]   = msg.get("timestamp", 0.0)
-                return  # skip comparison for first sync of new session
+                g_sync_stats["drops_detected"] = 0
+                g_sync_stats["cumulative_loss"] = 0
+                g_sync_stats["sync_seq"]        = seq
+                g_sync_stats["last_sync_ts"]    = msg.get("timestamp", 0.0)
+                g_sync_stats["_baseline_pub"]   = msg.get("total_published", 0)
+                g_sync_stats["_baseline_recv"]  = g_sync_stats["total_received"]
+                return  # skip loss comparison for first sync of new session
 
             received   = g_sync_stats["received_since"]
             dropped    = max(0, expect - received)
             total_pub  = msg.get("total_published", 0)
-            total_recv = g_sync_stats["total_received"]
-            cum_loss   = max(0, total_pub - total_recv)
+
+            # Delta-based cumulative loss: compare publisher/subscriber growth since
+            # the session baseline.  Timing-delayed messages that land in the next
+            # interval naturally cancel out; genuinely lost messages never arrive.
+            delta_pub  = total_pub - g_sync_stats["_baseline_pub"]
+            delta_recv = g_sync_stats["total_received"] - g_sync_stats["_baseline_recv"]
+            cum_loss   = max(0, delta_pub - delta_recv)
 
             g_sync_stats["drops_detected"]  += dropped
             g_sync_stats["received_since"]   = 0
@@ -620,8 +634,8 @@ async def _handle_mqtt_message(topic: str, payload: bytes) -> None:
             g_sync_stats["cumulative_loss"]  = cum_loss
 
             if cum_loss:
-                log.warning("Sync #%d  interval=%d/%d  cumulative loss=%d / %d published",
-                            seq, received, expect, cum_loss, total_pub)
+                log.warning("Sync #%d  interval=%d/%d  cumulative loss=%d / %d (since baseline)",
+                            seq, received, expect, cum_loss, delta_pub)
             else:
                 log.info("Sync #%d OK: %d/%d received  cumulative 0 loss", seq, received, expect)
         except Exception as e:
