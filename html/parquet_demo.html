@@ -546,36 +546,45 @@ function handleStats(d) {
   if (d.sync) {
     const s = d.sync;
     window._lastSyncRaw = s;   // kept for reset baseline
-    const drops = Math.max(0, (s.drops_detected ?? 0) - dropsBaseline);
-    const total = Math.max(0, (s.total_received  ?? 0) - totalBaseline);
-    const pct   = (total + drops) > 0 ? (drops / (total + drops) * 100) : 0;
-    const pctStr = pct > 0 ? pct.toFixed(2) + '%' : '0%';
+
+    // Cumulative loss: total_published - total_received — immune to per-interval timing jitter.
+    // At high rates (24k msg/s) per-interval comparison is noisy; cumulative is the true metric.
+    const cumLoss  = Math.max(0, (s.cumulative_loss  ?? 0));
+    const totalPub = s.total_published ?? 0;
+    const cumPct   = totalPub > 0 ? (cumLoss / totalPub * 100) : 0;
+    const cumPctStr = cumPct > 0 ? cumPct.toFixed(2) + '%' : '0%';
+
+    // Per-interval (kept for detail panel — noisy but shows timing jitter)
+    const intDrops = Math.max(0, (s.drops_detected ?? 0) - dropsBaseline);
+    const intTotal = Math.max(0, (s.total_received  ?? 0) - totalBaseline);
+    const intPct   = (intTotal + intDrops) > 0 ? (intDrops / (intTotal + intDrops) * 100) : 0;
+    const intPctStr = intPct > 0 ? intPct.toFixed(2) + '%' : '0%';
 
     setText('sync-session', s.session_id || '—');
     setText('sync-seq',     s.sync_seq != null ? '#' + s.sync_seq : '—');
-    setText('sync-total',   fmtNum(total));
-    setText('sync-drops',   drops > 0
-      ? drops.toLocaleString() + '  (' + pctStr + ' of stream)'
-      : '0');
+    setText('sync-total',   fmtNum(intTotal));
+    setText('sync-drops',   cumLoss > 0
+      ? cumLoss.toLocaleString() + ' cumulative  (' + cumPctStr + ')  •  interval: ' + intPctStr
+      : '0  •  interval: ' + intPctStr);
     setText('sync-last',    s.last_sync_ts ? new Date(s.last_sync_ts * 1000).toLocaleTimeString() : '—');
-    setClass('sync-drops',  drops > 0 ? 'err' : 'ok');
+    setClass('sync-drops',  cumLoss > 0 ? 'err' : 'ok');
 
-    // Hero: show percentage, sub-line clarifies it's absent from InfluxDB
-    setText('hero-drops',     pctStr);
-    setText('hero-drops-sub', drops > 0
-      ? drops.toLocaleString() + ' messages absent from InfluxDB'
+    // Hero uses cumulative — stable at high rates
+    setText('hero-drops',     cumPctStr);
+    setText('hero-drops-sub', cumLoss > 0
+      ? cumLoss.toLocaleString() + ' messages absent from InfluxDB'
       : 'all messages present in InfluxDB');
-    setClass('hero-drops', drops > 0 ? 'err' : 'ok');
-    $('hero-drops-card').classList.toggle('nonzero', drops > 0);
+    setClass('hero-drops', cumLoss > 0 ? 'err' : 'ok');
+    $('hero-drops-card').classList.toggle('nonzero', cumLoss > 0);
 
-    setText('val-parquet-drops', drops > 0 ? pctStr + ' missing' : '0%');
-    setClass('val-parquet-drops', drops > 0 ? 'err' : 'ok');
-    $('dot-parquet-drops').className = 'path-dot ' + (drops > 0 ? 'err' : 'ok');
+    setText('val-parquet-drops', cumLoss > 0 ? cumPctStr + ' missing' : '0%');
+    setClass('val-parquet-drops', cumLoss > 0 ? 'err' : 'ok');
+    $('dot-parquet-drops').className = 'path-dot ' + (cumLoss > 0 ? 'err' : 'ok');
 
-    if (drops > 0 && drops !== (window._lastDrops || 0)) {
-      feedLog('MISSING FROM INFLUX — ' + pctStr + ' (' + drops + ' messages)', 'drop');
+    if (cumLoss > 0 && cumLoss !== (window._lastDrops || 0)) {
+      feedLog('MISSING FROM INFLUX — ' + cumPctStr + ' (' + cumLoss + ' cumulative)', 'drop');
     }
-    window._lastDrops = drops;
+    window._lastDrops = cumLoss;
   }
 
   // rsync stats

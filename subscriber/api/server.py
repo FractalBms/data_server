@@ -182,12 +182,14 @@ g_stats = {"live_total": 0, "live_per_sec": 0, "live_per_sec_smooth": 0, "querie
            "last_query_ms": 0.0, "avg_query_ms": 0.0}
 # Chain-of-custody: updated when _sync messages arrive from the publisher
 g_sync_stats = {
-    "session_id":      "",
-    "sync_seq":        0,
-    "last_sync_ts":    0.0,
-    "received_since":  0,    # data messages received since last _sync
-    "drops_detected":  0,    # cumulative drops detected vs expected
-    "total_received":  0,    # total data messages received on this MQTT connection
+    "session_id":        "",
+    "sync_seq":          0,
+    "last_sync_ts":      0.0,
+    "received_since":    0,    # data messages received since last _sync
+    "drops_detected":    0,    # cumulative per-interval drops (noisy at high rates)
+    "total_received":    0,    # total data messages received on this MQTT connection
+    "total_published":   0,    # total published by stress runner (from latest _sync)
+    "cumulative_loss":   0,    # total_published - total_received (true end-to-end deficit)
 }
 g_start_time = time.time()
 # Per-second rate counter — two ints, no list allocation per message.
@@ -604,18 +606,24 @@ async def _handle_mqtt_message(topic: str, payload: bytes) -> None:
                 g_sync_stats["last_sync_ts"]   = msg.get("timestamp", 0.0)
                 return  # skip comparison for first sync of new session
 
-            received = g_sync_stats["received_since"]
-            dropped  = max(0, expect - received)
-            g_sync_stats["drops_detected"] += dropped
-            g_sync_stats["received_since"]  = 0
-            g_sync_stats["sync_seq"]        = seq
-            g_sync_stats["last_sync_ts"]    = msg.get("timestamp", 0.0)
+            received   = g_sync_stats["received_since"]
+            dropped    = max(0, expect - received)
+            total_pub  = msg.get("total_published", 0)
+            total_recv = g_sync_stats["total_received"]
+            cum_loss   = max(0, total_pub - total_recv)
 
-            if dropped:
-                log.warning("Sync #%d DROPS: expected=%d received=%d dropped=%d cumulative=%d",
-                            seq, expect, received, dropped, g_sync_stats["drops_detected"])
+            g_sync_stats["drops_detected"]  += dropped
+            g_sync_stats["received_since"]   = 0
+            g_sync_stats["sync_seq"]         = seq
+            g_sync_stats["last_sync_ts"]     = msg.get("timestamp", 0.0)
+            g_sync_stats["total_published"]  = total_pub
+            g_sync_stats["cumulative_loss"]  = cum_loss
+
+            if cum_loss:
+                log.warning("Sync #%d  interval=%d/%d  cumulative loss=%d / %d published",
+                            seq, received, expect, cum_loss, total_pub)
             else:
-                log.info("Sync #%d OK: %d/%d received", seq, received, expect)
+                log.info("Sync #%d OK: %d/%d received  cumulative 0 loss", seq, received, expect)
         except Exception as e:
             log.warning("Sync parse error: %s", e)
         return
