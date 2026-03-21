@@ -94,6 +94,7 @@ def make_mqtt_client(mqtt_cfg: dict) -> mqtt.Client:
     client.on_connect    = lambda c, u, f, rc: log.info(
         "MQTT connected to %s:%d (rc=%d)", mqtt_cfg["host"], mqtt_cfg["port"], rc)
     client.on_disconnect = lambda c, u, rc: log.warning("MQTT disconnected (rc=%d)", rc)
+    client.reconnect_delay_set(min_delay=1, max_delay=5)  # reconnect within 1-5s after broker restart
     return client
 
 
@@ -158,7 +159,7 @@ async def site_publish_loop(project_id: int, site_cfg: dict, config: dict,
                 # but at high rates the PUBACK round-trip saturates broker queues.
                 if mode == "per_cell_item":
                     ts     = time.time()
-                    topic  = cell.topic          # cache — property rebuilds f-string each call
+                    topic  = cell.topic.replace("batteries", topic_prefix, 1)  # apply shard prefix
                     values = {name: state.step() for name, state in cell.measurements.items()}
                     if "voltage" in values and "current" in values:
                         values["power"] = round(values["voltage"] * values["current"], 4)
@@ -170,7 +171,8 @@ async def site_publish_loop(project_id: int, site_cfg: dict, config: dict,
                         )
                         batch += 1
                 else:
-                    g_mqtt_client.publish(cell.topic, json.dumps(cell.payload()), qos=0)
+                    t = cell.topic.replace("batteries", topic_prefix, 1)
+                    g_mqtt_client.publish(t, json.dumps(cell.payload()), qos=0)
                     batch += 1
 
             g_site_counters[key] += batch
