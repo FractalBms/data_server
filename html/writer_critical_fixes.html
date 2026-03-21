@@ -577,29 +577,30 @@ if (tid == arrow::Type::INT64)
   <h2 class="section">Major Issues</h2>
 
   <div class="nav">
-    <a href="#M1">M1 parse_payload default</a>
-    <a href="#M2">M2 sync first-session</a>
-    <a href="#M3">M3 schema duplication</a>
-    <a href="#M4">M4 flush-time date</a>
+    <a href="#M1">M1 ✓ parse_payload default</a>
+    <a href="#M2">M2 ✓ sync first-session</a>
+    <a href="#M3">M3 ✓ schema duplication</a>
+    <a href="#M4">M4 ✓ flush-time date</a>
     <a href="#M5">M5 ✓ fixed by C4-A</a>
-    <a href="#M6">M6 recv safety</a>
-    <a href="#M7">M7 health path parsing</a>
+    <a href="#M6">M6 ✓ recv safety</a>
+    <a href="#M7">M7 ✓ health path parsing</a>
     <a href="#M8">M8 ✓ fixed by C5</a>
-    <a href="#M9">M9 shutdown order</a>
-    <a href="#M10">M10 g_mosq data race</a>
-    <a href="#M11">M11 shutdown data loss</a>
-    <a href="#M12">M12 config validation</a>
-    <a href="#M13">M13 path traversal</a>
-    <a href="#M14">M14 int/float collision</a>
+    <a href="#M9">M9 ✓ shutdown order</a>
+    <a href="#M10">M10 ✓ g_mosq data race</a>
+    <a href="#M11">M11 ✓ shutdown data loss</a>
+    <a href="#M12">M12 ✓ config validation</a>
+    <a href="#M13">M13 ✓ path traversal</a>
+    <a href="#M14">M14 ✓ int/float collision</a>
   </div>
 
   <!-- ── M1 ──────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M1">
+  <div class="fix" id="M1" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M1</span>
       <span class="fix-title"><code>parse_payload</code> default-constructs <code>Config{}</code> — wrong config silently used
         <span class="fix-lines">line 241</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p>The <code>Config</code> parameter has a default argument of <code>Config{}</code>. Any call site that omits it silently uses a zero-value config — wrong <code>project_id</code>, wrong field mappings, no error. Already a latent bug in tests.</p>
@@ -625,12 +626,13 @@ if (tid == arrow::Type::INT64)
   </div>
 
   <!-- ── M2 ──────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M2">
+  <div class="fix" id="M2" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M2</span>
       <span class="fix-title">First sync always reports OK — misleading when messages were dropped before it arrived
         <span class="fix-lines">lines 823–824</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p>On a new session start <code>g_received_since_sync</code> is a large leftover from the previous run. The cast to <code>int64_t</code> can wrap, and the sync logic skips the drop check for the first <code>_sync</code> of a session. Real drops before the first sync are silently declared "OK".</p>
@@ -658,12 +660,13 @@ g_sync_session_id = new_session_id;
   </div>
 
   <!-- ── M3 ──────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M3">
+  <div class="fix" id="M3" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M3</span>
       <span class="fix-title"><code>flush_partition</code> and <code>write_wal_ipc</code> duplicate ~60 lines of schema-building code
         <span class="fix-lines">lines 356–414 vs 472–512</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p>Both functions independently collect all int/float field names, build Arrow arrays column-by-column, and assemble a table. The logic has already diverged in variable names and will drift further. Any schema change must be made in two places.</p>
@@ -691,12 +694,13 @@ static arrow::Status write_wal_ipc(...) {
   </div>
 
   <!-- ── M4 ──────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M4">
+  <div class="fix" id="M4" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M4</span>
       <span class="fix-title"><code>make_output_path</code> uses flush time — WAL-replayed data lands in today's date partition
         <span class="fix-lines">lines 314–343</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p><code>make_output_path</code> calls <code>system_clock::now()</code> internally. Data recovered from a WAL written two days ago is written into today's year/month/day directory. DuckDB queries scoped to historical date ranges will miss it.</p>
@@ -738,12 +742,13 @@ static arrow::Status write_wal_ipc(...) {
   </div>
 
   <!-- ── M6 ──────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M6">
+  <div class="fix" id="M6" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M6</span>
       <span class="fix-title">Health thread: <code>recv</code> return ignored, buffer uninitialised, fragmented reads unhandled
         <span class="fix-lines">line 617</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p><code>recv</code> return value is discarded — a zero-byte or error read goes undetected and the uninitialised stack buffer is parsed as an HTTP request. A client that sends headers in two TCP segments gets a spurious 400 response.</p>
@@ -770,12 +775,13 @@ if (n &lt;= 0) {
   </div>
 
   <!-- ── M7 ──────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M7">
+  <div class="fix" id="M7" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M7</span>
       <span class="fix-title">Health endpoint returns JSON 200 to any TCP connection — no path or method check
         <span class="fix-lines">lines 617–633</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p>Port scanners, load balancer probes, and keepalive connections all receive a full JSON health payload. No method or path is parsed — a <code>POST /exploit</code> gets the same 200 response as <code>GET /health</code>.</p>
@@ -821,12 +827,13 @@ if (!ok) {
   </div>
 
   <!-- ── M9 ──────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M9">
+  <div class="fix" id="M9" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M9</span>
       <span class="fix-title">Wrong shutdown order — <code>mosquitto_disconnect</code> after <code>loop_stop</code>, DISCONNECT never sent
         <span class="fix-lines">lines 1044–1046</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p><code>mosquitto_loop_stop(force=true)</code> kills the network thread before <code>mosquitto_disconnect</code> is called. The broker never receives a DISCONNECT packet and retains the session — QoS state, will messages, and subscriptions persist until the broker-side keepalive timeout.</p>
@@ -852,12 +859,13 @@ mosquitto_loop_stop(g_mosq, false); // clean stop</pre>
   </div>
 
   <!-- ── M10 ─────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M10">
+  <div class="fix" id="M10" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M10</span>
       <span class="fix-title"><code>g_mosq</code> plain pointer — data race between main thread write and network thread reads
         <span class="fix-lines">lines 1005, 1038</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p>The main thread writes <code>g_mosq</code> at startup and during reconnect; mosquitto's network thread reads it in callbacks. Under the C++ memory model this is a data race — formally undefined behaviour, practically a torn pointer read on 32-bit ARM.</p>
@@ -877,12 +885,13 @@ mosquitto_loop_stop(g_mosq, false); // clean stop</pre>
   </div>
 
   <!-- ── M11 ─────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M11">
+  <div class="fix" id="M11" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M11</span>
       <span class="fix-title">Final flush runs before <code>mosquitto_loop_stop</code> — guaranteed data loss window on shutdown
         <span class="fix-lines">lines 1041–1044</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p>The flush thread exits when it sees <code>g_shutdown</code>. <code>mosquitto_loop_stop</code> is called <em>after</em> the final flush. Any messages delivered between the flush thread's last drain and <code>loop_stop</code> are silently discarded. This happens on every graceful shutdown.</p>
@@ -908,12 +917,13 @@ flush_thread.join();          // final flush</pre>
   </div>
 
   <!-- ── M12 ─────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M12">
+  <div class="fix" id="M12" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M12</span>
       <span class="fix-title">No config validation — bad values cause spin-loops, silent drops, or wrong compression
         <span class="fix-lines">lines 117–168</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p><code>flush_interval_seconds &lt;= 0</code> spins the flush thread at 100% CPU. <code>max_total_buffer_rows &lt;= 0</code> drops every single message. An invalid <code>compression</code> string falls through silently to Snappy.</p>
@@ -939,12 +949,13 @@ flush_thread.join();          // final flush</pre>
   </div>
 
   <!-- ── M13 ─────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M13">
+  <div class="fix" id="M13" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M13</span>
       <span class="fix-title"><code>source_type</code> injected into filesystem paths without sanitisation — path traversal
         <span class="fix-lines">line 334</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p>A rogue MQTT publisher using a topic like <code>../../etc/cron.d/evil/…</code> causes the writer to create files anywhere the process can write. Real attack surface if the broker is reachable from untrusted clients.</p>
@@ -976,12 +987,13 @@ if (info.source_type.empty()) return std::nullopt;</pre>
   </div>
 
   <!-- ── M14 ─────────────────────────────────────────────────────────────── -->
-  <div class="fix" id="M14">
+  <div class="fix" id="M14" style="opacity:.55;">
     <div class="fix-header">
       <span class="fix-id maj">M14</span>
       <span class="fix-title">Integer scalars silently promoted to <code>double</code> — precision loss and duplicate Parquet columns
         <span class="fix-lines">lines 289–292</span>
       </span>
+      <span class="applied">✓ Applied</span>
     </div>
     <div class="fix-body">
       <p>In <code>parse_payload</code>, flat JSON integers not in the configured <code>int_cols</code> list fall through to the float path. Values &gt; 2<sup>53</sup> lose precision. Worse: if a JSON field name matches a topic-derived int column, the same field appears in both <code>row.ints</code> and <code>row.floats</code>, producing two Parquet columns with the same name.</p>
