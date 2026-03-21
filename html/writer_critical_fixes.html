@@ -120,6 +120,12 @@
   .pro  { color: var(--green);    }
   .con  { color: var(--critical); }
 
+  /* minor badge variant */
+  .fix-id.min {
+    background: rgba(88,166,255,.12); color: var(--blue);
+    border-color: var(--blue);
+  }
+
   /* major badge variant */
   .fix-id.maj {
     background: rgba(227,179,65,.15); color: var(--yellow);
@@ -161,10 +167,10 @@
 <body>
 <div class="page">
 
-  <h1>writer.cpp — Critical &amp; Major Fixes</h1>
+  <h1>writer.cpp — Critical, Major &amp; Minor Fixes</h1>
   <p class="subtitle">
     Companion to <a href="writer_code_review.html">writer_code_review.html</a> ·
-    6 critical · 14 major · before/after code and suggested fixes
+    6 critical · 14 major · 11 minor · before/after code and suggested fixes
   </p>
 
   <div class="nav">
@@ -1013,6 +1019,386 @@ if (row.ints.count(key) == 0)
         </div>
       </div>
       <p>For the precision issue: widen <code>int_cols</code> config or add a configurable threshold; values above 2<sup>53</sup> that must round-trip exactly should always be in <code>int_cols</code>.</p>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="section">Minor Issues</h2>
+
+  <div class="nav">
+    <a href="#m1">m1 magic numbers</a>
+    <a href="#m2">m2 overflow notify</a>
+    <a href="#m3">m3 column order</a>
+    <a href="#m4">m4 g_cfg raw ptr</a>
+    <a href="#m5">m5 create_directories</a>
+    <a href="#m6">m6 clock skew</a>
+    <a href="#m7">m7 first sync OK</a>
+    <a href="#m8">m8 duplicate KV</a>
+    <a href="#m9">m9 subscribe retry</a>
+    <a href="#m10">m10 recv buf size</a>
+    <a href="#m11">m11 lib_init unchecked</a>
+  </div>
+
+  <!-- ── m1 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m1">
+    <div class="fix-header">
+      <span class="fix-id min">m1</span>
+      <span class="fix-title">Magic numbers — backlog, retries, backoff, keepalive, reconnect delays all hardcoded
+        <span class="fix-lines">lines 609, 683, 687, 1011, 1015, 1018</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>None of the operational timing constants are configurable. Changing keepalive from 60s requires a recompile. At minimum, define named constants instead of inline literals so they're findable and self-documenting.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before — scattered magic numbers</div>
+          <pre>listen(srv, 4);                    // health backlog
+constexpr int MAX_RETRIES = 3;    // parquet retry count
+sleep_for(seconds(1 &lt;&lt; attempt)); // 1s/2s/4s backoff
+mosquitto_connect(..., 60);        // keepalive
+reconnect_delay_set(mosq, 2, 30); // min/max delay
+sleep_for(seconds(5));            // connect retry</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — named constants (or config fields)</div>
+          <pre>// Near top of file or in Config struct:
+static constexpr int  HEALTH_BACKLOG       = 4;
+static constexpr int  FLUSH_MAX_RETRIES    = 3;
+static constexpr int  MQTT_KEEPALIVE_S     = 60;
+static constexpr int  MQTT_RECONNECT_MIN_S = 2;
+static constexpr int  MQTT_RECONNECT_MAX_S = 30;
+static constexpr int  MQTT_CONNECT_RETRY_S = 5;</pre>
+        </div>
+      </div>
+      <p style="color:var(--muted);font-size:.85rem;">For full configurability, add these as optional fields in <code>Config</code> with the current values as defaults — no behaviour change, but runtime-tunable.</p>
+    </div>
+  </div>
+
+  <!-- ── m2 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m2">
+    <div class="fix-header">
+      <span class="fix-id min">m2</span>
+      <span class="fix-title">Overflow <code>notify_one</code> is lost if flush thread is mid-flush — drops continue for full interval
+        <span class="fix-lines">lines 941–948</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p><code>notify_one</code> only wakes the flush thread if it is blocked in <code>poll()</code>. If the flush thread is busy doing Parquet I/O (outside the poll), the notification is silently discarded. The next flush won't start until the full <code>flush_interval_seconds</code> has elapsed — all overflow drops in that window are unrecoverable.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>// on_message overflow path:
+g_flush_cv.notify_one(); // lost if thread is busy</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — sticky flush-needed flag</div>
+          <pre>// Global:
+static std::atomic&lt;bool&gt; g_flush_needed{false};
+
+// on_message overflow path:
+g_flush_needed.store(true);
+g_flush_cv.notify_one();
+
+// flush_thread_fn, top of loop — skip wait if flagged:
+if (!g_flush_needed.exchange(false)) {
+    lock.unlock();
+    poll(&amp;pfd, 1, g_cfg->flush_interval_seconds * 1000);
+    lock.lock();
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── m3 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m3">
+    <div class="fix-header">
+      <span class="fix-id min">m3</span>
+      <span class="fix-title">Parquet column order non-deterministic across flush cycles
+        <span class="fix-lines">rows_to_arrow_table()</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>Column order is determined by which row is seen first in each flush batch. If the first row of one cycle lacks a field that later rows have, the column position shifts. DuckDB is unaffected but the files are confusing to inspect with <code>parquet-tools</code> or pandas.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before — first-seen order</div>
+          <pre>std::map&lt;std::string, bool&gt; seen_i, seen_f;
+for (const auto& r : rows) {
+    for (auto& [k,_] : r.ints)
+        if (!seen_i[k]) { seen_i[k]=true; int_cols.push_back(k); }
+    for (auto& [k,_] : r.floats)
+        if (!seen_f[k]) { seen_f[k]=true; float_cols.push_back(k); }
+}</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — stable sorted order</div>
+          <pre>std::set&lt;std::string&gt; seen_i, seen_f;
+for (const auto& r : rows) {
+    for (auto& [k,_] : r.ints)   seen_i.insert(k);
+    for (auto& [k,_] : r.floats) seen_f.insert(k);
+}
+// std::set iteration is sorted — columns always alphabetical
+int_cols.assign(seen_i.begin(), seen_i.end());
+float_cols.assign(seen_f.begin(), seen_f.end());</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── m4 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m4">
+    <div class="fix-header">
+      <span class="fix-id min">m4</span>
+      <span class="fix-title"><code>g_cfg</code> is a raw pointer to a stack <code>Config</code> — null dereference in tests
+        <span class="fix-lines">line 458</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p><code>g_cfg</code> is <code>nullptr</code> until <code>main()</code> sets it. Any unit test that calls a function referencing <code>g_cfg</code> before <code>main()</code> runs will segfault. The fix is trivial: make it a pointer to a static default-constructed <code>Config</code>, never null.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>static const Config* g_cfg{nullptr};
+// nullptr until main() assigns &amp;cfg</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — never null</div>
+          <pre>static Config        g_cfg_storage{};
+static const Config* g_cfg{&amp;g_cfg_storage};
+
+// In main(), replace g_cfg = &amp;cfg with:
+g_cfg_storage = cfg;   // copy loaded config in</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── m5 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m5">
+    <div class="fix-header">
+      <span class="fix-id min">m5</span>
+      <span class="fix-title"><code>wal_path_for</code> calls <code>create_directories</code> on every flush, every partition
+        <span class="fix-lines">wal_path_for() ~line 507</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>At 10k partitions and a 60-second flush cycle, that's 10k redundant <code>stat</code>+<code>mkdir</code> syscall sequences per flush. The WAL directory doesn't change between flushes.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before — inside wal_path_for()</div>
+          <pre>static std::string wal_path_for(...) {
+    std::string wp = cfg.wal_path.empty()
+        ? cfg.base_path + "/.wal" : cfg.wal_path;
+    std::error_code ec;
+    fs::create_directories(wp, ec);  // ← every call
+    return wp + "/" + ...;
+}</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — create once at startup</div>
+          <pre>// In main(), after validate_config():
+if (cfg.wal_enabled) {
+    std::string wp = cfg.wal_path.empty()
+        ? cfg.base_path + "/.wal" : cfg.wal_path;
+    std::error_code ec;
+    fs::create_directories(wp, ec);
+    if (ec) { std::cerr &lt;&lt; "[wal] mkdir failed\n"; return 1; }
+}
+
+// wal_path_for() — just build the filename:
+static std::string wal_path_for(...) {
+    std::string wp = cfg.wal_path.empty()
+        ? cfg.base_path + "/.wal" : cfg.wal_path;
+    return wp + "/" + ...;   // no create_directories
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── m6 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m6">
+    <div class="fix-header">
+      <span class="fix-id min">m6</span>
+      <span class="fix-title">WAL filename and Parquet filename can differ by one second at a clock boundary
+        <span class="fix-lines">time_suffix() vs make_output_path()</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p><code>wal_path_for</code> calls <code>time_suffix()</code> and <code>make_output_path</code> calls <code>system_clock::now()</code> independently. If they straddle a second boundary the WAL file is named <code>…T120000Z.wal.arrow</code> while the Parquet file is named <code>…T120001Z.parquet</code>. The WAL cleanup logic that deletes the WAL on success still works (it holds the full path), but the filenames are confusing.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before — two independent clock reads</div>
+          <pre>// do_flush():
+wal_file = wal_path_for(*g_cfg, ...); // calls now() internally
+auto path = make_output_path(...);    // calls now() independently</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — capture once, pass through</div>
+          <pre>// do_flush():
+auto flush_ts = std::chrono::system_clock::now(); // single clock read
+wal_file = wal_path_for(*g_cfg, ..., flush_ts);
+auto path = make_output_path(*g_cfg, ..., flush_ts);
+
+// Both functions accept time_point instead of calling now() themselves</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── m7 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m7">
+    <div class="fix-header">
+      <span class="fix-id min">m7</span>
+      <span class="fix-title">First <code>_sync</code> of a new session always logs OK — drops before it arrived are invisible
+        <span class="fix-lines">handle_sync_message()</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>When a session change is detected the counters reset and the function returns early, skipping the drop check. This is correct — there's genuinely no prior sync to compare against. But messages dropped <em>between</em> session start and the first <code>_sync</code> of that session are permanently invisible. The current comment says "documented but not prominently".</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before — silent gap</div>
+          <pre>if (session != g_sync_session_id) {
+    g_sync_session_id     = session;
+    g_received_since_sync = 0;
+    g_sync_drops_detected = 0;
+    return;  // drops before first sync never counted
+}</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — log the blind spot explicitly</div>
+          <pre>if (session != g_sync_session_id) {
+    if (!g_sync_session_id.empty())
+        std::cout &lt;&lt; "[sync] new session — drops before "
+                     "first _sync are not counted\n";
+    g_sync_session_id     = session;
+    g_received_since_sync = 0;
+    g_sync_drops_detected = 0;
+    return;
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── m8 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m8">
+    <div class="fix-header">
+      <span class="fix-id min">m8</span>
+      <span class="fix-title"><code>parse_topic</code> silently overwrites duplicate key-value segments
+        <span class="fix-lines">lines 227–234</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>If a topic path contains <code>site=1/rack=2/site=3</code>, the second <code>site=3</code> silently overwrites the first with no warning. The resulting row has <code>site=3</code> with no indication that the topic was malformed.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before — silent overwrite</div>
+          <pre>try {
+    info.kv[segment.substr(0, eq)] =
+        std::stoi(segment.substr(eq + 1));
+} catch (...) {}</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — warn on duplicate</div>
+          <pre>std::string kv_key = segment.substr(0, eq);
+int kv_val;
+try { kv_val = std::stoi(segment.substr(eq + 1)); }
+catch (...) { continue; }
+if (info.kv.count(kv_key))
+    std::cerr &lt;&lt; "[topic] duplicate key '" &lt;&lt; kv_key
+              &lt;&lt; "' in topic: " &lt;&lt; topic &lt;&lt; "\n";
+info.kv[kv_key] = kv_val;</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── m9 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m9">
+    <div class="fix-header">
+      <span class="fix-id min">m9</span>
+      <span class="fix-title"><code>mosquitto_subscribe</code> failure in <code>on_connect</code> not retried — writer receives nothing
+        <span class="fix-lines">on_connect() ~line 802</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>If <code>mosquitto_subscribe</code> fails (e.g. broker ACL rejection, out of memory), the writer logs the error and continues. It is now connected to the broker but subscribed to nothing — it receives zero messages indefinitely with no further indication. The reconnect loop in <code>mosquitto_loop_start</code> only fires on TCP disconnect, not on subscribe failure.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>int sub_rc = mosquitto_subscribe(g_mosq.load(), nullptr,
+    g_cfg->mqtt_topic.c_str(), g_cfg->mqtt_qos);
+if (sub_rc != MOSQ_ERR_SUCCESS)
+    std::cerr &lt;&lt; "[mqtt] subscribe failed: "
+              &lt;&lt; mosquitto_strerror(sub_rc) &lt;&lt; "\n";
+// ← silently receives nothing</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — disconnect to force reconnect</div>
+          <pre>int sub_rc = mosquitto_subscribe(g_mosq.load(), nullptr,
+    g_cfg->mqtt_topic.c_str(), g_cfg->mqtt_qos);
+if (sub_rc != MOSQ_ERR_SUCCESS) {
+    std::cerr &lt;&lt; "[mqtt] subscribe failed ("
+              &lt;&lt; mosquitto_strerror(sub_rc)
+              &lt;&lt; ") — disconnecting to retry\n";
+    mosquitto_disconnect(g_mosq.load()); // triggers reconnect + on_connect
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── m10 ─────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m10">
+    <div class="fix-header">
+      <span class="fix-id min">m10</span>
+      <span class="fix-title">Health endpoint <code>recv</code> buffer 255 bytes — too small for Chrome/Firefox headers
+        <span class="fix-lines">health_thread_fn()</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>Chrome and Firefox send 500–2000 byte GET headers (User-Agent, Accept, Cookie, etc.). The 255-byte buffer silently truncates the request. The path/method check added by M7 may fail to match <code>/health</code> if it falls beyond byte 255, causing spurious 404s from real browser requests.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>char buf[256] = {};
+auto n = recv(cli, buf, sizeof(buf) - 1, 0);</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — 4 KB covers all realistic headers</div>
+          <pre>char buf[4096] = {};
+auto n = recv(cli, buf, sizeof(buf) - 1, 0);</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── m11 ─────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="m11">
+    <div class="fix-header">
+      <span class="fix-id min">m11</span>
+      <span class="fix-title"><code>mosquitto_lib_init()</code> return value unchecked — crash if init fails
+        <span class="fix-lines">main() ~line 1064</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p><code>mosquitto_lib_init()</code> can return <code>MOSQ_ERR_UNKNOWN</code> if the underlying platform library fails to initialise. All subsequent mosquitto calls will produce undefined behaviour. <code>mosquitto_lib_cleanup()</code> is also called unconditionally in the shutdown path even if init failed.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>mosquitto_lib_init();  // return ignored</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After</div>
+          <pre>if (mosquitto_lib_init() != MOSQ_ERR_SUCCESS) {
+    std::cerr &lt;&lt; "[init] mosquitto_lib_init failed\n";
+    return 1;
+}</pre>
+        </div>
+      </div>
     </div>
   </div>
 
