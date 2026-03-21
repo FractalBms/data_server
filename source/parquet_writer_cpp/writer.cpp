@@ -1039,8 +1039,9 @@ static void print_help(const char* prog) {
 "  --config <path>        YAML config file (default: config.yaml)\n"
 "  --host <hostname>      MQTT broker host (overrides mqtt.host)\n"
 "  --port <n>             MQTT broker port (overrides mqtt.port)\n"
-"  --output <path>        Parquet output directory (overrides output.base_path)\n"
-"  --health-port <n>      Health endpoint port (overrides health.port)\n"
+"  --client-id <id>       MQTT client ID (overrides mqtt.client_id) — MUST be unique per instance\n"
+"  --output <path>        Parquet output directory (overrides output.base_path) — MUST be unique per instance\n"
+"  --health-port <n>      Health endpoint port (overrides health.port) — MUST be unique per instance\n"
 "  --flush-interval <n>   Flush interval seconds (overrides output.flush_interval_seconds)\n"
 "  --help                 Show this help and exit\n"
 "\n"
@@ -1093,17 +1094,18 @@ static void print_help(const char* prog) {
 int main(int argc, char* argv[]) {
     std::string config_path = "config.yaml";
     // CLI overrides applied after config load — take precedence over config file
-    std::string cli_host, cli_output;
+    std::string cli_host, cli_output, cli_client_id;
     int cli_port = 0, cli_health_port = 0, cli_flush_interval = 0;
     for (int i = 1; i < argc; i++) {
         std::string a(argv[i]);
-        if (a == "--help")                              { print_help(argv[0]); return 0; }
-        if (a == "--config"       && i + 1 < argc)     config_path      = argv[++i];
-        else if (a == "--host"    && i + 1 < argc)     cli_host         = argv[++i];
-        else if (a == "--port"    && i + 1 < argc)     cli_port         = std::atoi(argv[++i]);
-        else if (a == "--output"  && i + 1 < argc)     cli_output       = argv[++i];
-        else if (a == "--health-port" && i + 1 < argc) cli_health_port  = std::atoi(argv[++i]);
-        else if (a == "--flush-interval" && i+1 < argc)cli_flush_interval = std::atoi(argv[++i]);
+        if (a == "--help")                               { print_help(argv[0]); return 0; }
+        if (a == "--config"        && i + 1 < argc)     config_path      = argv[++i];
+        else if (a == "--host"     && i + 1 < argc)     cli_host         = argv[++i];
+        else if (a == "--port"     && i + 1 < argc)     cli_port         = std::atoi(argv[++i]);
+        else if (a == "--output"   && i + 1 < argc)     cli_output       = argv[++i];
+        else if (a == "--client-id"&& i + 1 < argc)     cli_client_id    = argv[++i];
+        else if (a == "--health-port" && i + 1 < argc)  cli_health_port  = std::atoi(argv[++i]);
+        else if (a == "--flush-interval" && i+1 < argc) cli_flush_interval = std::atoi(argv[++i]);
     }
 
     Config cfg = load_config(config_path);
@@ -1111,6 +1113,7 @@ int main(int argc, char* argv[]) {
     if (!cli_host.empty())         cfg.mqtt_host              = cli_host;
     if (cli_port > 0)              cfg.mqtt_port              = cli_port;
     if (!cli_output.empty())       cfg.base_path              = cli_output;
+    if (!cli_client_id.empty())    cfg.mqtt_client_id         = cli_client_id;
     if (cli_health_port > 0)       cfg.health_port            = cli_health_port;
     if (cli_flush_interval > 0)    cfg.flush_interval_seconds = cli_flush_interval;
 
