@@ -1,0 +1,20 @@
+mqtt:
+  client_id: parquet-writer-a
+  host: broker
+  port: 1883
+  topic: "#"
+  qos: 0
+output:
+  base_path: /data/parquet
+  compression: snappy
+  flush_interval_seconds: 10
+  max_messages_per_part: 50000
+  max_total_buffer_rows: 500000
+health:
+  enabled: true
+  port: 8771
+wal:
+  enabled: true
+  path: /wal
+guard:
+  min_free_gb: 1.0
