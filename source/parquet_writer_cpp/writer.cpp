@@ -1200,8 +1200,9 @@ int main(int argc, char* argv[]) {
     // O_NONBLOCK on read end: drain loop in flush_thread_fn won't block after wakeup
     fcntl(g_signal_pipe[0], F_SETFL, O_NONBLOCK);
 
-    // clean_session=false: FlashMQ queues QoS-1 messages while we're offline
-    auto* mosq = mosquitto_new(cfg.mqtt_client_id.c_str(), /*clean_session=*/false, nullptr);
+    // clean_session=true: correct for QoS-0 (broker can't queue QoS-0 anyway)
+    // and prevents stale subscriptions from old configs being restored on reconnect.
+    auto* mosq = mosquitto_new(cfg.mqtt_client_id.c_str(), /*clean_session=*/true, nullptr);
     if (!mosq) {
         std::cerr << "[mqtt] mosquitto_new failed\n";
         return 1;
