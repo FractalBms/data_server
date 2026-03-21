@@ -4,9 +4,9 @@
 
 | Name | WiFi IP | Wired IP | Role |
 |---|---|---|---|
-| phil-dev | 192.168.86.46 | — | Dev machine (retired as edge host) |
-| lp3 (LattePanda) | 192.168.86.20 | 192.168.0.20 | Host / edge — stress runner, writer.cpp, push agent, FlashMQ :1883 |
-| fractal-phil | 192.168.86.51 | 192.168.0.51 | AWS-sim — FlashMQ :1884, Telegraf, InfluxDB2, subscriber_api, manager |
+| phil-dev | 192.168.86.46 | — | Dev machine — stress runner, parquet writer, push agent, FlashMQ :1883 |
+| lp3 (LattePanda) | 192.168.86.20 | 192.168.0.20 | Edge host — stress runner, writer.cpp, push agent, FlashMQ :1883 |
+| fractal-phil | 192.168.86.51 | 192.168.0.51 | AWS-sim — FlashMQ :1884, Telegraf, InfluxDB2, subscriber_api (systemd), manager |
 
 > **Note:** Always use wired IPs (192.168.0.x) for bridge and rsync — higher throughput, avoids WiFi contention at ~80k msgs/sec.
 > **Important:** 192.168.0.x is only reachable from lp3. phil-dev (192.168.86.46) is WiFi-only and cannot reach this subnet — bridge/rsync configs using 192.168.0.51 must be run from lp3, not phil-dev.
@@ -51,9 +51,27 @@ cd source/parquet_writer_cpp && ./parquet_writer --config config.yaml > /tmp/wri
 cd source/rsync_push && /home/phil/work/gen-ai/data_server/.venv/bin/python push_agent.py > /tmp/push_agent.log 2>&1 &
 ```
 
-### fractal-phil (192.168.86.51) — managed by manager or start_aws_sim.sh
+### lp3 (192.168.86.20) — git repo at ~/work/gen-ai/data_server
 
 ```bash
+# Build writer (Arrow/Parquet dev headers now installed)
+cd ~/work/gen-ai/data_server/source/parquet_writer_cpp && make parquet_writer
+
+# Start writer
+./parquet_writer --config config.yaml > /tmp/writer-host.log 2>&1 &
+```
+
+- Git remote uses HTTPS (no GitHub SSH key on lp3): `https://github.com/philflex2020/data_server.git`
+- SSH auth: password `phil` (use sshpass from phil-dev)
+- ufw allows: 22, 1883, 8769, 8770, 8771
+
+### fractal-phil (192.168.86.51) — git repo at ~/data_server
+
+```bash
+# subscriber_api is under systemd — check/restart with:
+sudo systemctl status subscriber-api
+sudo systemctl restart subscriber-api
+
 # Full stack (from repo root on fractal-phil)
 bash start_aws_sim.sh
 
@@ -65,7 +83,7 @@ python manager/manager.py --config manager/config.fractal.yaml
 
 | Port | Component | Machine |
 |---|---|---|
-| 1883 | FlashMQ host (MQTT) | phil-dev |
+| 1883 | FlashMQ host (MQTT) | phil-dev / lp3 |
 | 1884 | FlashMQ aws-sim (MQTT) | fractal-phil |
 | 8080 | HTML server | phil-dev |
 | 8086 | InfluxDB2 | fractal-phil |
@@ -73,16 +91,19 @@ python manager/manager.py --config manager/config.fractal.yaml
 | 8765 | Generator WebSocket | phil-dev |
 | 8767 | subscriber_api WebSocket | fractal-phil |
 | 8768 | subscriber_api flux HTTP | fractal-phil |
-| 8769 | stress_runner WebSocket | phil-dev |
-| 8770 | push_agent HTTP API | phil-dev |
+| 8769 | stress_runner WebSocket | phil-dev / lp3 |
+| 8770 | push_agent HTTP API | phil-dev / lp3 |
+| 8771 | parquet_writer health | phil-dev / lp3 |
+| 8772 | parquet_writer health (test) | lp3 (test writer only) |
 
 ## Key paths
 
 | Path | Machine | Contents |
 |---|---|---|
-| `/srv/data/parquet/` | phil-dev | writer.cpp output (partitioned parquet) |
+| `/srv/data/parquet/` | phil-dev / lp3 | writer.cpp output (partitioned parquet) |
+| `/srv/data/parquet-test/` | lp3 | test writer output (config_test.yaml) |
 | `/srv/data/parquet-aws-sim/` | fractal-phil | rsynced copy (DuckDB source) |
-| `/etc/flashmq/bridge-conf.d/` | phil-dev | FlashMQ bridge config (generated) |
+| `/etc/flashmq/bridge-conf.d/` | phil-dev / lp3 | FlashMQ bridge config (generated) |
 
 ## Python environment
 
@@ -96,6 +117,17 @@ python manager/manager.py --config manager/config.fractal.yaml
 - Host field should be `192.168.86.46`
 - Host Parquet Store panel feeds from push_agent `:8770/parquet_stats`
 - Writer status is inferred from stress_runner WebSocket mps > 0
+
+## Diagnostic scripts
+
+```bash
+scripts/test/test_host  192.168.86.20              # lp3 health (mqtt/stress/writer/push_agent)
+scripts/test/test_aws   192.168.86.51              # fractal-phil health (mqtt_aws/influxdb/subscriber)
+scripts/test/config_host 192.168.86.20 -p phil     # show lp3 configs via SSH
+scripts/test/config_aws  192.168.86.51             # show fractal-phil configs via SSH
+```
+
+Run with python3 directly (not bash). All scripts support `--help` and optional section args.
 
 ## Stress runner topology
 
