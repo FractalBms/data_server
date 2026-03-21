@@ -120,6 +120,17 @@
   .pro  { color: var(--green);    }
   .con  { color: var(--critical); }
 
+  /* major badge variant */
+  .fix-id.maj {
+    background: rgba(227,179,65,.15); color: var(--yellow);
+    border-color: var(--yellow);
+  }
+  h2.section {
+    font-size: 1.05rem; font-weight: 700; margin: 2.5rem 0 1rem;
+    text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: .4rem;
+  }
+
   /* apply order */
   .apply-order {
     background: var(--surface); border: 1px solid var(--border);
@@ -150,10 +161,10 @@
 <body>
 <div class="page">
 
-  <h1>writer.cpp — Critical Fixes</h1>
+  <h1>writer.cpp — Critical &amp; Major Fixes</h1>
   <p class="subtitle">
     Companion to <a href="writer_code_review.html">writer_code_review.html</a> ·
-    6 critical issues · exact before/after code for each
+    6 critical · 14 major · before/after code and suggested fixes
   </p>
 
   <div class="nav">
@@ -559,6 +570,437 @@ if (tid == arrow::Type::INT64)
         <span class="step-desc">Option A applied — <code>shared_ptr&lt;StateMap&gt;</code> move eliminates O(N) copy under lock. Option C (shared memory ring) deferred to subscriber_api phase.</span>
         <span class="step-risk risk-low">done</span>
       </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="section">Major Issues</h2>
+
+  <div class="nav">
+    <a href="#M1">M1 parse_payload default</a>
+    <a href="#M2">M2 sync first-session</a>
+    <a href="#M3">M3 schema duplication</a>
+    <a href="#M4">M4 flush-time date</a>
+    <a href="#M5">M5 ✓ fixed by C4-A</a>
+    <a href="#M6">M6 recv safety</a>
+    <a href="#M7">M7 health path parsing</a>
+    <a href="#M8">M8 ✓ fixed by C5</a>
+    <a href="#M9">M9 shutdown order</a>
+    <a href="#M10">M10 g_mosq data race</a>
+    <a href="#M11">M11 shutdown data loss</a>
+    <a href="#M12">M12 config validation</a>
+    <a href="#M13">M13 path traversal</a>
+    <a href="#M14">M14 int/float collision</a>
+  </div>
+
+  <!-- ── M1 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M1">
+    <div class="fix-header">
+      <span class="fix-id maj">M1</span>
+      <span class="fix-title"><code>parse_payload</code> default-constructs <code>Config{}</code> — wrong config silently used
+        <span class="fix-lines">line 241</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>The <code>Config</code> parameter has a default argument of <code>Config{}</code>. Any call site that omits it silently uses a zero-value config — wrong <code>project_id</code>, wrong field mappings, no error. Already a latent bug in tests.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>static Row parse_payload(
+    const std::string& payload,
+    const TopicInfo& info,
+    const std::string& project_id,
+    const Config& cfg = Config{})  // ← silent wrong default</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — remove the default</div>
+          <pre>static Row parse_payload(
+    const std::string& payload,
+    const TopicInfo& info,
+    const std::string& project_id,
+    const Config& cfg)  // ← required, compiler catches omissions</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── M2 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M2">
+    <div class="fix-header">
+      <span class="fix-id maj">M2</span>
+      <span class="fix-title">First sync always reports OK — misleading when messages were dropped before it arrived
+        <span class="fix-lines">lines 823–824</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>On a new session start <code>g_received_since_sync</code> is a large leftover from the previous run. The cast to <code>int64_t</code> can wrap, and the sync logic skips the drop check for the first <code>_sync</code> of a session. Real drops before the first sync are silently declared "OK".</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before — handle_sync_message</div>
+          <pre>// g_sync_session_id change detected:
+g_sync_session_id = new_session_id;
+// g_received_since_sync not reset —
+// carries value from previous session</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — reset counter on session change</div>
+          <pre>if (g_sync_session_id != new_session_id) {
+    g_sync_session_id = new_session_id;
+    g_received_since_sync = 0;  // ← fresh start
+    g_sync_drops_detected = 0;
+    std::cout &lt;&lt; "[sync] new session "
+              &lt;&lt; new_session_id &lt;&lt; "\n";
+    return;  // skip drop check for first sync
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── M3 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M3">
+    <div class="fix-header">
+      <span class="fix-id maj">M3</span>
+      <span class="fix-title"><code>flush_partition</code> and <code>write_wal_ipc</code> duplicate ~60 lines of schema-building code
+        <span class="fix-lines">lines 356–414 vs 472–512</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>Both functions independently collect all int/float field names, build Arrow arrays column-by-column, and assemble a table. The logic has already diverged in variable names and will drift further. Any schema change must be made in two places.</p>
+      <div class="solo">
+        <div class="code-label note" style="border-radius:6px 6px 0 0;">Fix — extract shared helper</div>
+        <pre>// New shared function:
+static arrow::Result&lt;std::shared_ptr&lt;arrow::Table&gt;&gt;
+rows_to_arrow_table(const std::vector&lt;Row&gt;& rows) {
+    // ... single copy of the field-collection + array-building logic ...
+}
+
+// flush_partition becomes:
+static arrow::Status flush_partition(...) {
+    ARROW_ASSIGN_OR_RAISE(auto table, rows_to_arrow_table(rows));
+    // ... open file, write table, close ...
+}
+
+// write_wal_ipc becomes:
+static arrow::Status write_wal_ipc(...) {
+    ARROW_ASSIGN_OR_RAISE(auto table, rows_to_arrow_table(rows));
+    // ... open IPC file, write table, close ...
+}</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── M4 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M4">
+    <div class="fix-header">
+      <span class="fix-id maj">M4</span>
+      <span class="fix-title"><code>make_output_path</code> uses flush time — WAL-replayed data lands in today's date partition
+        <span class="fix-lines">lines 314–343</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p><code>make_output_path</code> calls <code>system_clock::now()</code> internally. Data recovered from a WAL written two days ago is written into today's year/month/day directory. DuckDB queries scoped to historical date ranges will miss it.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>static std::string make_output_path(
+    const Config& cfg,
+    const std::string& source_type,
+    int partition_value) {
+    auto now = system_clock::now(); // ← always now</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — accept optional timestamp</div>
+          <pre>static std::string make_output_path(
+    const Config& cfg,
+    const std::string& source_type,
+    int partition_value,
+    std::optional&lt;system_clock::time_point&gt; ts = {}) {
+    auto t = ts.value_or(system_clock::now());</pre>
+        </div>
+      </div>
+      <p>In <code>replay_wal_files</code>, derive <code>min_ts</code> from the oldest row timestamp and pass it to <code>make_output_path</code>. Normal flush path passes no argument — behaviour unchanged.</p>
+    </div>
+  </div>
+
+  <!-- ── M5 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M5" style="opacity:.55;">
+    <div class="fix-header">
+      <span class="fix-id maj">M5</span>
+      <span class="fix-title"><code>g_current_state</code> O(N) copy under <code>g_mutex</code> blocks MQTT thread
+        <span class="fix-lines">lines 762–763</span>
+      </span>
+      <span class="applied">✓ Fixed by C4-A</span>
+    </div>
+    <div class="fix-body">
+      <p>Resolved by the C4 Option A fix: <code>g_current_state</code> is now a <code>shared_ptr&lt;StateMap&gt;</code>; flush thread does an O(1) pointer move instead of an O(N) map copy under the lock.</p>
+    </div>
+  </div>
+
+  <!-- ── M6 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M6">
+    <div class="fix-header">
+      <span class="fix-id maj">M6</span>
+      <span class="fix-title">Health thread: <code>recv</code> return ignored, buffer uninitialised, fragmented reads unhandled
+        <span class="fix-lines">line 617</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p><code>recv</code> return value is discarded — a zero-byte or error read goes undetected and the uninitialised stack buffer is parsed as an HTTP request. A client that sends headers in two TCP segments gets a spurious 400 response.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>char buf[256];
+recv(client_fd, buf, sizeof(buf)-1, 0);
+// buf may be uninitialised on error
+buf[255] = '\0';</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After</div>
+          <pre>char buf[256] = {};   // zero-init
+auto n = recv(client_fd, buf,
+              sizeof(buf)-1, 0);
+if (n &lt;= 0) {
+    close(client_fd);
+    continue;
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── M7 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M7">
+    <div class="fix-header">
+      <span class="fix-id maj">M7</span>
+      <span class="fix-title">Health endpoint returns JSON 200 to any TCP connection — no path or method check
+        <span class="fix-lines">lines 617–633</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>Port scanners, load balancer probes, and keepalive connections all receive a full JSON health payload. No method or path is parsed — a <code>POST /exploit</code> gets the same 200 response as <code>GET /health</code>.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>// After recv — immediately send JSON:
+std::string resp = "HTTP/1.1 200 OK\r\n...";
+send(client_fd, resp.c_str(), ...);</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — check method and path</div>
+          <pre>std::string req(buf);
+bool ok = (req.rfind("GET ", 0) == 0
+    &amp;&amp; req.find(" /health ") != std::string::npos)
+       || (req.rfind("GET ", 0) == 0
+    &amp;&amp; req.find(" /health\r") != std::string::npos);
+if (!ok) {
+    std::string r404 =
+        "HTTP/1.1 404 Not Found\r\n"
+        "Content-Length: 0\r\n"
+        "Connection: close\r\n\r\n";
+    send(client_fd, r404.c_str(), r404.size(), 0);
+    close(client_fd); continue;
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── M8 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M8" style="opacity:.55;">
+    <div class="fix-header">
+      <span class="fix-id maj">M8</span>
+      <span class="fix-title"><code>check_disk_space</code> skips disk sampling when guard disabled — <code>disk_free_gb</code> always 0.0
+        <span class="fix-lines">lines 440–452</span>
+      </span>
+      <span class="applied">✓ Fixed by C5</span>
+    </div>
+    <div class="fix-body">
+      <p>Resolved by the C5 fix: the <code>min_bytes == 0</code> guard is now checked <em>after</em> the disk space sample, so <code>g_disk_free_gb_x10</code> is always populated regardless of config.</p>
+    </div>
+  </div>
+
+  <!-- ── M9 ──────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M9">
+    <div class="fix-header">
+      <span class="fix-id maj">M9</span>
+      <span class="fix-title">Wrong shutdown order — <code>mosquitto_disconnect</code> after <code>loop_stop</code>, DISCONNECT never sent
+        <span class="fix-lines">lines 1044–1046</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p><code>mosquitto_loop_stop(force=true)</code> kills the network thread before <code>mosquitto_disconnect</code> is called. The broker never receives a DISCONNECT packet and retains the session — QoS state, will messages, and subscriptions persist until the broker-side keepalive timeout.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>flush_thread.join();
+mosquitto_loop_stop(g_mosq, true); // kills thread
+mosquitto_disconnect(g_mosq);      // ← packet never sent</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — disconnect first, then stop</div>
+          <pre>flush_thread.join();
+mosquitto_disconnect(g_mosq);      // sends DISCONNECT
+// give the network thread time to flush the packet:
+std::this_thread::sleep_for(
+    std::chrono::milliseconds(100));
+mosquitto_loop_stop(g_mosq, false); // clean stop</pre>
+        </div>
+      </div>
+      <p style="color:var(--muted);font-size:.85rem;">This also interacts with M11 — see M11 for the combined correct shutdown sequence.</p>
+    </div>
+  </div>
+
+  <!-- ── M10 ─────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M10">
+    <div class="fix-header">
+      <span class="fix-id maj">M10</span>
+      <span class="fix-title"><code>g_mosq</code> plain pointer — data race between main thread write and network thread reads
+        <span class="fix-lines">lines 1005, 1038</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>The main thread writes <code>g_mosq</code> at startup and during reconnect; mosquitto's network thread reads it in callbacks. Under the C++ memory model this is a data race — formally undefined behaviour, practically a torn pointer read on 32-bit ARM.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before</div>
+          <pre>static struct mosquitto* g_mosq = nullptr;</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After</div>
+          <pre>static std::atomic&lt;struct mosquitto*&gt;
+    g_mosq{nullptr};</pre>
+        </div>
+      </div>
+      <p>All <code>g_mosq</code> reads become <code>g_mosq.load()</code> — a trivial mechanical change throughout. Callbacks that receive <code>g_mosq</code> as a parameter are unaffected.</p>
+    </div>
+  </div>
+
+  <!-- ── M11 ─────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M11">
+    <div class="fix-header">
+      <span class="fix-id maj">M11</span>
+      <span class="fix-title">Final flush runs before <code>mosquitto_loop_stop</code> — guaranteed data loss window on shutdown
+        <span class="fix-lines">lines 1041–1044</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>The flush thread exits when it sees <code>g_shutdown</code>. <code>mosquitto_loop_stop</code> is called <em>after</em> the final flush. Any messages delivered between the flush thread's last drain and <code>loop_stop</code> are silently discarded. This happens on every graceful shutdown.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before — wrong order</div>
+          <pre>g_shutdown = true;
+flush_thread.join();     // final flush here
+mosquitto_loop_stop(...);// messages still arrive
+mosquitto_disconnect(...);</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — stop ingest first</div>
+          <pre>g_shutdown.store(true);
+mosquitto_disconnect(g_mosq); // signal broker
+mosquitto_loop_stop(g_mosq, false); // drain network
+// NOW flush — catches everything:
+flush_thread.join();          // final flush</pre>
+        </div>
+      </div>
+      <p style="color:var(--muted);font-size:.85rem;">Combining M9 + M11: the correct shutdown sequence is <strong>set g_shutdown → disconnect → loop_stop → join flush thread</strong>.</p>
+    </div>
+  </div>
+
+  <!-- ── M12 ─────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M12">
+    <div class="fix-header">
+      <span class="fix-id maj">M12</span>
+      <span class="fix-title">No config validation — bad values cause spin-loops, silent drops, or wrong compression
+        <span class="fix-lines">lines 117–168</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p><code>flush_interval_seconds &lt;= 0</code> spins the flush thread at 100% CPU. <code>max_total_buffer_rows &lt;= 0</code> drops every single message. An invalid <code>compression</code> string falls through silently to Snappy.</p>
+      <div class="solo">
+        <div class="code-label note" style="border-radius:6px 6px 0 0;">Fix — add validate_config() called from main()</div>
+        <pre>static bool validate_config(const Config& cfg) {
+    bool ok = true;
+    if (cfg.flush_interval_seconds &lt;= 0) {
+        std::cerr &lt;&lt; "[config] flush_interval_seconds must be &gt; 0\n"; ok = false;
+    }
+    if (cfg.max_total_buffer_rows &lt;= 0) {
+        std::cerr &lt;&lt; "[config] max_total_buffer_rows must be &gt; 0\n"; ok = false;
+    }
+    static const std::set&lt;std::string&gt; valid_compression{
+        "snappy","gzip","brotli","lz4","zstd","none"};
+    if (!valid_compression.count(cfg.compression)) {
+        std::cerr &lt;&lt; "[config] unknown compression: " &lt;&lt; cfg.compression &lt;&lt; "\n"; ok = false;
+    }
+    return ok;
+}</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── M13 ─────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M13">
+    <div class="fix-header">
+      <span class="fix-id maj">M13</span>
+      <span class="fix-title"><code>source_type</code> injected into filesystem paths without sanitisation — path traversal
+        <span class="fix-lines">line 334</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>A rogue MQTT publisher using a topic like <code>../../etc/cron.d/evil/…</code> causes the writer to create files anywhere the process can write. Real attack surface if the broker is reachable from untrusted clients.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before — parse_topic()</div>
+          <pre>info.source_type = segment;
+// ← no validation, raw into fs path</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — sanitize on ingest</div>
+          <pre>// Reject traversal sequences and bare slashes
+static std::string sanitize_path_segment(
+        std::string s) {
+    // strip leading dots and slashes
+    auto bad = s.find_first_of("/\\");
+    if (bad != std::string::npos)
+        s = s.substr(0, bad);
+    if (s.empty() || s == "." || s == "..")
+        return "";
+    return s;
+}
+info.source_type =
+    sanitize_path_segment(segment);
+if (info.source_type.empty()) return std::nullopt;</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── M14 ─────────────────────────────────────────────────────────────── -->
+  <div class="fix" id="M14">
+    <div class="fix-header">
+      <span class="fix-id maj">M14</span>
+      <span class="fix-title">Integer scalars silently promoted to <code>double</code> — precision loss and duplicate Parquet columns
+        <span class="fix-lines">lines 289–292</span>
+      </span>
+    </div>
+    <div class="fix-body">
+      <p>In <code>parse_payload</code>, flat JSON integers not in the configured <code>int_cols</code> list fall through to the float path. Values &gt; 2<sup>53</sup> lose precision. Worse: if a JSON field name matches a topic-derived int column, the same field appears in both <code>row.ints</code> and <code>row.floats</code>, producing two Parquet columns with the same name.</p>
+      <div class="diff">
+        <div class="code-block">
+          <div class="code-label before">Before — parse_payload float fallback</div>
+          <pre>// integer field not in int_cols:
+row.floats[key] = (double)int_val;
+// ← may duplicate row.ints[key]</pre>
+        </div>
+        <div class="code-block">
+          <div class="code-label after">After — skip if already in ints</div>
+          <pre>// integer field not in int_cols:
+if (row.ints.count(key) == 0)
+    row.floats[key] = (double)int_val;
+// else: already stored as int64 — skip</pre>
+        </div>
+      </div>
+      <p>For the precision issue: widen <code>int_cols</code> config or add a configurable threshold; values above 2<sup>53</sup> that must round-trip exactly should always be in <code>int_cols</code>.</p>
     </div>
   </div>
 
