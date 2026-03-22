@@ -513,6 +513,12 @@ static std::atomic<uint64_t> g_last_flush_rows  {0};
 static std::atomic<uint64_t> g_last_flush_ms    {0};
 static std::atomic<uint64_t> g_disk_free_gb_x10 {0};
 static std::atomic<uint64_t> g_wal_replay_rows  {0};
+static std::atomic<uint64_t> g_ring_drops       {0};   // drops from ring full (on_message)
+
+// Declared here (before health_thread_fn) so health_thread_fn can read its
+// write_pos/read_pos counters.  The ring body is at global scope so the 100MB
+// slots array goes into BSS (zero-initialized, lazily paged in by the OS).
+static MqttRing g_mqtt_ring;
 
 // ---------------------------------------------------------------------------
 // Disk space guard (only active when min_free_bytes > 0)
@@ -709,15 +715,20 @@ static void health_thread_fn(int port) {
             send(cli, r404, strlen(r404), 0);
             close(cli); continue;
         }
+        uint64_t ring_used = g_mqtt_ring.write_pos.load(std::memory_order_relaxed) -
+                             g_mqtt_ring.read_pos.load(std::memory_order_relaxed);
         std::string body =
             "{\"msgs_received\":"    + std::to_string(g_msgs_received.load())     +
             ",\"buffer_rows\":"      + std::to_string(g_health_buffer_rows.load())+
             ",\"overflow_drops\":"   + std::to_string(g_overflow_drops.load())    +
+            ",\"ring_used\":"        + std::to_string(ring_used)                  +
+            ",\"ring_cap\":"         + std::to_string(MQRING_CAPACITY)            +
+            ",\"ring_drops\":"       + std::to_string(g_ring_drops.load())        +
+            ",\"wal_replay_rows\":"  + std::to_string(g_wal_replay_rows.load())   +
             ",\"flush_count\":"      + std::to_string(g_flush_count.load())       +
             ",\"total_rows_written\":"+ std::to_string(g_total_rows_written.load())+
             ",\"last_flush_rows\":"  + std::to_string(g_last_flush_rows.load())   +
             ",\"last_flush_ms\":"    + std::to_string(g_last_flush_ms.load())     +
-            ",\"wal_replay_rows\":"  + std::to_string(g_wal_replay_rows.load())   +
             ",\"disk_free_gb\":"     + std::to_string(g_disk_free_gb_x10.load() / 10.0) +
             "}\n";
         std::string resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -888,7 +899,7 @@ static std::atomic<struct mosquitto*> g_mosq{nullptr};  // M10: atomic — writt
 // Lock-free SPSC ring: on_message (MQTT thread) → parse_thread_fn (parse thread).
 // g_mqtt_stopped is set by main() after mosquitto_loop_stop() to tell the parse
 // thread that no more pushes will occur and it may drain to empty then exit.
-static MqttRing              g_mqtt_ring;
+// (g_mqtt_ring declared earlier so health_thread_fn can read write_pos/read_pos)
 static std::atomic<bool>     g_mqtt_stopped{false};
 
 static void on_connect(struct mosquitto*, void*, int rc) {
@@ -1050,8 +1061,7 @@ static void on_message(struct mosquitto*, void*, const struct mosquitto_message*
     );
 
     if (!ok) {
-        // Ring full — count as overflow (same semantics as buffer overflow)
-        auto drops = g_overflow_drops.fetch_add(1) + 1;
+        auto drops = g_ring_drops.fetch_add(1) + 1;
         if (drops == 1 || drops % 10000 == 0)
             std::cerr << "[ring] FULL — dropped " << drops << " msgs\n";
     }

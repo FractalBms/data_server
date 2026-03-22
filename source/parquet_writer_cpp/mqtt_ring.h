@@ -15,9 +15,9 @@
  *   JSON parsing.
  *
  * Sizing:
- *   16384 slots × ~390 bytes/slot ≈ 6 MB.
- *   At 80k msg/s, 16384 slots covers ~200 ms of burst — more than enough to
- *   absorb a flush-thread lock hold (which is O(1), a few µs).
+ *   262144 slots × ~390 bytes/slot ≈ 100 MB.
+ *   At 300k msg/s, 262144 slots covers ~870 ms of burst — enough to absorb
+ *   slow parquet flushes (observed up to ~300 ms on the torture server).
  */
 #pragma once
 
@@ -25,7 +25,7 @@
 #include <cstdint>
 #include <cstring>
 
-static constexpr uint32_t MQRING_CAPACITY  = 1u << 14;  // 16384 — must be power-of-2
+static constexpr uint32_t MQRING_CAPACITY  = 1u << 18;  // 262144 — must be power-of-2
 static constexpr uint32_t MQRING_TOPIC_MAX = 128;
 static constexpr uint32_t MQRING_PAY_MAX   = 256;
 

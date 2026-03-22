@@ -131,6 +131,9 @@ static void worker(WorkerCfg cfg) {
                             if (rc == MOSQ_ERR_NOMEM) {
                                 // Queue full — yield and retry
                                 std::this_thread::yield();
+                            } else if (rc == MOSQ_ERR_NO_CONN) {
+                                // Disconnected — wait for auto-reconnect
+                                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                             } else {
                                 fprintf(stderr, "publish err %d\n", rc);
                                 break;
