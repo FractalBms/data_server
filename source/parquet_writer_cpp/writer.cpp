@@ -510,7 +510,12 @@ static std::atomic<uint64_t> g_msgs_received    {0};
 static std::atomic<uint64_t> g_flush_count      {0};
 static std::atomic<uint64_t> g_total_rows_written{0};
 static std::atomic<uint64_t> g_last_flush_rows  {0};
-static std::atomic<uint64_t> g_last_flush_ms    {0};
+static std::atomic<uint64_t> g_last_flush_ms    {0};   // total (WAL + parquet) for last flush
+static std::atomic<uint64_t> g_last_wal_ms      {0};   // WAL portion of last flush
+static std::atomic<uint64_t> g_last_parquet_ms  {0};   // parquet portion of last flush
+static std::atomic<uint64_t> g_flush_max_ms     {0};   // worst-case total flush duration ever
+static std::atomic<uint64_t> g_flush_total_ms   {0};   // sum of all flush durations (÷ count = avg)
+static std::atomic<bool>     g_flush_active     {false}; // true while do_flush() is running
 static std::atomic<uint64_t> g_disk_free_gb_x10 {0};
 static std::atomic<uint64_t> g_wal_replay_rows  {0};
 static std::atomic<uint64_t> g_ring_drops       {0};   // drops from ring full (on_message)
@@ -715,8 +720,10 @@ static void health_thread_fn(int port) {
             send(cli, r404, strlen(r404), 0);
             close(cli); continue;
         }
-        uint64_t ring_used = g_mqtt_ring.write_pos.load(std::memory_order_relaxed) -
-                             g_mqtt_ring.read_pos.load(std::memory_order_relaxed);
+        uint64_t ring_used  = g_mqtt_ring.write_pos.load(std::memory_order_relaxed) -
+                              g_mqtt_ring.read_pos.load(std::memory_order_relaxed);
+        uint64_t fc         = g_flush_count.load();
+        uint64_t avg_flush  = fc > 0 ? g_flush_total_ms.load() / fc : 0;
         std::string body =
             "{\"msgs_received\":"    + std::to_string(g_msgs_received.load())     +
             ",\"buffer_rows\":"      + std::to_string(g_health_buffer_rows.load())+
@@ -724,11 +731,16 @@ static void health_thread_fn(int port) {
             ",\"ring_used\":"        + std::to_string(ring_used)                  +
             ",\"ring_cap\":"         + std::to_string(MQRING_CAPACITY)            +
             ",\"ring_drops\":"       + std::to_string(g_ring_drops.load())        +
-            ",\"wal_replay_rows\":"  + std::to_string(g_wal_replay_rows.load())   +
-            ",\"flush_count\":"      + std::to_string(g_flush_count.load())       +
-            ",\"total_rows_written\":"+ std::to_string(g_total_rows_written.load())+
-            ",\"last_flush_rows\":"  + std::to_string(g_last_flush_rows.load())   +
+            ",\"flush_active\":"     + std::to_string(g_flush_active.load() ? 1 : 0) +
+            ",\"flush_count\":"      + std::to_string(fc)                         +
             ",\"last_flush_ms\":"    + std::to_string(g_last_flush_ms.load())     +
+            ",\"last_wal_ms\":"      + std::to_string(g_last_wal_ms.load())       +
+            ",\"last_parquet_ms\":"  + std::to_string(g_last_parquet_ms.load())   +
+            ",\"flush_avg_ms\":"     + std::to_string(avg_flush)                  +
+            ",\"flush_max_ms\":"     + std::to_string(g_flush_max_ms.load())      +
+            ",\"last_flush_rows\":"  + std::to_string(g_last_flush_rows.load())   +
+            ",\"total_rows_written\":"+ std::to_string(g_total_rows_written.load())+
+            ",\"wal_replay_rows\":"  + std::to_string(g_wal_replay_rows.load())   +
             ",\"disk_free_gb\":"     + std::to_string(g_disk_free_gb_x10.load() / 10.0) +
             "}\n";
         std::string resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -764,9 +776,13 @@ static void do_flush(std::map<PartitionKey, Partition> to_flush,
         return;
     }
 
+    g_flush_active.store(true, std::memory_order_release);
+
     auto flush_ts    = std::chrono::system_clock::now();  // m6: single clock read for WAL+Parquet filenames
     auto flush_start = std::chrono::steady_clock::now();
-    uint64_t flush_rows = 0;
+    uint64_t flush_rows  = 0;
+    uint64_t wal_us      = 0;   // accumulated WAL write time for this flush
+    uint64_t parquet_us  = 0;   // accumulated parquet write time for this flush
     std::vector<Row> hot_rows;   // accumulated for hot file; empty if feature disabled
     const bool want_hot = !g_cfg->hot_file_path.empty();
 
@@ -780,7 +796,10 @@ static void do_flush(std::map<PartitionKey, Partition> to_flush,
         std::string wal_file;
         if (g_cfg->wal_enabled) {
             wal_file = wal_path_for(*g_cfg, key.source_type, key.partition_value, flush_ts);
+            auto t0 = std::chrono::steady_clock::now();
             auto ws = write_wal_ipc(wal_file, part.rows);
+            wal_us += std::chrono::duration_cast<std::chrono::microseconds>(
+                          std::chrono::steady_clock::now() - t0).count();
             if (!ws.ok()) {
                 std::cerr << "[wal] write failed (" << ws.ToString()
                           << ") — SKIPPING parquet flush for this partition\n";
@@ -793,6 +812,7 @@ static void do_flush(std::map<PartitionKey, Partition> to_flush,
         arrow::Status status;
         const int max_retries  = g_cfg->flush_max_retries;
         const int retry_base_s = g_cfg->flush_retry_base_seconds;
+        auto t0 = std::chrono::steady_clock::now();
         for (int attempt = 0; attempt <= max_retries; ++attempt) {
             if (attempt > 0) {
                 std::cerr << "[flush] retry " << attempt << "/" << max_retries
@@ -803,6 +823,8 @@ static void do_flush(std::map<PartitionKey, Partition> to_flush,
             if (status.ok()) break;
             std::cerr << "[flush] attempt " << attempt + 1 << " failed: " << status.ToString() << "\n";
         }
+        parquet_us += std::chrono::duration_cast<std::chrono::microseconds>(
+                          std::chrono::steady_clock::now() - t0).count();
         if (status.ok()) {
             flush_rows += part.rows.size();
             std::cout << "[flush] " << part.rows.size() << " rows → " << path << "\n";
@@ -824,8 +846,18 @@ static void do_flush(std::map<PartitionKey, Partition> to_flush,
     g_total_rows_written.fetch_add(flush_rows);
     g_last_flush_rows.store(flush_rows);
     g_last_flush_ms.store(static_cast<uint64_t>(elapsed_ms));
+    g_last_wal_ms.store(wal_us / 1000);
+    g_last_parquet_ms.store(parquet_us / 1000);
+    g_flush_total_ms.fetch_add(static_cast<uint64_t>(elapsed_ms));
+    // Update max with a simple CAS loop
+    uint64_t prev = g_flush_max_ms.load(std::memory_order_relaxed);
+    while (static_cast<uint64_t>(elapsed_ms) > prev &&
+           !g_flush_max_ms.compare_exchange_weak(prev, static_cast<uint64_t>(elapsed_ms),
+                                                  std::memory_order_relaxed)) {}
+    g_flush_active.store(false, std::memory_order_release);
     if (flush_rows > 0)
-        std::cout << "[flush] total=" << flush_rows << " rows in " << elapsed_ms << "ms\n";
+        std::cout << "[flush] total=" << flush_rows << " rows in " << elapsed_ms
+                  << "ms (wal=" << wal_us/1000 << "ms parquet=" << parquet_us/1000 << "ms)\n";
 
     // Hot file — flat merge of all partitions, written atomically via temp+rename.
     // Covers the gap between the last rsync and now for DuckDB queries on AWS.

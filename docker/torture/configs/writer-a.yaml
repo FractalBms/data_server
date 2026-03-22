@@ -16,7 +16,7 @@ health:
   enabled: true
   port: 8771
 wal:
-  enabled: true
+  enabled: false
   path: /wal
 guard:
   min_free_gb: 1.0
