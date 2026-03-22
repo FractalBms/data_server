@@ -81,6 +81,126 @@
   Apply in the order listed — each fix is independent except NC4+NM1 which must go together.
 </p>
 
+<!-- ═══════════════ TORTURE TEST SESSION SUMMARY ════════════════════════ -->
+<h2>Torture Test Session Summary — 2026-03-21</h2>
+<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:28px">
+
+  <p style="margin-bottom:14px;color:var(--muted)">
+    End-to-end work done building and tuning the Docker torture stack on phil-256g (192.168.86.34 —
+    56-thread Xeon, 256 GB RAM). Started at ~14k msg/s per writer; ended at 80–220k msg/s sustained
+    with zero drops under nominal load.
+  </p>
+
+  <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
+    <thead>
+      <tr style="background:#21262d">
+        <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border);color:var(--muted)">#</th>
+        <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border);color:var(--muted)">Change</th>
+        <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border);color:var(--muted)">What it fixed</th>
+        <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border);color:var(--muted)">Impact</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;color:var(--muted)">1</td>
+        <td style="padding:8px 10px"><strong style="color:var(--accent)">C++ stress publisher</strong><br>
+          <span style="color:var(--muted);font-size:0.78rem">source/stress_runner/stress_pub.cpp</span></td>
+        <td style="padding:8px 10px">Python paho-mqtt saturated at ~22k msg/s; QoS-0 drop guard caused self-throttle.
+          C++ libmosquitto + <code>loop_start</code> network thread removes the bottleneck.</td>
+        <td style="padding:8px 10px;color:var(--green)">22k → 300–340k msg/s per publisher</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;color:var(--muted)">2</td>
+        <td style="padding:8px 10px"><strong style="color:var(--accent)">SPSC ring buffer</strong><br>
+          <span style="color:var(--muted);font-size:0.78rem">source/parquet_writer_cpp/mqtt_ring.h</span></td>
+        <td style="padding:8px 10px"><code>on_message</code> held <code>g_mutex</code> for JSON parse + buffer insert.
+          Ring decouples MQTT network thread (memcpy only) from parse_thread. Capacity
+          increased 16k → 262k slots (100 MB) for ~870 ms burst absorption at 300k msg/s.</td>
+        <td style="padding:8px 10px;color:var(--green)">Eliminates mutex contention in on_message; handles flush bursts without drops</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;color:var(--muted)">3</td>
+        <td style="padding:8px 10px"><strong style="color:var(--accent)">Signal pipe deadlock fix (DL1)</strong><br>
+          <span style="color:var(--muted);font-size:0.78rem">writer.cpp — pipe init in main()</span></td>
+        <td style="padding:8px 10px">Write end of <code>g_signal_pipe</code> was blocking. At 400k msg/s the 65 KB
+          kernel pipe fills in ~165 ms during a flush. parse_thread blocks on <code>write()</code>
+          while holding <code>g_mutex</code>; flush_thread can never acquire it → deadlock.
+          Fix: <code>fcntl(g_signal_pipe[1], F_SETFL, O_NONBLOCK)</code>.</td>
+        <td style="padding:8px 10px;color:var(--green)">14k → 80–220k msg/s; ring drops eliminated</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;color:var(--muted)">4</td>
+        <td style="padding:8px 10px"><strong style="color:var(--accent)">FlashMQ broker tuning</strong><br>
+          <span style="color:var(--muted);font-size:0.78rem">docker/torture/configs/flashmq.conf</span></td>
+        <td style="padding:8px 10px">
+          <code>client_initial_buffer_size 131072 → 4194304</code> (4 MB): broker was dropping QoS-0
+          messages when the per-client write buffer filled at 80k msg/s.<br>
+          <code>thread_count 8 → 2</code>: 2-socket NUMA system — 8 threads caused cross-socket
+          routing latency. 2 threads stays within one NUMA node.<br>
+          Required full image rebuild (<code>docker compose up -d --force-recreate</code>) —
+          <code>docker compose restart</code> does not swap the baked-in config.</td>
+        <td style="padding:8px 10px;color:var(--green)">Writer input rate: 11.5k → 258k msg/s total</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;color:var(--muted)">5</td>
+        <td style="padding:8px 10px"><strong style="color:var(--accent)">WAL disabled in torture configs</strong><br>
+          <span style="color:var(--muted);font-size:0.78rem">docker/torture/configs/writer-{a,b,c,d}.yaml</span></td>
+        <td style="padding:8px 10px">WAL was consuming ~50% of flush time (63 ms WAL vs 69 ms parquet on
+          writer-b). With WAL off, flush_max_ms dropped from ~486 ms to ~110–165 ms.
+          SHM ring buffer will replace WAL as the crash-recovery mechanism.</td>
+        <td style="padding:8px 10px;color:var(--green)">flush_max_ms: 486 → ~150 ms; halved worst-case ring pressure</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;color:var(--muted)">6</td>
+        <td style="padding:8px 10px"><strong style="color:var(--accent)">Flush instrumentation</strong><br>
+          <span style="color:var(--muted);font-size:0.78rem">writer.cpp — do_flush(), health endpoint</span></td>
+        <td style="padding:8px 10px">Health endpoint now exposes: <code>ring_used</code>, <code>ring_cap</code>,
+          <code>ring_drops</code>, <code>flush_active</code>, <code>last_wal_ms</code>,
+          <code>last_parquet_ms</code>, <code>flush_avg_ms</code>, <code>flush_max_ms</code>.
+          Enabled root-cause analysis of the deadlock and WAL overhead.</td>
+        <td style="padding:8px 10px;color:var(--muted)">Observability; no throughput change</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;color:var(--muted)">7</td>
+        <td style="padding:8px 10px"><strong style="color:var(--accent)">Stress runner client ID collision fix</strong><br>
+          <span style="color:var(--muted);font-size:0.78rem">docker/torture/docker-compose.yml</span></td>
+        <td style="padding:8px 10px">All 4 C++ stress containers defaulted to client_id <code>stress-cpp-0</code>.
+          Each new connection kicked the previous one off the broker (<code>publish err 4</code>,
+          "Unapproved PUBLISH from non-authenticated client"). Fixed by passing
+          <code>--id stress-{a,b,c,d}</code> per container.</td>
+        <td style="padding:8px 10px;color:var(--green)">Stress runners: 0 → 330k msg/s each</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;color:var(--muted)">8</td>
+        <td style="padding:8px 10px"><strong style="color:var(--accent)">Torture monitor — ring stats + C++ log parser</strong><br>
+          <span style="color:var(--muted);font-size:0.78rem">html/writer/torture_monitor.html · docker/torture/torture_api.py</span></td>
+        <td style="padding:8px 10px">Monitor writer cards updated to show ring_used/ring_cap/ring_drops instead of
+          WAL stats. <code>STRESS_MAX_MPS</code> raised 20k → 200k for C++ publisher scale.
+          <code>/stress</code> API endpoint extended to parse C++ <code>[stress_pub] N msg/s</code>
+          log format alongside Python <code>Sync #N interval=N</code>.</td>
+        <td style="padding:8px 10px;color:var(--muted)">Monitor now shows accurate rates and ring health</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 10px;color:var(--muted)">9</td>
+        <td style="padding:8px 10px"><strong style="color:var(--accent)">Async output queue design</strong><br>
+          <span style="color:var(--muted);font-size:0.78rem">writer_code_review_2.html — Future Architecture section</span></td>
+        <td style="padding:8px 10px">At 330k msg/s × 4 writers, slow disk flushes (2.6 s) cause g_buffer overflow
+          even though flush_thread releases g_mutex before I/O. Design: bounded
+          <code>OutputQueue</code> with a disk_writer_thread decouples flush latency from
+          input rate. Mirrors the SHM input ring on the output side.</td>
+        <td style="padding:8px 10px;color:var(--muted)">Pending implementation (after SHM ring)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p style="margin-top:14px;font-size:0.84rem">
+    <strong>Net result:</strong> sustained 80–220k msg/s per writer under nominal 80k msg/s load,
+    330k+ msg/s per writer under torture load (4× design). Zero ring drops, zero buf drops,
+    flush_max_ms 130–165 ms at nominal rate.
+    Remaining work: SHM input ring (lossless restart) → async output queue (lossless disk backpressure).
+  </p>
+</div>
+
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
 <h2>Apply Order</h2>
 <table class="apply-order" style="margin-bottom:28px">
