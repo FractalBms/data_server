@@ -517,5 +517,116 @@ for (const auto& wp : wal_files) {                 // inner: fs::path — shadow
   </table>
 </div>
 
+<!-- ═══════════════ FUTURE ARCHITECTURE: OUTPUT QUEUE ════════════════════ -->
+<h2>Future Architecture — Async Output Queue</h2>
+<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:16px">
+
+  <h3 style="color:var(--accent);margin-bottom:10px">Motivation</h3>
+  <p style="margin-bottom:12px">
+    Torture-test observation (2026-03-21, 330k msg/s × 4 writers): writer-b hit
+    <code>flush_max_ms=2614ms</code> with <code>ring_drops=5M</code> and
+    <code>overflow_drops=195k</code>. Root cause: even though
+    <code>flush_thread</code> releases <code>g_mutex</code> before disk I/O,
+    <code>g_buffer</code> refills and exceeds <code>max_total_buffer_rows</code>
+    during a 2.6 s parquet write. The slow disk write directly sets the ceiling
+    on sustainable input rate.
+  </p>
+
+  <h3 style="color:var(--accent);margin-bottom:10px">Proposed Design</h3>
+  <p style="margin-bottom:8px">Decouple the flush decision from the actual disk write by inserting an output queue:</p>
+  <pre style="background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:14px;font-size:0.82rem;overflow-x:auto;margin-bottom:12px">
+parse_thread → g_buffer → flush_thread → [output queue] → disk_writer_thread → parquet
+                          (fast: slice      (Arrow tables,
+                           buffer, build     in-memory,
+                           Arrow table,      max depth N)
+                           enqueue &amp; return)
+  </pre>
+
+  <p style="margin-bottom:4px"><strong>flush_thread</strong> becomes very fast:</p>
+  <ol style="margin-left:20px;margin-bottom:12px;line-height:1.8">
+    <li>Acquire <code>g_mutex</code>, move rows to local vectors, release mutex.</li>
+    <li>Build Arrow table from rows (CPU-only, no I/O).</li>
+    <li>Push <code>FlushJob{key, table, output_path}</code> onto output queue.</li>
+    <li>Return immediately — g_buffer is free for new data.</li>
+  </ol>
+
+  <p style="margin-bottom:4px"><strong>disk_writer_thread</strong> drains the queue:</p>
+  <ol style="margin-left:20px;margin-bottom:12px;line-height:1.8">
+    <li>Pop <code>FlushJob</code> from queue.</li>
+    <li>Write Arrow table to parquet (slow I/O, no mutex held).</li>
+    <li>On success: delete WAL file if applicable. On failure: retain for recovery.</li>
+  </ol>
+
+  <h3 style="color:var(--accent);margin-bottom:10px">Memory Cost</h3>
+  <p style="margin-bottom:8px">
+    At torture-test load: <code>last_flush_rows = 321k rows × ~200 B/row Arrow ≈ 64 MB</code> per queued table.
+    With a max queue depth of 4 jobs: <strong>~256 MB peak</strong>. Trivial on phil-256g (256 GB),
+    acceptable on lp3 (1 GB — shallower cap of 2 jobs recommended).
+  </p>
+  <p style="margin-bottom:12px">
+    <strong>Backpressure:</strong> if the queue is full (disk persistently slow), flush_thread blocks on enqueue.
+    This propagates disk pressure up through g_buffer → ring → broker QoS-0 drops,
+    rather than silently discarding data mid-pipeline.
+  </p>
+
+  <h3 style="color:var(--accent);margin-bottom:10px">Implementation Sketch</h3>
+  <pre style="background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:14px;font-size:0.82rem;overflow-x:auto;margin-bottom:12px">struct FlushJob {
+    PartitionKey                  key;
+    std::shared_ptr&lt;arrow::Table&gt; table;
+    std::string                   output_path;
+    std::string                   wal_path;    // empty if WAL disabled
+};
+
+struct OutputQueue {
+    std::deque&lt;FlushJob&gt;    jobs;
+    std::mutex              mu;
+    std::condition_variable cv_consumer;
+    std::condition_variable cv_producer;
+    size_t                  max_depth = 4;
+    std::atomic&lt;bool&gt;       shutdown{false};
+
+    void push(FlushJob j) {
+        std::unique_lock lk(mu);
+        cv_producer.wait(lk, [&amp;]{ return jobs.size() &lt; max_depth || shutdown; });
+        jobs.push_back(std::move(j));
+        cv_consumer.notify_one();
+    }
+    bool pop(FlushJob&amp; out) {   // returns false on shutdown+empty
+        std::unique_lock lk(mu);
+        cv_consumer.wait(lk, [&amp;]{ return !jobs.empty() || shutdown; });
+        if (jobs.empty()) return false;
+        out = std::move(jobs.front()); jobs.pop_front();
+        cv_producer.notify_one();
+        return true;
+    }
+};</pre>
+
+  <h3 style="color:var(--accent);margin-bottom:10px">Relationship to SHM Input Ring</h3>
+  <p style="margin-bottom:8px">The output queue mirrors the SHM input ring — one absorbs burst on ingress, the other on egress:</p>
+  <pre style="background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:14px;font-size:0.82rem;overflow-x:auto;margin-bottom:12px">[MQTT broker]
+     │ QoS-0
+     ▼
+[SHM input ring]       ← absorbs broker burst; survives writer restart
+     │
+     ▼
+[parse_thread → g_buffer → flush_thread]
+     │
+     ▼
+[output queue]         ← absorbs disk I/O burst; decouples flush from write
+     │
+     ▼
+[disk_writer_thread → parquet files]</pre>
+  <p>Together they sandwich the writer core and isolate it from both input and output timing variance.</p>
+
+  <h3 style="color:var(--accent);margin-bottom:10px">Priority &amp; Short-Term Workaround</h3>
+  <p>
+    Implement <strong>after</strong> the SHM input ring (SHM-1 through SHM-6).
+    Once the full input→output latency budget is visible from live instrumentation,
+    the correct <code>max_depth</code> and thread count can be set empirically.<br><br>
+    Short-term: increase <code>max_total_buffer_rows</code> from 500k → 2M in writer configs
+    to buy more headroom against slow flushes without the architectural change.
+  </p>
+</div>
+
 </body>
 </html>
