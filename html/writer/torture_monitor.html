@@ -402,12 +402,31 @@ function updateStress(data) {
     const pct  = Math.min(100, (mps / STRESS_MAX_MPS) * 100);
     const col  = pct > 60 ? 'var(--green)' : pct > 20 ? 'var(--yellow)' : 'var(--red)';
 
+    // broker-confirmed delivery = writer-X ingestion rate (already calculated in rateHistory)
+    const writerHist = rateHistory[`writer-${s}`] || [];
+    const recv       = writerHist.length ? (writerHist[writerHist.length - 1] || 0) : 0;
+    const delivPct   = mps > 0 ? Math.round(recv / mps * 100) : 0;
+    const delivCol   = delivPct >= 80 ? 'var(--green)' : delivPct >= 50 ? 'var(--yellow)' : 'var(--red)';
+
     card.className = `scard ${ok ? 'ok' : 'err'}`;
     card.innerHTML = `
       <div class="scard-title">stress-${s}</div>
       <div class="scard-rate" style="color:${col}">${fmtNum(mps)}</div>
-      <div class="scard-unit">msg/s</div>
-      <div class="scard-bar"><div class="scard-fill" style="width:${pct}%;background:${col}"></div></div>`;
+      <div class="scard-unit">published msg/s</div>
+      <div class="scard-bar"><div class="scard-fill" style="width:${pct}%;background:${col}"></div></div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px">
+        <span style="font-size:0.75rem;color:var(--muted)">broker-confirmed</span>
+        <span style="font-family:Consolas,monospace;font-size:0.85rem;color:${recv>0?delivCol:'var(--muted)'}">
+          ${recv > 0 ? fmtNum(recv) + ' msg/s' : '—'}
+        </span>
+      </div>
+      ${recv > 0 && mps > 0 ? `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">
+        <div style="flex:1;height:3px;background:var(--border);border-radius:2px;margin-right:8px;overflow:hidden">
+          <div style="width:${Math.min(100,delivPct)}%;height:100%;background:${delivCol};border-radius:2px"></div>
+        </div>
+        <span style="font-size:0.75rem;color:${delivCol};font-family:Consolas,monospace">${delivPct}%</span>
+      </div>` : ''}`;
   });
 }
 
