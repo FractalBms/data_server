@@ -79,10 +79,20 @@ class Handler(BaseHTTPRequestHandler):
                         capture_output=True, text=True, timeout=5
                     )
                     lines = (r.stdout + r.stderr).splitlines()
+                    # C++ stress_pub: "[stress_pub]  79872 msg/s  (..."
+                    cpp_line = next(
+                        (l for l in reversed(lines) if "[stress_pub]" in l and "msg/s" in l), None
+                    )
+                    # Python stress_runner: "Sync #N: total=N interval=N"
                     sync_line = next(
                         (l for l in reversed(lines) if "Sync #" in l), None
                     )
-                    if sync_line:
+                    if cpp_line:
+                        m = re.search(r'\[\s*stress_pub\s*\]\s+(\d+)\s+msg/s', cpp_line)
+                        msgs_per_sec = int(m.group(1)) if m else 0
+                        result[key] = {"msgs_per_sec": msgs_per_sec, "ok": True,
+                                       "last_sync": cpp_line.strip()}
+                    elif sync_line:
                         m = re.search(r'interval=(\d+)', sync_line)
                         msgs_per_sec = round(int(m.group(1)) / SYNC_INTERVAL_S) if m else 0
                         result[key] = {"msgs_per_sec": msgs_per_sec, "ok": True,

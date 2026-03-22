@@ -41,7 +41,8 @@ services:
       broker:
         condition: service_healthy
     command: ["--host", "broker", "--port", "1883", "--prefix", "batteries_a",
-              "--racks", "12", "--modules", "8", "--cells", "52", "--conns", "1"]
+              "--racks", "12", "--modules", "8", "--cells", "52", "--conns", "1",
+              "--id", "stress-a"]
     restart: unless-stopped
 
   stress-b:
@@ -52,7 +53,8 @@ services:
       broker:
         condition: service_healthy
     command: ["--host", "broker", "--port", "1883", "--prefix", "batteries_b",
-              "--racks", "12", "--modules", "8", "--cells", "52", "--conns", "1"]
+              "--racks", "12", "--modules", "8", "--cells", "52", "--conns", "1",
+              "--id", "stress-b"]
     restart: unless-stopped
 
   stress-c:
@@ -63,7 +65,8 @@ services:
       broker:
         condition: service_healthy
     command: ["--host", "broker", "--port", "1883", "--prefix", "batteries_c",
-              "--racks", "12", "--modules", "8", "--cells", "52", "--conns", "1"]
+              "--racks", "12", "--modules", "8", "--cells", "52", "--conns", "1",
+              "--id", "stress-c"]
     restart: unless-stopped
 
   stress-d:
@@ -74,7 +77,8 @@ services:
       broker:
         condition: service_healthy
     command: ["--host", "broker", "--port", "1883", "--prefix", "batteries_d",
-              "--racks", "12", "--modules", "8", "--cells", "52", "--conns", "1"]
+              "--racks", "12", "--modules", "8", "--cells", "52", "--conns", "1",
+              "--id", "stress-d"]
     restart: unless-stopped
 
   # ── Writer A — baseline, always running ─────────────────────────────────
