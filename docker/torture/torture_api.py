@@ -17,7 +17,7 @@ Endpoints:
     POST /stack/restart    — docker compose restart (writers only)
 """
 import json, os, re, subprocess, sys, urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 PORT        = int(os.environ.get("TORTURE_API_PORT", 8780))
@@ -221,7 +221,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"torture_api listening on 0.0.0.0:{PORT}  (compose dir: {COMPOSE_DIR})",
           flush=True)
     try:

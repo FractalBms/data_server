@@ -17,7 +17,7 @@ Endpoints (API-compatible with torture_api.py where possible):
     POST /stack/restart    — restart writers only
 """
 import json, os, re, subprocess, sys, time, urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 PORT         = int(os.environ.get("SPARK_API_PORT", 8780))
@@ -223,7 +223,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"spark_api listening on 0.0.0.0:{PORT}  (repo: {REPO})", flush=True)
     try:
         server.serve_forever()
