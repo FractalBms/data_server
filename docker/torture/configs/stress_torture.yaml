@@ -6,11 +6,10 @@ mqtt:
 
 topology:
   sites: 2
-  racks: 4
-  modules: 4
+  racks: 12
+  modules: 8
   cells: 52
   mode: per_cell_item
 
 rate:
-  target_msgs_per_sec: 10000
   out_packet_guard: 20000

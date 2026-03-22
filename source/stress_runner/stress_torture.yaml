@@ -1,5 +1,5 @@
 # Stress runner config for torture test on phil-256g
-# Lighter topology: 2 sites × 4 racks × 4 modules × 52 cells = 1664 cells → ~13k msgs/sec
+# Full topology: 2 sites × 12 racks × 8 modules × 52 cells = 9984 cells → ~80k msgs/sec
 mqtt:
   host: broker
   port: 1883
@@ -28,10 +28,10 @@ projects:
   - project_id: 1
     sites:
       - site_id: 10
-        racks: 4
-        modules_per_rack: 4
+        racks: 12
+        modules_per_rack: 8
         cells_per_module: 52
       - site_id: 11
-        racks: 4
-        modules_per_rack: 4
+        racks: 12
+        modules_per_rack: 8
         cells_per_module: 52
