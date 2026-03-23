@@ -175,15 +175,20 @@
 </div>
 
 <!-- ── Stress rate control ── -->
-<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-  <span style="font-size:0.8rem;color:var(--muted)">Stress rate:</span>
-  <button class="btn btn-rate" id="srate-100k"  onclick="setStressPubRate(100000)">100k/s</button>
-  <button class="btn btn-rate" id="srate-200k"  onclick="setStressPubRate(200000)">200k/s</button>
-  <button class="btn btn-rate" id="srate-300k"  onclick="setStressPubRate(300000)">300k/s</button>
-  <button class="btn btn-rate" id="srate-500k"  onclick="setStressPubRate(500000)">500k/s</button>
-  <button class="btn btn-rate" id="srate-1m"    onclick="setStressPubRate(1000000)">1M/s</button>
-  <button class="btn btn-rate" id="srate-max"   onclick="setStressPubRate(0)">Max</button>
-  <span id="srate-status" style="font-size:0.78rem;color:var(--muted)"></span>
+<div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px 16px;margin-bottom:12px">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <span style="font-size:0.8rem;color:var(--muted);white-space:nowrap">Stress pub rate</span>
+    <input type="range" id="srate-slider" min="50000" max="1000000" step="50000" value="300000"
+           style="flex:1;min-width:160px;accent-color:var(--accent)"
+           oninput="updateSliderLabel()">
+    <span id="srate-label" style="font-size:1rem;font-family:monospace;color:var(--accent);min-width:70px;text-align:right">300k/s</span>
+    <button class="btn" id="srate-max-btn" onclick="setSliderMax()" title="Remove rate limit">Max</button>
+    <button class="btn" style="background:#238636;border-color:#238636;color:#fff" onclick="applyStressPubRate()">Set Rate</button>
+    <span id="srate-status" style="font-size:0.78rem;color:var(--muted)"></span>
+  </div>
+  <div style="font-size:0.72rem;color:var(--muted);margin-top:6px">
+    Total across all 4 publishers · ring safe below ~400k/s · Max = unlimited (may fill ring)
+  </div>
 </div>
 
 <!-- ── Rate gap note ── -->
@@ -696,18 +701,34 @@ function escHtml(s) {
 }
 
 // ── auto-connect on load ───────────────────────────────────────────────────
-// ── stress rate control ────────────────────────────────────────────────────
-const SRATE_IDS = {100000:'srate-100k', 200000:'srate-200k', 300000:'srate-300k',
-                   500000:'srate-500k', 1000000:'srate-1m', 0:'srate-max'};
+// ── stress rate slider ─────────────────────────────────────────────────────
+let g_srate_is_max = false;
 
-function setStressPubRate(rate) {
-  Object.values(SRATE_IDS).forEach(id => {
-    const b = document.getElementById(id);
-    if (b) b.classList.remove('active');
-  });
-  const active = document.getElementById(SRATE_IDS[rate]);
-  if (active) active.classList.add('active');
+function fmtRate(v) {
+  if (v === 0) return 'Max';
+  return v >= 1000000 ? (v/1000000).toFixed(1)+'M/s' : Math.round(v/1000)+'k/s';
+}
 
+function updateSliderLabel() {
+  g_srate_is_max = false;
+  const v = parseInt(document.getElementById('srate-slider').value);
+  const lbl = document.getElementById('srate-label');
+  if (lbl) lbl.textContent = fmtRate(v);
+  const maxBtn = document.getElementById('srate-max-btn');
+  if (maxBtn) maxBtn.classList.remove('active');
+}
+
+function setSliderMax() {
+  g_srate_is_max = true;
+  const lbl = document.getElementById('srate-label');
+  if (lbl) lbl.textContent = 'Max';
+  const maxBtn = document.getElementById('srate-max-btn');
+  if (maxBtn) maxBtn.classList.add('active');
+}
+
+function applyStressPubRate() {
+  const rate = g_srate_is_max ? 0
+             : parseInt(document.getElementById('srate-slider').value);
   const st = document.getElementById('srate-status');
   if (st) st.textContent = 'setting…';
 
@@ -718,8 +739,8 @@ function setStressPubRate(rate) {
   })
   .then(r => r.json())
   .then(d => {
-    if (st) st.textContent = d.ok ? `→ ${rate ? (rate/1000)+'k' : 'max'}/s` : 'failed';
-    log(`stress rate → ${rate || 'max'} msg/s: ${d.ok ? 'OK' : 'failed'}`, d.ok ? 'ok' : 'err');
+    if (st) st.textContent = d.ok ? `✓ set to ${fmtRate(rate)}` : 'failed';
+    log(`stress rate → ${fmtRate(rate)}: ${d.ok ? 'OK' : 'failed'}`, d.ok ? 'ok' : 'err');
   })
   .catch(e => { if (st) st.textContent = 'error'; log('stress/restart: ' + e.message, 'err'); });
 }

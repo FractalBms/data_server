@@ -25,6 +25,7 @@ COMPOSE_DIR = os.path.join(os.path.dirname(__file__))
 WRITER_PORTS = {"a": 8771, "b": 8772, "c": 8773, "d": 8774}
 STRESS_CONTAINERS = ["torture_stress_a", "torture_stress_b",
                      "torture_stress_c", "torture_stress_d"]
+g_stress_rate = 0   # 0 = unlimited; updated by /stress/restart
 SYNC_INTERVAL_S = 10.0   # matches stress_runner default sync_interval_seconds
 CORS = {
     "Access-Control-Allow-Origin":  "*",
@@ -125,6 +126,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/system":
             self.respond({
                 "host":           "phil-256g",
+                "stress_rate":    g_stress_rate,
                 "ip":             "192.168.86.34",
                 "cpu":            "2× Intel Xeon E5-2690 v4 (14c/28t each, 56 threads total)",
                 "ram_gb":         256,
@@ -201,6 +203,34 @@ class Handler(BaseHTTPRequestHandler):
                                    ["writer-a", "writer-b", "writer-c", "writer-d"])
             r = compose("restart", *services)
             self.respond({"ok": r.returncode == 0})
+
+        elif path == "/stress/restart":
+            global g_stress_rate
+            rate = int(payload.get("rate", g_stress_rate))
+            g_stress_rate = rate
+            # Stop and remove existing stress containers, then restart with rate
+            for cname in STRESS_CONTAINERS:
+                subprocess.run(["docker", "stop", cname], capture_output=True)
+                subprocess.run(["docker", "rm",   cname], capture_output=True)
+            ok = True
+            for letter, cname in zip("abcd", STRESS_CONTAINERS):
+                cmd = [
+                    "docker", "run", "-d",
+                    "--name", cname,
+                    "--network", "torture_torture",
+                    "--restart", "unless-stopped",
+                    "stress-pub:torture",
+                    "--host", "broker", "--port", "1883",
+                    "--prefix", f"batteries_{letter}",
+                    "--racks", "12", "--modules", "8", "--cells", "52",
+                    "--conns", "1", "--id", f"stress-{letter}",
+                ]
+                if rate > 0:
+                    cmd += ["--rate", str(rate)]
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                if r.returncode != 0:
+                    ok = False
+            self.respond({"ok": ok, "rate": rate})
 
         else:
             self.respond({"error": f"unknown path: {path}"}, 404)
