@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 PORT         = int(os.environ.get("SPARK_API_PORT", 8780))
 WRITER_PORTS = {"a": 8771, "b": 8772, "c": 8773, "d": 8774}
 REPO         = os.path.expanduser("~/work/gen-ai/data_server")
+g_stress_rate = 0   # 0 = unlimited; updated by /stress/restart
 LOG_DIR      = "/tmp"
 
 LOG_MAP = {
@@ -157,7 +158,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond({"service": service, "lines": [str(e)]})
 
         elif path == "/system":
-            self.respond(SYSTEM_INFO)
+            info = dict(SYSTEM_INFO)
+            info["stress_rate"] = g_stress_rate
+            self.respond(info)
 
         elif path == "/health":
             self.respond({"status": "ok", "api": "spark_api"})
@@ -204,6 +207,25 @@ class Handler(BaseHTTPRequestHandler):
                         subprocess.Popen([writer_bin, "--config", cfg],
                                          stdout=lf, stderr=lf)
             self.respond({"ok": True})
+
+        elif path == "/stress/restart":
+            global g_stress_rate
+            rate = int(payload.get("rate", g_stress_rate))
+            g_stress_rate = rate
+            stress_bin = "/tmp/stress_pub"
+            subprocess.run(["pkill", "-f", "stress_pub"], capture_output=True)
+            time.sleep(0.5)
+            for x in ["a", "b", "c", "d"]:
+                log = f"/tmp/stress-spark-{x}.log"
+                cmd = [stress_bin, "--host", "localhost", "--port", "1883",
+                       "--prefix", f"batteries_{x}",
+                       "--racks", "12", "--modules", "8", "--cells", "52",
+                       "--conns", "1", "--id", f"stress-{x}"]
+                if rate > 0:
+                    cmd += ["--rate", str(rate)]
+                with open(log, "a") as lf:
+                    subprocess.Popen(cmd, stdout=lf, stderr=lf)
+            self.respond({"ok": True, "rate": rate})
 
         else:
             self.respond({"error": f"unknown path: {path}"}, 404)

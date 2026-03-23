@@ -20,6 +20,7 @@
  *     --conns   <n>          parallel MQTT connections (default: 1)
  *     --qos     <0|1>        QoS level        (default: 0)
  *     --id      <client_id>  base client ID   (default: stress-cpp)
+ *     --rate    <n>          target total msgs/sec across all workers (default: 0 = unlimited)
  */
 
 #include <mosquitto.h>
@@ -66,6 +67,7 @@ struct WorkerCfg {
     int         qos;
     std::string client_id;
     int         worker_id;
+    int         rate_per_worker = 0;
 };
 
 static void worker(WorkerCfg cfg) {
@@ -107,6 +109,7 @@ static void worker(WorkerCfg cfg) {
     uint64_t loop_count = 0;
 
     while (!g_stop.load()) {
+        auto sweep_start = std::chrono::steady_clock::now();
         double ts = ts_base + loop_count * 0.001;   // synthetic 1ms increment
 
         for (int r = 0; r < cfg.racks && !g_stop.load(); ++r) {
@@ -144,6 +147,18 @@ static void worker(WorkerCfg cfg) {
                 }
             }
         }
+
+        // Rate limiting: sleep remainder of sweep window if needed
+        if (cfg.rate_per_worker > 0) {
+            int    msgs_per_sweep = cfg.racks * cfg.modules * cfg.cells * 7;
+            double target_s  = (double)msgs_per_sweep / cfg.rate_per_worker;
+            double elapsed_s = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - sweep_start).count();
+            if (elapsed_s < target_s)
+                std::this_thread::sleep_for(
+                    std::chrono::duration<double>(target_s - elapsed_s));
+        }
+
         ++loop_count;
     }
 
@@ -156,7 +171,7 @@ static void worker(WorkerCfg cfg) {
 // Stats printer
 // ---------------------------------------------------------------------------
 
-static void stats_loop(int racks, int modules, int cells) {
+static void stats_loop(int racks, int modules, int cells, int rate_total) {
     uint64_t last = 0;
     auto     t_last = std::chrono::steady_clock::now();
 
@@ -167,8 +182,14 @@ static void stats_loop(int racks, int modules, int cells) {
         double   dt  = std::chrono::duration<double>(now - t_last).count();
         uint64_t mps = static_cast<uint64_t>((cur - last) / dt);
         int      total_cells = racks * modules * cells;
-        fprintf(stdout, "[stress_pub] %7lu msg/s  (%d cells × 7 fields = %d expected/s)\n",
-                (unsigned long)mps, total_cells, total_cells * 7);
+        if (rate_total > 0) {
+            fprintf(stdout, "[stress_pub] %7lu msg/s  (%d cells × 7 fields = %d expected/s)"
+                    "  target=%d/s\n",
+                    (unsigned long)mps, total_cells, total_cells * 7, rate_total);
+        } else {
+            fprintf(stdout, "[stress_pub] %7lu msg/s  (%d cells × 7 fields = %d expected/s)\n",
+                    (unsigned long)mps, total_cells, total_cells * 7);
+        }
         fflush(stdout);
         last   = cur;
         t_last = now;
@@ -189,17 +210,19 @@ int main(int argc, char* argv[]) {
     int         conns  = 1;
     int         qos    = 0;
     std::string base_id = "stress-cpp";
+    int         rate_total = 0;
 
     for (int i = 1; i < argc; ++i) {
-        if      (!strcmp(argv[i], "--host")    && i+1<argc) host    = argv[++i];
-        else if (!strcmp(argv[i], "--port")    && i+1<argc) port    = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--prefix")  && i+1<argc) prefix  = argv[++i];
-        else if (!strcmp(argv[i], "--racks")   && i+1<argc) racks   = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--modules") && i+1<argc) modules = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--cells")   && i+1<argc) cells   = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--conns")   && i+1<argc) conns   = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--qos")     && i+1<argc) qos     = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--id")      && i+1<argc) base_id = argv[++i];
+        if      (!strcmp(argv[i], "--host")    && i+1<argc) host       = argv[++i];
+        else if (!strcmp(argv[i], "--port")    && i+1<argc) port       = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--prefix")  && i+1<argc) prefix     = argv[++i];
+        else if (!strcmp(argv[i], "--racks")   && i+1<argc) racks      = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--modules") && i+1<argc) modules    = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--cells")   && i+1<argc) cells      = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--conns")   && i+1<argc) conns      = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--qos")     && i+1<argc) qos        = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--id")      && i+1<argc) base_id    = argv[++i];
+        else if (!strcmp(argv[i], "--rate")    && i+1<argc) rate_total = atoi(argv[++i]);
     }
 
     mosquitto_lib_init();
@@ -208,29 +231,33 @@ int main(int argc, char* argv[]) {
 
     fprintf(stdout,
         "[stress_pub] host=%s:%d  prefix=%s  %d×%d×%d cells  "
-        "%d conns  qos=%d\n",
+        "%d conns  qos=%d  rate=%s\n",
         host.c_str(), port, prefix.c_str(),
-        racks, modules, cells, conns, qos);
+        racks, modules, cells, conns, qos,
+        rate_total > 0 ? std::to_string(rate_total).c_str() : "unlimited");
     fflush(stdout);
 
     // Launch worker threads (one per connection)
+    int rate_per_worker = (rate_total > 0 && conns > 0) ? rate_total / conns : 0;
+
     std::vector<std::thread> workers;
     workers.reserve(conns);
     for (int i = 0; i < conns; ++i) {
         WorkerCfg cfg;
-        cfg.host      = host;
-        cfg.port      = port;
-        cfg.prefix    = prefix;
-        cfg.racks     = racks;
-        cfg.modules   = modules;
-        cfg.cells     = cells;
-        cfg.qos       = qos;
-        cfg.client_id = base_id + "-" + std::to_string(i);
-        cfg.worker_id = i;
+        cfg.host            = host;
+        cfg.port            = port;
+        cfg.prefix          = prefix;
+        cfg.racks           = racks;
+        cfg.modules         = modules;
+        cfg.cells           = cells;
+        cfg.qos             = qos;
+        cfg.client_id       = base_id + "-" + std::to_string(i);
+        cfg.worker_id       = i;
+        cfg.rate_per_worker = rate_per_worker;
         workers.emplace_back(worker, cfg);
     }
 
-    std::thread stats(stats_loop, racks, modules, cells);
+    std::thread stats(stats_loop, racks, modules, cells, rate_total);
 
     for (auto& w : workers) w.join();
     g_stop.store(true);

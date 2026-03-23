@@ -27,6 +27,7 @@
   .btn:hover { border-color: var(--accent); color: var(--accent); }
   .btn.danger:hover { border-color: var(--red); color: var(--red); }
   .btn.active { background: var(--green-bg); border-color: var(--green); color: var(--green); }
+  .btn-rate.active { background: #1a3d1a; border-color: var(--green); color: var(--green); }
   .btn.needs-action { border-color: var(--yellow); color: var(--yellow);
                       animation: pulse-warn 1.2s ease-in-out infinite; }
   @keyframes pulse-warn {
@@ -171,6 +172,18 @@
   <div class="scard off" id="scard-b"><div class="scard-title">stress-b</div><div class="scard-rate">—</div><div class="scard-unit">msg/s</div></div>
   <div class="scard off" id="scard-c"><div class="scard-title">stress-c</div><div class="scard-rate">—</div><div class="scard-unit">msg/s</div></div>
   <div class="scard off" id="scard-d"><div class="scard-title">stress-d</div><div class="scard-rate">—</div><div class="scard-unit">msg/s</div></div>
+</div>
+
+<!-- ── Stress rate control ── -->
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+  <span style="font-size:0.8rem;color:var(--muted)">Stress rate:</span>
+  <button class="btn btn-rate" id="srate-100k"  onclick="setStressPubRate(100000)">100k/s</button>
+  <button class="btn btn-rate" id="srate-200k"  onclick="setStressPubRate(200000)">200k/s</button>
+  <button class="btn btn-rate" id="srate-300k"  onclick="setStressPubRate(300000)">300k/s</button>
+  <button class="btn btn-rate" id="srate-500k"  onclick="setStressPubRate(500000)">500k/s</button>
+  <button class="btn btn-rate" id="srate-1m"    onclick="setStressPubRate(1000000)">1M/s</button>
+  <button class="btn btn-rate" id="srate-max"   onclick="setStressPubRate(0)">Max</button>
+  <span id="srate-status" style="font-size:0.78rem;color:var(--muted)"></span>
 </div>
 
 <!-- ── Rate gap note ── -->
@@ -683,6 +696,34 @@ function escHtml(s) {
 }
 
 // ── auto-connect on load ───────────────────────────────────────────────────
+// ── stress rate control ────────────────────────────────────────────────────
+const SRATE_IDS = {100000:'srate-100k', 200000:'srate-200k', 300000:'srate-300k',
+                   500000:'srate-500k', 1000000:'srate-1m', 0:'srate-max'};
+
+function setStressPubRate(rate) {
+  Object.values(SRATE_IDS).forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.classList.remove('active');
+  });
+  const active = document.getElementById(SRATE_IDS[rate]);
+  if (active) active.classList.add('active');
+
+  const st = document.getElementById('srate-status');
+  if (st) st.textContent = 'setting…';
+
+  fetch(apiBase() + '/stress/restart', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rate}),
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (st) st.textContent = d.ok ? `→ ${rate ? (rate/1000)+'k' : 'max'}/s` : 'failed';
+    log(`stress rate → ${rate || 'max'} msg/s: ${d.ok ? 'OK' : 'failed'}`, d.ok ? 'ok' : 'err');
+  })
+  .catch(e => { if (st) st.textContent = 'error'; log('stress/restart: ' + e.message, 'err'); });
+}
+
 window.addEventListener('load', () => {
   // Start paused — let user hit Connect, or auto-connect if host reachable
   log('Ready. Press Connect or adjust host/port.', '');
