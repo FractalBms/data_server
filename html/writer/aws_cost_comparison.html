@@ -1250,6 +1250,55 @@
 <h2 id="querycost">12 · Sample Query Cost — Max Cell Voltage</h2>
 
 <div class="section">
+
+  <!-- ── What is Athena? ─────────────────────────────────────────── -->
+  <div style="background:#0c2d6b22;border:1px solid #1a4d9e;border-radius:8px;padding:16px 20px;margin-bottom:20px">
+    <div style="color:var(--accent);font-weight:700;font-size:0.9rem;margin-bottom:8px">What is AWS Athena?</div>
+    <p style="margin-bottom:8px">
+      Athena is Amazon's <strong>serverless SQL query service</strong>. You point it at Parquet
+      files sitting on S3, run a standard SQL query, and Athena automatically spins up a
+      temporary fleet of ~200 worker nodes that scan the files in parallel. When the query
+      finishes the fleet shuts down. There is no server to provision, patch, or pay for
+      when idle — you are billed only for the bytes scanned ($5 per TB).
+    </p>
+    <p style="margin-bottom:8px">
+      Because it parallelises across hundreds of nodes simultaneously, Athena finishes scans
+      that would take a single machine hours in a matter of minutes. The same SQL query that
+      runs on a local DuckDB installation also runs unchanged on Athena — the only difference
+      is where the compute happens.
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <div style="background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:12px">
+        <div style="font-size:0.78rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">Athena</div>
+        <ul style="font-size:0.82rem;margin-bottom:0">
+          <li>No server — fully managed by AWS</li>
+          <li>~200 parallel workers per query</li>
+          <li>50 TB scanned in ~15 minutes</li>
+          <li>Pay per query: $5/TB scanned</li>
+          <li>Idle cost: <strong>$0</strong></li>
+          <li>Same SQL as DuckDB — no relearning</li>
+        </ul>
+      </div>
+      <div style="background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:12px">
+        <div style="font-size:0.78rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">DuckDB local (spark1 / phil-dev)</div>
+        <ul style="font-size:0.82rem;margin-bottom:0">
+          <li>Runs on your own machine</li>
+          <li>One machine, all available cores</li>
+          <li>50 TB scanned in ~3–5 hours</li>
+          <li>Pay per query: <strong>$0</strong></li>
+          <li>Idle cost: $0 (already running)</li>
+          <li>Identical SQL syntax</li>
+        </ul>
+      </div>
+    </div>
+    <p style="font-size:0.82rem;color:var(--muted);margin-top:10px;margin-bottom:0">
+      <strong>Rule of thumb:</strong> use local DuckDB for day-to-day queries on recent data
+      (fast, free, no internet required). Use Athena for occasional large historical scans
+      where waiting hours is impractical — the $25–$250 cost is a one-off, not a monthly charge.
+    </p>
+  </div>
+  <!-- ── end Athena explainer ──────────────────────────────────────── -->
+
   <p>
     A concrete query is the clearest way to compare systems. The query below retrieves
     the <strong>daily maximum cell voltage for each of 47 BMS units</strong> — a standard
