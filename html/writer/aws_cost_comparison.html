@@ -138,6 +138,7 @@
   <a href="#processing">Processing costs</a>
   <a href="#dataloss">Data loss risk</a>
   <a href="#influx3">InfluxDB 3</a>
+  <a href="#querycost">Query cost</a>
   <a href="#notes">Notes &amp; caveats</a>
 </div>
 
@@ -1246,7 +1247,357 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════ -->
-<h2 id="notes">12 · Notes and Caveats</h2>
+<h2 id="querycost">12 · Sample Query Cost — Max Cell Voltage</h2>
+
+<div class="section">
+  <p>
+    A concrete query is the clearest way to compare systems. The query below retrieves
+    the <strong>daily maximum cell voltage for each of 47 BMS units</strong> — a standard
+    degradation-monitoring query that a BMS engineer or automated report would run
+    regularly. It requires scanning the full time range and aggregating across all units.
+  </p>
+
+  <h3>The query</h3>
+  <div class="two-col">
+    <div class="box">
+      <div class="box-title">Parquet / DuckDB / AWS Athena (SQL)</div>
+      <pre style="background:#0d0d1a;border:1px solid #1a1a4a;font-size:0.78rem;padding:12px;border-radius:6px;overflow-x:auto">-- works unchanged on local DuckDB, Athena, or InfluxDB 3.0
+SELECT
+    regexp_extract(filename, 'unit/([^/]+)', 1) AS unit_id,
+    strftime(to_timestamp(ts), '%Y-%m-%d')      AS day,
+    MAX(value_f)                                AS max_cell_voltage
+FROM read_parquet('s3://bucket/parquet/unit/**/*.parquet')
+WHERE point_name = 'Batt1_BMS_Max_cell_voltage'
+GROUP BY unit_id, day
+ORDER BY unit_id, day;</pre>
+    </div>
+    <div class="box">
+      <div class="box-title">InfluxDB 2.x (Flux — required for InfluxDB 2.x)</div>
+      <pre style="background:#0d0d1a;border:1px solid #1a1a4a;font-size:0.78rem;padding:12px;border-radius:6px;overflow-x:auto">// Flux has no concept of column projection —
+// entire series records are returned before filtering
+from(bucket: "bms_data")
+  |> range(start: -1y)
+  |> filter(fn: (r) =>
+       r._measurement == "unit" and
+       r.topic =~ /Max_cell_voltage/)
+  |> aggregateWindow(
+       every: 1d, fn: max, createEmpty: false)
+  |> group(columns: ["unit_id"])</pre>
+      <p style="font-size:0.78rem;color:var(--muted);margin-top:8px">
+        Note: Flux's <code>aggregateWindow</code> materialises the full result set in memory
+        before returning. For 10 years of data across 47 units this can exhaust the
+        InfluxDB server's memory budget.
+      </p>
+    </div>
+  </div>
+
+  <h3>What the query scans</h3>
+  <p>
+    The efficiency of each system depends on how well it can skip data that does not match
+    <code>point_name = 'Batt1_BMS_Max_cell_voltage'</code>. One year of Longbow data at
+    81,420 msg/s contains ~2.57 trillion rows and ~24.5 TB of Parquet. The max cell voltage
+    metric is one of 1,770 unique topics — roughly 1/1,770th of all rows.
+  </p>
+  <table>
+    <thead><tr><th>System</th><th>Index / pruning mechanism</th><th>Bytes actually read (1 yr)</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>InfluxDB 2.x (TSM)</strong></td>
+        <td class="ok">Series index: maps tag set directly to TSM block offsets. Only the 47
+            <code>Max_cell_voltage</code> series are opened — all other 1,723 topics are not
+            touched.</td>
+        <td class="ok">~6 GB<br><span class="dim" style="font-size:0.76rem">46 rows/s for this topic × 86,400 × 365 × ~4 B/value compressed</span></td>
+      </tr>
+      <tr>
+        <td><strong>InfluxDB 3.0 Enterprise (IOx)</strong></td>
+        <td class="warn">Catalog knows which Parquet files cover which time ranges (time pruning
+            ✓) but files are time-sorted, not field-sorted. Cannot skip files that don't
+            contain the target field — must read the <code>point_name</code> and
+            <code>value_f</code> columns from every file in the range.</td>
+        <td class="warn">~5 TB (column projection: point_name + value_f ≈ 20% of 24.5 TB)</td>
+      </tr>
+      <tr>
+        <td><strong>InfluxDB Cloud Serverless</strong></td>
+        <td class="warn">Same IOx engine as above but running on shared InfluxData
+            infrastructure — Athena-scale parallelism not guaranteed.</td>
+        <td class="warn">~5 TB (same column projection)</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + Athena</strong></td>
+        <td class="warn">Hive directory pruning on date (time pruning ✓). Column projection
+            reads only point_name + value_f. Row group min/max stats checked but field values
+            are interleaved in every row group so no row group is skipped.</td>
+        <td class="warn">~5 TB (same as IOx; Athena compensates with ~200-node parallelism)</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + DuckDB (local or EC2)</strong></td>
+        <td class="warn">Same pruning as Athena. DuckDB's async S3 reader uses multiple
+            parallel threads but is limited to one machine's network and CPU bandwidth.</td>
+        <td class="warn">~5 TB</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-info" style="margin-top:8px">
+    <strong>InfluxDB 2.x series index advantage:</strong> for this specific narrow query
+    (one metric, fixed time range) InfluxDB 2.x scans ~833× less data than any
+    Parquet-based approach. This advantage only exists for queries that map cleanly to
+    a fixed set of series. For cross-metric analytics — e.g. "find all cells where
+    max_voltage &gt; 4.2 V within 5 minutes of temperature &gt; 35 °C" — InfluxDB 2.x
+    must scan all series and loses this advantage entirely. Parquet excels at these
+    join-style analytical queries.
+  </div>
+
+  <h3>1-year query — cost and runtime comparison</h3>
+  <p>Returns daily max cell voltage per unit for calendar year 2024 (2.57 T rows, 24.5 TB Parquet).</p>
+  <table>
+    <thead>
+      <tr>
+        <th>System</th>
+        <th>Where query runs</th>
+        <th>Data scanned</th>
+        <th>Runtime (est.)</th>
+        <th class="r">AWS cost</th>
+        <th class="r">Compute cost</th>
+        <th class="r">Total cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>InfluxDB 2.x</strong></td>
+        <td>EC2 r5.2xlarge (always on)</td>
+        <td class="ok">~6 GB (series index)</td>
+        <td class="ok">~15 s</td>
+        <td class="r ok">$0</td>
+        <td class="r dim">EC2 already paid</td>
+        <td class="r ok">$0 *</td>
+      </tr>
+      <tr>
+        <td><strong>InfluxDB 3.0 Enterprise</strong></td>
+        <td>EC2 m5.xlarge (always on)</td>
+        <td class="warn">~5 TB (col. proj.)</td>
+        <td class="warn">~30–50 min</td>
+        <td class="r ok">$0</td>
+        <td class="r dim">EC2 already paid</td>
+        <td class="r warn">$0 * †</td>
+      </tr>
+      <tr>
+        <td><strong>InfluxDB Cloud Serverless</strong></td>
+        <td>Shared InfluxData cloud</td>
+        <td class="warn">~5 TB</td>
+        <td class="warn">~30–60 min</td>
+        <td class="r err">$25.00</td>
+        <td class="r ok">—</td>
+        <td class="r err">$25.00</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + AWS Athena</strong></td>
+        <td>Athena (serverless, ~200 nodes)</td>
+        <td class="warn">~5 TB</td>
+        <td class="ok">~90 s</td>
+        <td class="r warn">$25.00</td>
+        <td class="r ok">—</td>
+        <td class="r warn">$25.00</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + DuckDB on EC2</strong><br>
+            <span class="dim" style="font-size:0.76rem">c5.4xlarge: 16 vCPU, $0.68/hr</span></td>
+        <td>Dedicated query EC2 (on-demand)</td>
+        <td class="warn">~5 TB</td>
+        <td class="warn">~25–35 min</td>
+        <td class="r ok">$0</td>
+        <td class="r warn">~$0.32</td>
+        <td class="r ok">$0.32</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + DuckDB local</strong><br>
+            <span class="dim" style="font-size:0.76rem">spark1: 20-core ARM, NVMe 3.3 GB/s</span></td>
+        <td>On-premise edge machine</td>
+        <td class="warn">~5 TB (local disk)</td>
+        <td class="warn">~10–15 min</td>
+        <td class="r ok">$0</td>
+        <td class="r ok">$0</td>
+        <td class="r ok">$0</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + DuckDB local</strong><br>
+            <span class="dim" style="font-size:0.76rem">30-day local cache + S3 for older</span></td>
+        <td>Local for recent; Athena for older</td>
+        <td class="ok">~600 GB local + older on S3</td>
+        <td class="ok">&lt;2 min (last 30 days free)<br>$25 if querying full year</td>
+        <td class="r ok">$0 (recent)</td>
+        <td class="r ok">$0</td>
+        <td class="r ok">$0 (recent)</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="font-size:0.78rem;color:var(--muted);margin-top:6px">
+    * "EC2 already paid" means no marginal cost per query — but the always-on EC2 is a fixed
+    monthly charge regardless of query volume. † InfluxDB 3.0 Enterprise also contends
+    with the live 81k writes/s ingest on the same node — large scans slow ingest and vice versa.
+  </p>
+
+  <h3>10-year query — cost and runtime comparison</h3>
+  <p>Returns daily max cell voltage per unit across the full 10-year dataset (25.7 T rows, 245 TB Parquet).</p>
+  <table>
+    <thead>
+      <tr>
+        <th>System</th>
+        <th>Data scanned</th>
+        <th>Runtime (est.)</th>
+        <th class="r">AWS cost</th>
+        <th class="r">Compute cost</th>
+        <th class="r">Total cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>InfluxDB 2.x</strong></td>
+        <td class="ok">~60 GB (series index)</td>
+        <td class="ok">~2 min</td>
+        <td class="r ok">$0</td>
+        <td class="r dim">EC2 paid</td>
+        <td class="r ok">$0 *</td>
+      </tr>
+      <tr>
+        <td><strong>InfluxDB 3.0 Enterprise</strong></td>
+        <td class="err">~50 TB (col. proj.)</td>
+        <td class="err">~5–8 hrs</td>
+        <td class="r ok">$0</td>
+        <td class="r dim">EC2 paid</td>
+        <td class="r warn">$0 * †</td>
+      </tr>
+      <tr>
+        <td><strong>InfluxDB Cloud Serverless</strong></td>
+        <td class="err">~50 TB</td>
+        <td class="err">~5–10 hrs</td>
+        <td class="r err">$250.00</td>
+        <td class="r ok">—</td>
+        <td class="r err">$250.00</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + AWS Athena</strong></td>
+        <td class="err">~50 TB</td>
+        <td class="ok">~15 min</td>
+        <td class="r warn">$250.00</td>
+        <td class="r ok">—</td>
+        <td class="r warn">$250.00</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + DuckDB on EC2</strong><br>
+            <span class="dim" style="font-size:0.76rem">c5.4xlarge on-demand</span></td>
+        <td class="err">~50 TB</td>
+        <td class="err">~4–6 hrs</td>
+        <td class="r ok">$0</td>
+        <td class="r warn">~$3.40</td>
+        <td class="r ok">$3.40</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + DuckDB local (spark1)</strong></td>
+        <td class="err">~50 TB (local disk)</td>
+        <td class="err">~3–5 hrs</td>
+        <td class="r ok">$0</td>
+        <td class="r ok">$0</td>
+        <td class="r ok">$0</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + Athena + S3-IA lifecycle</strong></td>
+        <td class="err">~50 TB (S3-IA retrieval)</td>
+        <td class="ok">~15 min</td>
+        <td class="r warn">$250 scan + $500 S3-IA retrieval</td>
+        <td class="r ok">—</td>
+        <td class="r err">$750.00 ‡</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="font-size:0.78rem;color:var(--muted);margin-top:6px">
+    † 5–8 hour query blocks ingest on a single-node InfluxDB 3.0 Enterprise instance — real deployments would need a dedicated read replica (+$153/month always-on) to avoid this.
+    ‡ S3-IA retrieval fee ($0.01/GB × 50 TB = $500) applies when Athena reads archived data; avoid by keeping recent 1–2 years on S3 Standard for frequent queries, using S3-IA/Glacier only for occasional compliance lookups.
+  </p>
+
+  <h3>Per-unit query — single unit, 1 year (operational use case)</h3>
+  <p>
+    Most day-to-day operational queries target one unit. With
+    <code>topic_partition_segments: 2</code>, DuckDB and Athena can limit the scan to
+    that unit's files only (1/47th of total data).
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>System</th>
+        <th>Data scanned</th>
+        <th>Runtime</th>
+        <th class="r">Cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>InfluxDB 2.x</strong></td>
+        <td class="ok">~130 MB (1 unit, series index)</td>
+        <td class="ok">&lt;1 s</td>
+        <td class="r ok">$0</td>
+      </tr>
+      <tr>
+        <td><strong>InfluxDB 3.0 Enterprise</strong></td>
+        <td class="warn">~106 GB (col. proj., 1 unit's files)</td>
+        <td class="warn">~8–12 min</td>
+        <td class="r ok">$0 (EC2 paid)</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + Athena (per-unit partition)</strong></td>
+        <td class="ok">~106 GB</td>
+        <td class="ok">~5 s</td>
+        <td class="r ok">$0.53</td>
+      </tr>
+      <tr>
+        <td><strong>Parquet + DuckDB local (spark1)</strong></td>
+        <td class="ok">~106 GB (local NVMe)</td>
+        <td class="ok">~30 s</td>
+        <td class="r ok">$0</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Recommended query strategy by use case</h3>
+  <table>
+    <thead><tr><th>Use case</th><th>Recommended approach</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Live dashboard / last 24 hours</td>
+        <td class="ok">DuckDB on local edge machine (30-day cache)</td>
+        <td>Sub-second, free, no S3 egress</td>
+      </tr>
+      <tr>
+        <td>Weekly unit report (1 unit, 1 year)</td>
+        <td class="ok">Athena with per-unit partitioning</td>
+        <td>5 seconds, $0.53 — negligible</td>
+      </tr>
+      <tr>
+        <td>Fleet-wide degradation analysis (all units, 1 year)</td>
+        <td class="warn">Athena ($25) or overnight DuckDB EC2 ($0.32)</td>
+        <td>Athena is 20× faster; DuckDB EC2 is 78× cheaper</td>
+      </tr>
+      <tr>
+        <td>10-year compliance/warranty audit (all units)</td>
+        <td class="warn">Athena ($250) — keep data on S3 Standard, not S3-IA, for these files</td>
+        <td>15 minutes vs 5–8 hours for self-hosted options; $250 is one-off cost</td>
+      </tr>
+      <tr>
+        <td>Ad-hoc cross-metric investigation</td>
+        <td class="ok">DuckDB local on spark1 (data already there)</td>
+        <td>Free, flexible SQL, no cloud dependency, full Parquet toolchain</td>
+      </tr>
+      <tr>
+        <td>Automated nightly aggregation</td>
+        <td class="ok">DuckDB on EC2 spot instance (c5.4xlarge spot ~$0.07/hr)</td>
+        <td>Run overnight when spot is cheap; terminate when done; ~$0.06/night</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<h2 id="notes">13 · Notes and Caveats</h2>
 
 <div class="section">
   <ul>
