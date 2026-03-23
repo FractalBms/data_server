@@ -1,11 +1,16 @@
 """
 real_stress_runner — replays real EMS MQTT topology from Longbow production data.
 
-Publishes synthetic values using the ACTUAL topic structure recorded from a live
-Longbow site: ems/site/{site_id}/unit/{unit_id}/{device}/{instance}/{point}/{dtype}
+Publishes synthetic values using the real EMS topic structure (without the
+ems/site/ prefix so real_writer can subscribe to unit/#):
+    unit/{unit_id}/{device}/{instance}/{point}/{dtype}
+
+Real recording topics have the form:
+    ems/site/{site_id}/unit/{unit_id}/{device}/{instance}/{point}/{dtype}
+Use tools/csv_replayer.py to replay the actual recorded messages.
 
 Key differences vs stress_runner.py:
-  - Topic format matches real production (ems/site/... not batteries/...)
+  - Topic format matches real production point names (from Longbow recording)
   - Payload uses ISO 8601 timestamps: {"ts": "2024-11-15T21:27:52.775Z", "value": N}
   - 1770 unique topics per unit (bms/pcs/rack points from real recording)
   - Data types: integer (71%), float (18%), boolean_integer (11%) per template

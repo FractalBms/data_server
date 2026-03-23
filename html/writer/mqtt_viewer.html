@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MQTT Live Viewer</title>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --yellow: #d29922; --red: #f85149;
+    --orange: #e3b341; --purple: #bc8cff;
+    --green-bg: #0d4429; --code-bg: #21262d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text);
+         font-family: 'Segoe UI', system-ui, sans-serif; padding: 14px; }
+
+  /* ── top bar ── */
+  .topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .topbar h1 { color: var(--accent); font-size: 1.2rem; margin-right: 4px; }
+  input[type=text], input[type=number] {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 4px 8px; border-radius: 4px; font-size: 0.82rem; }
+  input:focus { outline: none; border-color: var(--accent); }
+  .btn { border: 1px solid var(--border); background: var(--surface); color: var(--text);
+         padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.82rem;
+         transition: border-color .15s, color .15s; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.active { background: var(--green-bg); border-color: var(--green); color: var(--green); }
+  .btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot.ok  { background: var(--green); box-shadow: 0 0 5px var(--green); }
+  .dot.err { background: var(--red);   box-shadow: 0 0 5px var(--red); }
+  .dot.off { background: var(--muted); }
+  #conn-label { font-size: 0.8rem; color: var(--muted); }
+
+  /* ── stats bar ── */
+  .stats-bar { display: grid; grid-template-columns: repeat(6,1fr); gap: 6px; margin-bottom: 10px; }
+  .scard { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+           padding: 7px 10px; }
+  .scard-k { font-size: 0.68rem; color: var(--muted); text-transform: uppercase;
+             letter-spacing: .05em; }
+  .scard-v { font-size: 1.1rem; font-weight: 700; color: var(--accent);
+             font-family: 'Consolas', monospace; }
+
+  /* ── layout ── */
+  .layout { display: grid; grid-template-columns: 220px 1fr; gap: 10px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  /* ── unit list ── */
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+           padding: 10px; overflow-y: auto; max-height: calc(100vh - 200px); }
+  .panel-title { font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
+                 letter-spacing: .05em; margin-bottom: 8px; display: flex;
+                 justify-content: space-between; align-items: center; }
+  .unit-item { padding: 5px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+               font-family: 'Consolas', monospace; display: flex; justify-content: space-between;
+               align-items: center; margin-bottom: 2px; }
+  .unit-item:hover { background: var(--code-bg); }
+  .unit-item.active { background: #0c2d6b44; color: var(--accent); }
+  .unit-item .umps { font-size: 0.68rem; color: var(--muted); }
+  .unit-item .uactive { width: 6px; height: 6px; border-radius: 50%;
+                        background: var(--green); flex-shrink: 0; }
+
+  /* ── right side ── */
+  .right { display: flex; flex-direction: column; gap: 10px; }
+
+  /* ── filter / topic feed ── */
+  .feed-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+  .topic-filter { width: 220px; }
+  .device-btns { display: flex; gap: 4px; }
+  .dbtn { font-size: 0.72rem; padding: 2px 8px; border-radius: 10px;
+          border: 1px solid var(--border); background: var(--surface);
+          color: var(--muted); cursor: pointer; }
+  .dbtn:hover, .dbtn.on { border-color: var(--accent); color: var(--accent); background: #0c2d6b22; }
+  .dbtn.on { font-weight: 700; }
+
+  /* ── message feed ── */
+  #feed { background: #0a0d11; border: 1px solid var(--border); border-radius: 6px;
+          padding: 6px 10px; font-family: 'Consolas', monospace; font-size: 0.76rem;
+          height: 260px; overflow-y: auto; }
+  .msg-row { display: grid; grid-template-columns: 130px 1fr auto; gap: 8px;
+             padding: 2px 0; border-bottom: 1px solid #1c2128; align-items: baseline; }
+  .msg-row:last-child { border: none; }
+  .msg-topic { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg-topic .seg-unit { color: var(--accent); }
+  .msg-topic .seg-dev  { color: var(--purple); }
+  .msg-topic .seg-point{ color: var(--text); }
+  .msg-val   { color: var(--green); }
+  .msg-ts    { color: #444c57; font-size: 0.68rem; white-space: nowrap; }
+
+  /* ── signal table (selected unit) ── */
+  .sig-section { background: var(--surface); border: 1px solid var(--border);
+                 border-radius: 8px; padding: 10px; }
+  .sig-section h3 { font-size: 0.78rem; color: var(--muted); margin-bottom: 8px;
+                    display: flex; justify-content: space-between; }
+  .sig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 6px; }
+  .sig-card { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+              padding: 8px 10px; }
+  .sig-name { font-size: 0.68rem; color: var(--muted); white-space: nowrap;
+              overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+  .sig-val  { font-family: 'Consolas', monospace; font-size: 0.95rem; color: var(--accent); }
+  .sig-sub  { font-size: 0.65rem; color: var(--muted); margin-top: 1px; }
+  /* sparkline canvas */
+  canvas.spark { display: block; margin-top: 4px; width: 100%; height: 30px; }
+
+  /* ── device breakdown ── */
+  .dev-row { display: flex; justify-content: space-between; align-items: center;
+             font-size: 0.8rem; padding: 3px 0; border-bottom: 1px solid #21262d; }
+  .dev-row:last-child { border: none; }
+  .dev-name { font-family: 'Consolas', monospace; color: var(--purple); }
+  .dev-count { color: var(--muted); font-size: 0.72rem; }
+  .dev-bar-wrap { flex: 1; margin: 0 10px; background: var(--border);
+                  border-radius: 2px; height: 6px; overflow: hidden; }
+  .dev-bar { height: 100%; border-radius: 2px; background: var(--purple); opacity: .6; }
+
+  /* ── checkbox dropdown ── */
+  .chk-dropdown { position: relative; display: inline-block; }
+  .chk-btn { display: flex; align-items: center; gap: 5px; white-space: nowrap;
+             border: 1px solid var(--border); background: var(--surface); color: var(--text);
+             padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.82rem;
+             transition: border-color .15s; user-select: none; }
+  .chk-btn:hover, .chk-btn.open { border-color: var(--accent); color: var(--accent); }
+  .chk-btn .badge { background: var(--accent); color: #0d1117; border-radius: 8px;
+                    padding: 0 5px; font-size: 0.68rem; font-weight: 700; }
+  .chk-panel { position: absolute; top: calc(100% + 4px); left: 0; z-index: 200;
+               background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+               min-width: 280px; max-width: 400px; box-shadow: 0 8px 24px #00000066;
+               display: none; flex-direction: column; }
+  .chk-panel.open { display: flex; }
+  .chk-search { margin: 8px 8px 4px; background: var(--code-bg); border: 1px solid var(--border);
+                color: var(--text); padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;
+                width: calc(100% - 16px); }
+  .chk-search:focus { outline: none; border-color: var(--accent); }
+  .chk-actions { display: flex; gap: 6px; padding: 4px 8px;
+                 border-bottom: 1px solid var(--border); }
+  .chk-actions button { font-size: 0.72rem; padding: 2px 8px; border-radius: 4px;
+                        border: 1px solid var(--border); background: none; color: var(--muted);
+                        cursor: pointer; }
+  .chk-actions button:hover { color: var(--accent); border-color: var(--accent); }
+  .chk-list { overflow-y: auto; max-height: 280px; padding: 4px 0; }
+  .chk-item { display: flex; align-items: center; gap: 7px; padding: 3px 10px;
+              cursor: pointer; font-size: 0.78rem; font-family: 'Consolas', monospace; }
+  .chk-item:hover { background: var(--code-bg); }
+  .chk-item input[type=checkbox] { accent-color: var(--accent); flex-shrink: 0; }
+  .chk-item .ci-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .chk-item .ci-count { color: var(--muted); font-size: 0.68rem; flex-shrink: 0; }
+
+  .nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .nav a { color: var(--muted); text-decoration: none; font-size: 0.82rem;
+           padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; }
+  .nav a:hover { color: var(--accent); border-color: var(--accent); }
+  .nav a.here  { color: var(--accent); border-color: var(--accent); background: #0c2d6b22; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="writer_torture_test.html">Torture Test</a>
+  <a href="writer_real_data.html">Real Data</a>
+  <a href="stress_real_pub.html">stress_real_pub</a>
+  <a href="ems_simulator_control.html">EMS Control</a>
+  <a href="mqtt_viewer.html" class="here">MQTT Viewer</a>
+</div>
+
+<div class="topbar">
+  <h1>MQTT Live Viewer</h1>
+  <span class="dot off" id="conn-dot"></span>
+  <span id="conn-label">disconnected</span>
+  <input type="text" id="broker-host" value="192.168.86.46" style="width:130px" placeholder="host">
+  <input type="number" id="broker-port" value="8083" style="width:70px" placeholder="port">
+  <input type="text" id="sub-topic" value="unit/#" style="width:140px" placeholder="topic filter">
+  <button class="btn" id="conn-btn" onclick="toggleConnect()">Connect</button>
+  <button class="btn danger" onclick="clearAll()">Clear</button>
+  <label style="font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:4px">
+    <input type="checkbox" id="pause-chk"> Pause feed
+  </label>
+</div>
+
+<!-- Stats bar -->
+<div class="stats-bar">
+  <div class="scard"><div class="scard-k">Total rx</div><div class="scard-v" id="s-total">0</div></div>
+  <div class="scard"><div class="scard-k">Msg/s</div><div class="scard-v" id="s-mps">0</div></div>
+  <div class="scard"><div class="scard-k">Units seen</div><div class="scard-v" id="s-units">0</div></div>
+  <div class="scard"><div class="scard-k">Topics seen</div><div class="scard-v" id="s-topics">0</div></div>
+  <div class="scard"><div class="scard-k">Devices</div><div class="scard-v" id="s-devs">0</div></div>
+  <div class="scard"><div class="scard-k">Dropped</div><div class="scard-v" id="s-dropped" style="color:var(--yellow)">0</div></div>
+</div>
+
+<div class="layout">
+  <!-- Unit list -->
+  <div class="panel" id="unit-panel">
+    <div class="panel-title">
+      <span>Units</span>
+      <button class="btn" style="font-size:.7rem;padding:1px 7px" onclick="selectUnit(null)">All</button>
+    </div>
+    <div id="unit-list"><span style="color:var(--muted);font-size:.8rem">waiting…</span></div>
+  </div>
+
+  <!-- Right column -->
+  <div class="right">
+
+    <!-- Feed -->
+    <div class="sig-section">
+      <div class="feed-head">
+        <input type="text" id="topic-filter" class="topic-filter" placeholder="filter topics…" oninput="applyFilter()">
+        <div class="device-btns" id="dev-btns">
+          <span class="dbtn on" data-dev="all" onclick="setDevFilter(this)">all</span>
+          <span class="dbtn" data-dev="bms"  onclick="setDevFilter(this)">bms</span>
+          <span class="dbtn" data-dev="pcs"  onclick="setDevFilter(this)">pcs</span>
+          <span class="dbtn" data-dev="rack" onclick="setDevFilter(this)">rack</span>
+        </div>
+        <!-- Point name checkbox dropdown -->
+        <div class="chk-dropdown" id="point-dropdown">
+          <div class="chk-btn" id="point-btn" onclick="togglePointDropdown()">
+            Points <span class="badge" id="point-badge">all</span> ▾
+          </div>
+          <div class="chk-panel" id="point-panel">
+            <input class="chk-search" id="point-search" type="text" placeholder="search point names…"
+                   oninput="renderPointList()" onclick="event.stopPropagation()">
+            <div class="chk-actions">
+              <button onclick="selectAllPoints();event.stopPropagation()">Select all</button>
+              <button onclick="clearAllPoints();event.stopPropagation()">Clear all</button>
+              <button onclick="invertPoints();event.stopPropagation()">Invert</button>
+            </div>
+            <div class="chk-list" id="point-list"></div>
+          </div>
+        </div>
+
+        <label style="font-size:.75rem;color:var(--muted);display:flex;align-items:center;gap:4px;margin-left:auto">
+          Max rows: <input type="number" id="max-rows" value="200" style="width:60px" min="20" max="2000">
+        </label>
+      </div>
+      <div id="feed"></div>
+    </div>
+
+    <!-- Selected unit signal table -->
+    <div class="sig-section" id="sig-section" style="display:none">
+      <h3>
+        <span id="sig-title">Unit signals</span>
+        <span style="color:var(--muted);font-weight:400;font-size:.72rem" id="sig-count"></span>
+      </h3>
+      <div class="sig-grid" id="sig-grid"></div>
+    </div>
+
+    <!-- Device breakdown -->
+    <div class="sig-section" id="dev-section">
+      <h3><span>Topic breakdown by device</span></h3>
+      <div id="dev-breakdown"><span style="color:var(--muted);font-size:.8rem">no data yet</span></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ── state ───────────────────────────────────────────────────────────────────
+let client      = null;
+let totalRx     = 0;
+let dropped     = 0;
+let lastTotal   = 0;
+let mps         = 0;
+let selectedUnit= null;
+let devFilter   = 'all';
+let topicFilter = '';
+
+// unit → { id, count, lastSeen, signals: Map<shortname, {val, ts, history:[]}> }
+const units     = new Map();
+// topic → count
+const topicCounts = new Map();
+// device → count
+const devCounts   = new Map();
+// point name → count  (5th topic segment)
+const pointCounts = new Map();
+// Set of selected point names; null = all selected
+let selectedPoints = null;
+
+const FEED_MAX   = 500;   // internal buffer
+const SPARK_LEN  = 60;    // history points per sparkline
+
+// ── connection ───────────────────────────────────────────────────────────────
+
+function toggleConnect() {
+  if (client && client.connected) { client.end(); return; }
+  const host  = document.getElementById('broker-host').value.trim();
+  const port  = parseInt(document.getElementById('broker-port').value) || 8083;
+  const topic = document.getElementById('sub-topic').value.trim() || 'unit/#';
+  const url   = `ws://${host}:${port}/mqtt`;
+
+  setConn('connecting');
+  client = mqtt.connect(url, { clientId: 'mqv-' + Math.random().toString(16).slice(2,8) });
+
+  client.on('connect', () => {
+    setConn(true);
+    client.subscribe(topic, { qos: 0 });
+    document.getElementById('conn-btn').textContent = 'Disconnect';
+  });
+  client.on('close',   () => { setConn(false); document.getElementById('conn-btn').textContent = 'Connect'; });
+  client.on('error',   (e) => { setConn(false); console.error(e); });
+  client.on('message', onMessage);
+}
+
+function setConn(state) {
+  const dot = document.getElementById('conn-dot');
+  const lbl = document.getElementById('conn-label');
+  if (state === true)          { dot.className='dot ok';  lbl.textContent='connected'; }
+  else if (state==='connecting'){ dot.className='dot warn';lbl.textContent='connecting…'; }
+  else                          { dot.className='dot err'; lbl.textContent='disconnected'; }
+}
+
+// ── message handler ──────────────────────────────────────────────────────────
+
+function onMessage(topic, payload) {
+  totalRx++;
+
+  // Parse topic: unit/{uid}/{device}/{instance}/{point}/{dtype}
+  const parts = topic.split('/');
+  if (parts.length < 5 || parts[0] !== 'unit') return;
+  const uid     = parts[1];
+  const device  = parts[2] || 'unknown';
+  const instance= parts[3] || '';
+  const point   = parts[4] || '';
+  const dtype   = parts[5] || '';
+  const shortname = `${device}/${instance}/${point}`;
+
+  let value = null, ts = null;
+  try {
+    const msg = JSON.parse(payload.toString());
+    value = msg.value;
+    ts    = msg.ts;
+  } catch(e) { dropped++; return; }
+
+  // Unit tracking
+  if (!units.has(uid)) units.set(uid, { id: uid, count: 0, lastSeen: 0, signals: new Map() });
+  const u = units.get(uid);
+  u.count++;
+  u.lastSeen = Date.now();
+
+  // Signal history
+  if (!u.signals.has(shortname)) u.signals.set(shortname, { val: value, ts, history: [] });
+  const sig = u.signals.get(shortname);
+  sig.val = value; sig.ts = ts;
+  if (typeof value === 'number') {
+    sig.history.push(value);
+    if (sig.history.length > SPARK_LEN) sig.history.shift();
+  }
+
+  // Topic / device / point counts
+  topicCounts.set(topic, (topicCounts.get(topic)||0) + 1);
+  devCounts.set(device, (devCounts.get(device)||0) + 1);
+  const isNew = !pointCounts.has(point);
+  pointCounts.set(point, (pointCounts.get(point)||0) + 1);
+  if (isNew) schedPointListUpdate();
+
+  // Feed
+  if (!document.getElementById('pause-chk').checked) {
+    if (matchesFilter(uid, device, shortname, point)) addFeedRow(uid, device, instance, point, dtype, value, ts);
+  }
+
+  // Update selected unit signals live
+  if (selectedUnit === uid) schedSigUpdate();
+}
+
+// ── feed ─────────────────────────────────────────────────────────────────────
+
+let feedBuf = [];
+function addFeedRow(uid, device, instance, point, dtype, value, ts) {
+  const maxRows = parseInt(document.getElementById('max-rows').value) || 200;
+  feedBuf.push({ uid, device, instance, point, dtype, value, ts });
+  if (feedBuf.length > FEED_MAX) { feedBuf.shift(); dropped++; }
+  schedFeedFlush();
+}
+
+let feedFlushPending = false;
+function schedFeedFlush() {
+  if (feedFlushPending) return;
+  feedFlushPending = true;
+  requestAnimationFrame(flushFeed);
+}
+
+function flushFeed() {
+  feedFlushPending = false;
+  const feed = document.getElementById('feed');
+  const maxRows = Math.min(parseInt(document.getElementById('max-rows').value)||200, feedBuf.length);
+  const slice = feedBuf.slice(-maxRows);
+  feedBuf = [];
+
+  const frag = document.createDocumentFragment();
+  for (const m of slice) {
+    const row = document.createElement('div');
+    row.className = 'msg-row';
+    const shortTs = m.ts ? m.ts.slice(11,23) : '--';
+    const valStr  = typeof m.value === 'number' ? m.value.toFixed(
+                      Number.isInteger(m.value) ? 0 : (m.dtype==='float'?3:1)) : String(m.value);
+    row.innerHTML =
+      `<span class="msg-topic"><span class="seg-unit">${m.uid.slice(-4)}</span>/<span class="seg-dev">${m.device}</span>/<span class="seg-point">${m.point}</span></span>` +
+      `<span class="msg-val">${valStr}</span>` +
+      `<span class="msg-ts">${shortTs}</span>`;
+    frag.appendChild(row);
+  }
+  feed.appendChild(frag);
+  // trim to maxRows
+  const max = parseInt(document.getElementById('max-rows').value)||200;
+  while (feed.children.length > max) feed.removeChild(feed.firstChild);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function matchesFilter(uid, device, shortname, point) {
+  if (selectedUnit && uid !== selectedUnit) return false;
+  if (devFilter !== 'all' && device !== devFilter) return false;
+  if (topicFilter && !shortname.toLowerCase().includes(topicFilter)) return false;
+  if (selectedPoints && !selectedPoints.has(point)) return false;
+  return true;
+}
+
+function applyFilter() {
+  topicFilter = document.getElementById('topic-filter').value.toLowerCase().trim();
+}
+
+function setDevFilter(el) {
+  document.querySelectorAll('.dbtn').forEach(b => b.classList.remove('on'));
+  el.classList.add('on');
+  devFilter = el.dataset.dev;
+}
+
+// ── unit list ─────────────────────────────────────────────────────────────────
+
+function selectUnit(uid) {
+  selectedUnit = uid;
+  renderUnitList();
+  if (uid) {
+    document.getElementById('sig-section').style.display = '';
+    renderSigGrid(uid);
+  } else {
+    document.getElementById('sig-section').style.display = 'none';
+  }
+}
+
+function renderUnitList() {
+  const el   = document.getElementById('unit-list');
+  const sorted = [...units.values()].sort((a,b) => b.count - a.count);
+  el.innerHTML = '';
+  for (const u of sorted) {
+    const div = document.createElement('div');
+    div.className = `unit-item${selectedUnit === u.id ? ' active' : ''}`;
+    const age = Date.now() - u.lastSeen;
+    const active = age < 3000;
+    div.innerHTML = `
+      <span class="uid">${u.id}</span>
+      <span style="display:flex;align-items:center;gap:6px">
+        <span class="umps">${u.signals.size}pt</span>
+        <span class="uactive" style="background:${active?'var(--green)':'var(--muted)'}"></span>
+      </span>`;
+    div.onclick = () => selectUnit(u.id);
+    el.appendChild(div);
+  }
+}
+
+// ── signal grid ───────────────────────────────────────────────────────────────
+
+let sigUpdatePending = false;
+function schedSigUpdate() {
+  if (sigUpdatePending) return;
+  sigUpdatePending = true;
+  setTimeout(() => { sigUpdatePending = false; if (selectedUnit) renderSigGrid(selectedUnit); }, 200);
+}
+
+// Which signal cards are already in the grid (by shortname)
+const sigCardMap = new Map();
+
+function renderSigGrid(uid) {
+  const u = units.get(uid);
+  if (!u) return;
+  document.getElementById('sig-title').textContent = `Unit ${uid}`;
+  document.getElementById('sig-count').textContent = `${u.signals.size} signals`;
+
+  const grid = document.getElementById('sig-grid');
+
+  for (const [name, sig] of u.signals) {
+    let card = sigCardMap.get(name);
+    if (!card) {
+      card = document.createElement('div');
+      card.className = 'sig-card';
+      const parts = name.split('/');
+      const point = parts[2] || name;
+      const sub   = parts[0] + '/' + parts[1];
+      card.innerHTML = `<div class="sig-name" title="${name}">${point}</div>
+        <div class="sig-val" id="sv-${CSS.escape(name)}">—</div>
+        <div class="sig-sub">${sub}</div>
+        <canvas class="spark" id="sc-${CSS.escape(name)}" height="30"></canvas>`;
+      grid.appendChild(card);
+      sigCardMap.set(name, card);
+    }
+
+    // Update value
+    const valEl = card.querySelector('.sig-val');
+    if (valEl) {
+      valEl.textContent = typeof sig.val === 'number'
+        ? (Number.isInteger(sig.val) ? sig.val : sig.val.toFixed(3))
+        : String(sig.val);
+    }
+
+    // Sparkline
+    const canvas = card.querySelector('canvas');
+    if (canvas && sig.history.length > 1) drawSparkline(canvas, sig.history);
+  }
+}
+
+function drawSparkline(canvas, data) {
+  const W = canvas.offsetWidth || 180, H = 30;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 1;
+  ctx.strokeStyle = '#58a6ff66';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  data.forEach((v,i) => {
+    const x = (i / (data.length-1)) * W;
+    const y = H - ((v - min) / range) * (H-4) - 2;
+    i === 0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+  // last value dot
+  const lx = W, ly = H - ((data[data.length-1]-min)/range)*(H-4)-2;
+  ctx.fillStyle = '#58a6ff';
+  ctx.beginPath(); ctx.arc(lx,ly,2.5,0,Math.PI*2); ctx.fill();
+}
+
+// ── point name dropdown ──────────────────────────────────────────────────────
+
+let pointListDirty = false;
+function schedPointListUpdate() {
+  if (pointListDirty) return;
+  pointListDirty = true;
+  setTimeout(() => { pointListDirty = false; renderPointList(); }, 300);
+}
+
+function togglePointDropdown() {
+  const panel = document.getElementById('point-panel');
+  const btn   = document.getElementById('point-btn');
+  const open  = panel.classList.toggle('open');
+  btn.classList.toggle('open', open);
+  if (open) {
+    renderPointList();
+    document.getElementById('point-search').focus();
+  }
+}
+
+// Close when clicking outside
+document.addEventListener('click', e => {
+  const dd = document.getElementById('point-dropdown');
+  if (!dd.contains(e.target)) {
+    document.getElementById('point-panel').classList.remove('open');
+    document.getElementById('point-btn').classList.remove('open');
+  }
+});
+
+function renderPointList() {
+  const search = document.getElementById('point-search').value.toLowerCase().trim();
+  const list   = document.getElementById('point-list');
+  const sorted = [...pointCounts.entries()]
+    .filter(([n]) => !search || n.toLowerCase().includes(search))
+    .sort((a,b) => b[1]-a[1]);
+
+  list.innerHTML = '';
+  for (const [name, count] of sorted) {
+    const checked = selectedPoints === null || selectedPoints.has(name);
+    const div = document.createElement('div');
+    div.className = 'chk-item';
+    div.innerHTML = `<input type="checkbox" ${checked?'checked':''}>
+      <span class="ci-name" title="${name}">${name}</span>
+      <span class="ci-count">${count.toLocaleString()}</span>`;
+    div.querySelector('input').addEventListener('change', e => {
+      togglePoint(name, e.target.checked);
+    });
+    list.appendChild(div);
+  }
+  updatePointBadge();
+}
+
+function togglePoint(name, checked) {
+  // Materialise selectedPoints from null (= all) on first change
+  if (selectedPoints === null) {
+    selectedPoints = new Set(pointCounts.keys());
+  }
+  if (checked) selectedPoints.add(name);
+  else         selectedPoints.delete(name);
+  // If everything is checked revert to null (= all)
+  if (selectedPoints.size === pointCounts.size) selectedPoints = null;
+  updatePointBadge();
+}
+
+function selectAllPoints() {
+  selectedPoints = null;
+  renderPointList();
+}
+
+function clearAllPoints() {
+  selectedPoints = new Set();
+  renderPointList();
+}
+
+function invertPoints() {
+  const all = new Set(pointCounts.keys());
+  if (selectedPoints === null) {
+    selectedPoints = new Set();   // invert all → none
+  } else {
+    const inv = new Set([...all].filter(k => !selectedPoints.has(k)));
+    selectedPoints = inv.size === all.size ? null : inv;
+  }
+  renderPointList();
+}
+
+function updatePointBadge() {
+  const badge = document.getElementById('point-badge');
+  if (selectedPoints === null) {
+    badge.textContent = 'all';
+    badge.style.background = 'var(--accent)';
+  } else {
+    badge.textContent = selectedPoints.size;
+    badge.style.background = selectedPoints.size === 0 ? 'var(--red)' : 'var(--orange)';
+  }
+}
+
+// ── stats + UI update loop ────────────────────────────────────────────────────
+
+setInterval(() => {
+  mps = totalRx - lastTotal; lastTotal = totalRx;
+
+  document.getElementById('s-total').textContent   = totalRx >= 1e6 ? (totalRx/1e6).toFixed(2)+'M' : totalRx.toLocaleString();
+  document.getElementById('s-mps').textContent     = mps.toLocaleString();
+  document.getElementById('s-units').textContent   = units.size;
+  document.getElementById('s-topics').textContent  = topicCounts.size;
+  document.getElementById('s-devs').textContent    = devCounts.size;
+  document.getElementById('s-dropped').textContent = dropped;
+
+  renderUnitList();
+  renderDevBreakdown();
+}, 1000);
+
+function renderDevBreakdown() {
+  const el = document.getElementById('dev-breakdown');
+  if (devCounts.size === 0) return;
+  const total = [...devCounts.values()].reduce((a,b)=>a+b,0);
+  const sorted = [...devCounts.entries()].sort((a,b)=>b[1]-a[1]);
+  el.innerHTML = sorted.map(([d,n]) => `
+    <div class="dev-row">
+      <span class="dev-name">${d}</span>
+      <div class="dev-bar-wrap"><div class="dev-bar" style="width:${(n/total*100).toFixed(1)}%"></div></div>
+      <span class="dev-count">${n.toLocaleString()} (${(n/total*100).toFixed(1)}%)</span>
+    </div>`).join('');
+}
+
+function clearAll() {
+  units.clear(); topicCounts.clear(); devCounts.clear(); pointCounts.clear();
+  selectedPoints = null;
+  document.getElementById('point-list').innerHTML = '';
+  updatePointBadge();
+  sigCardMap.clear();
+  totalRx = dropped = lastTotal = mps = 0;
+  document.getElementById('feed').innerHTML = '';
+  document.getElementById('unit-list').innerHTML = '<span style="color:var(--muted);font-size:.8rem">waiting…</span>';
+  document.getElementById('sig-grid').innerHTML = '';
+  document.getElementById('sig-section').style.display = 'none';
+  document.getElementById('dev-breakdown').innerHTML = '<span style="color:var(--muted);font-size:.8rem">no data yet</span>';
+}
+
+// Auto-connect if ?host= in URL
+window.addEventListener('DOMContentLoaded', () => {
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('host')) {
+    document.getElementById('broker-host').value = p.get('host');
+    if (p.get('port')) document.getElementById('broker-port').value = p.get('port');
+    toggleConnect();
+  }
+});
+</script>
+</body>
+</html>
