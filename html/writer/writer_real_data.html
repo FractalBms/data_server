@@ -4,14 +4,52 @@
 <meta charset="UTF-8">
 <title>writer.cpp — Real Data Analysis (Longbow EMS)</title>
 <style>
+  /* ── dark mode (default) ── */
   :root {
     --bg: #0d1117; --surface: #161b22; --border: #30363d;
     --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
     --green: #3fb950; --yellow: #d29922; --red: #f85149;
-    --orange: #e3b341; --purple: #bc8cff; --fg: #c9d1d9;
+    --orange: #e3b341; --purple: #bc8cff;
+    --code-bg: #21262d; --code-text: #e6edf3;
+    --th-bg: #21262d; --tr-hover: #1c2128; --surface2: #0d1117;
+    --badge-new-bg: #0d4429; --badge-def-bg: #2d2000;
+    --badge-risk-bg: #3d0a0a; --badge-info-bg: #0c2d6b;
+    --kw: #ff7b72; --fn: #d2a8ff; --ty: #79c0ff; --str: #a5d6ff;
   }
+
+  /* ── light / print mode ── */
+  body.light {
+    --bg: #ffffff; --surface: #f6f8fa; --border: #d0d7de;
+    --text: #1f2328; --muted: #57606a; --accent: #0550ae;
+    --green: #1a7f37; --yellow: #9a6700; --red: #cf222e;
+    --orange: #953800; --purple: #6639ba;
+    --code-bg: #eaeef2; --code-text: #1f2328;
+    --th-bg: #eaeef2; --tr-hover: #eaeef2; --surface2: #f6f8fa;
+    --badge-new-bg: #dcfce7; --badge-def-bg: #fef9c3;
+    --badge-risk-bg: #fee2e2; --badge-info-bg: #dbeafe;
+    --kw: #cf222e; --fn: #8250df; --ty: #0550ae; --str: #0a3069;
+  }
+
+  /* ── auto light on print ── */
+  @media print {
+    body {
+      --bg: #ffffff; --surface: #f6f8fa; --border: #d0d7de;
+      --text: #1f2328; --muted: #57606a; --accent: #0550ae;
+      --green: #1a7f37; --yellow: #9a6700; --red: #cf222e;
+      --orange: #953800; --purple: #6639ba;
+      --code-bg: #eaeef2; --code-text: #1f2328;
+      --th-bg: #eaeef2; --tr-hover: #eaeef2; --surface2: #f6f8fa;
+      --badge-new-bg: #dcfce7; --badge-def-bg: #fef9c3;
+      --badge-risk-bg: #fee2e2; --badge-info-bg: #dbeafe;
+      --kw: #cf222e; --fn: #8250df; --ty: #0550ae; --str: #0a3069;
+    }
+    .theme-toggle { display: none; }
+    .nav { display: none; }
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; padding: 24px; line-height: 1.6; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif;
+         padding: 24px; line-height: 1.6; transition: background 0.2s, color 0.2s; }
   h1 { color: var(--accent); font-size: 1.5rem; margin-bottom: 6px; }
   .subtitle { color: var(--muted); margin-bottom: 28px; font-size: 0.9rem; }
   h2 { color: var(--accent); font-size: 1.1rem; margin: 32px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
@@ -20,47 +58,55 @@
   .nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
   .nav a { color: var(--muted); text-decoration: none; font-size: 0.82rem; padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; }
   .nav a:hover { color: var(--accent); border-color: var(--accent); }
-  .nav a.here { color: var(--accent); border-color: var(--accent); background: #0c2d6b22; }
+  .nav a.here { color: var(--accent); border-color: var(--accent); background: var(--badge-info-bg); opacity: 0.6; }
+  body.light .nav a.here { opacity: 1; }
 
   .section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
 
-  pre { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: 14px; font-family: 'Consolas', monospace; font-size: 0.82rem; line-height: 1.6; overflow-x: auto; color: #e6edf3; margin: 8px 0; }
+  pre { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 14px;
+        font-family: 'Consolas', monospace; font-size: 0.82rem; line-height: 1.6;
+        overflow-x: auto; color: var(--code-text); margin: 8px 0; }
 
-  code { background: #21262d; border: 1px solid var(--border); padding: 1px 5px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 0.82rem; color: #e6edf3; }
+  code { background: var(--code-bg); border: 1px solid var(--border); padding: 1px 5px;
+         border-radius: 4px; font-family: 'Consolas', monospace; font-size: 0.82rem; color: var(--code-text); }
 
-  .kw  { color: #ff7b72; }
-  .fn  { color: #d2a8ff; }
-  .ty  { color: #79c0ff; }
-  .str { color: #a5d6ff; }
-  .num { color: #79c0ff; }
-  .cmt { color: #8b949e; }
-  .ok  { color: #3fb950; }
-  .warn{ color: #d29922; }
-  .err { color: #f85149; }
+  .kw  { color: var(--kw); }
+  .fn  { color: var(--fn); }
+  .ty  { color: var(--ty); }
+  .str { color: var(--str); }
+  .num { color: var(--ty); }
+  .cmt { color: var(--muted); }
+  .ok  { color: var(--green); }
+  .warn{ color: var(--yellow); }
+  .err { color: var(--red); }
 
   p  { margin-bottom: 8px; font-size: 0.88rem; }
   ul, ol { padding-left: 20px; margin-bottom: 8px; }
   li { font-size: 0.88rem; margin-bottom: 3px; }
 
   .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; }
-  .badge-new  { background: #0d4429; color: var(--green);  border: 1px solid #1a6e3a; }
-  .badge-fix  { background: #0d4429; color: var(--green);  border: 1px solid #1a6e3a; }
-  .badge-def  { background: #2d2000; color: var(--yellow); border: 1px solid #5a4000; }
-  .badge-risk { background: #3d0a0a; color: var(--red);    border: 1px solid #7a1515; }
-  .badge-info { background: #0c2d6b; color: var(--accent); border: 1px solid #1a4d9e; }
+  .badge-new  { background: var(--badge-new-bg);  color: var(--green);  border: 1px solid #1a6e3a; }
+  .badge-fix  { background: var(--badge-new-bg);  color: var(--green);  border: 1px solid #1a6e3a; }
+  .badge-def  { background: var(--badge-def-bg);  color: var(--yellow); border: 1px solid #5a4000; }
+  .badge-risk { background: var(--badge-risk-bg); color: var(--red);    border: 1px solid #7a1515; }
+  .badge-info { background: var(--badge-info-bg); color: var(--accent); border: 1px solid #1a4d9e; }
+  body.light .badge-new, body.light .badge-fix  { border-color: #86efac; }
+  body.light .badge-def  { border-color: #fde047; }
+  body.light .badge-risk { border-color: #fca5a5; }
+  body.light .badge-info { border-color: #93c5fd; }
 
   table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 12px; }
-  th { background: #21262d; color: var(--muted); text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--border); font-weight: 600; }
+  th { background: var(--th-bg); color: var(--muted); text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--border); font-weight: 600; }
   td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
   tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #1c2128; }
+  tr:hover td { background: var(--tr-hover); }
   td.num { text-align: right; font-family: 'Consolas', monospace; color: var(--accent); }
   td.warn { color: var(--red); font-weight: 600; }
   td.ok   { color: var(--green); }
 
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-  .card { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
+  .card { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
   .card-title { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
   .card-val { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
   .card-sub { color: var(--muted); font-size: 0.75rem; margin-top: 2px; }
@@ -70,9 +116,13 @@
   .alert-ok   { background: #0d442922; border-color: var(--green); }
   .alert-warn { background: #2d200022; border-color: var(--yellow); }
   .alert-err  { background: #3d0a0a22; border-color: var(--red); }
+  body.light .alert-info { background: #dbeafe; }
+  body.light .alert-ok   { background: #dcfce7; }
+  body.light .alert-warn { background: #fef9c3; }
+  body.light .alert-err  { background: #fee2e2; }
 
   .flow { font-family: 'Consolas', monospace; font-size: 0.82rem; color: var(--text);
-          background: #0d1117; border: 1px solid var(--border); border-radius: 6px;
+          background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
           padding: 16px; line-height: 1.8; margin: 8px 0; }
   .flow .hi   { color: var(--accent); font-weight: 700; }
   .flow .ok   { color: var(--green); }
@@ -88,9 +138,34 @@
   .trunc-ok   { color: var(--green); }
   .trunc-cut  { color: var(--red); text-decoration: line-through; }
   .trunc-miss { color: var(--yellow); font-style: italic; }
+
+  /* ── theme toggle button ── */
+  .theme-toggle {
+    position: fixed; top: 16px; right: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 6px 14px;
+    font-size: 0.8rem; cursor: pointer; z-index: 999;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    transition: background 0.2s, color 0.2s;
+  }
+  .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
 </style>
+
+<script>
+  function toggleTheme() {
+    const body = document.body;
+    const btn  = document.getElementById('theme-btn');
+    if (body.classList.toggle('light')) {
+      btn.textContent = '🌙 Dark mode';
+    } else {
+      btn.textContent = '🖨 Print / Light mode';
+    }
+  }
+</script>
 </head>
 <body>
+
+<button class="theme-toggle" id="theme-btn" onclick="toggleTheme()">🖨 Print / Light mode</button>
 
 <h1>writer.cpp — Real Data Analysis</h1>
 <p class="subtitle">
