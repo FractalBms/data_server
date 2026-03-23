@@ -431,7 +431,8 @@ TEST("hot file: mixed source types merged correctly") {
 
 // Build a SensorKey from source_type + the ints map of a row.
 static SensorKey sensor_key(const std::string& source, const Row& r) {
-    return SensorKey{source, r.ints};
+    // SensorKey::ints is std::map (ordered, for operator<); Row::ints is unordered_map — explicit convert
+    return SensorKey{source, std::map<std::string, int64_t>(r.ints.begin(), r.ints.end())};
 }
 
 // Simulate the current-state write logic from do_flush.

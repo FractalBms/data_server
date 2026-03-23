@@ -202,6 +202,7 @@
     <a href="#K6" class="kpi">K6 WAL replay throughput</a>
     <a href="#K7" class="kpi">K7 buffer insert rate</a>
     <a href="#K8" class="kpi">K8 compression ratio</a>
+  <a href="writer_real_data.html">Real Data</a>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════════════
@@ -1251,7 +1252,8 @@ int main() {
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
 <h2 class="section">Last Run Results</h2>
 <div style="font-size:.8rem;color:var(--muted);margin-bottom:1rem">
-  phil-dev · 2026-03-21 · <code>make test &amp;&amp; make kpi</code>
+  phil-dev · 2026-03-22 (post F3 fixes) · <code>make test &amp;&amp; make kpi</code>
+  &nbsp;·&nbsp; <a href="writer_critical_fixes_3.html" style="color:var(--accent)">F3-1…F3-7 applied</a>
 </div>
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:2rem">
@@ -1313,64 +1315,71 @@ int main() {
 === parquet_writer KPI benchmarks ===
 
 --- KPI 1: parse throughput ---
-parse_topic (1M calls)
-  <span style="color:var(--green);font-weight:600">1 650 946 ops/s</span>  (0.606s for 1M)
-  <span style="color:var(--muted)">110× fleet target of 14 976 msg/s ✓</span>
+parse_topic (1M calls)  [F3-7: memchr pointer walk]
+  <span style="color:var(--green);font-weight:600">2 672 549 ops/s</span>  (0.374s for 1M)
+  <span style="color:var(--muted)">178× fleet target of 14 976 msg/s ✓  (+62% vs run #2)</span>
 
 parse_topic + parse_payload (1M)
-  <span style="color:var(--green);font-weight:600">507 578 ops/s</span>  (1.970s for 1M)
-  <span style="color:var(--muted)">34× fleet target ✓</span>
+  <span style="color:var(--green);font-weight:600">491 121 ops/s</span>  (2.036s for 1M)
+  <span style="color:var(--muted)">33× fleet target ✓</span>
 
 parse_topic + parse_payload solar (1M)
-  <span style="color:var(--green);font-weight:600">543 054 ops/s</span>  (1.841s for 1M)
-  <span style="color:var(--muted)">36× fleet target ✓</span>
+  <span style="color:var(--green);font-weight:600">431 224 ops/s</span>  (2.319s for 1M)
+  <span style="color:var(--muted)">29× fleet target ✓</span>
 
 Fleet target (24× scale): 14 976 msg/s
 
 --- KPI 2: parquet write throughput ---
 flush_partition snappy batch=1 000
-  <span style="color:var(--green);font-weight:600">960 857 rows/s   18.8 MB/s</span>
-  (0.208s for 200 000 rows)
+  <span style="color:var(--green);font-weight:600">821 263 rows/s   16.0 MB/s</span>
+  (0.244s for 200 000 rows)
 
 flush_partition snappy batch=10 000
-  <span style="color:var(--green);font-weight:600">984 343 rows/s   15.8 MB/s</span>
-  (0.203s for 200 000 rows)
+  <span style="color:var(--green);font-weight:600">914 050 rows/s   14.6 MB/s</span>
+  (0.219s for 200 000 rows)
 
 flush_partition snappy batch=50 000
-  <span style="color:var(--green);font-weight:600">855 594 rows/s   13.7 MB/s</span>
-  (0.234s for 200 000 rows)
+  <span style="color:var(--green);font-weight:600">865 072 rows/s   13.9 MB/s</span>
+  (0.231s for 200 000 rows)
 
 --- KPI 3: end-to-end ingest sim ---
 parse+buffer 14 976 msg × 10 rounds
-  <span style="color:var(--green);font-weight:600">452 212 ops/s</span>  (0.331s for 149 760)
+  <span style="color:var(--green);font-weight:600">434 587 ops/s</span>  (0.344s for 149 760)
   96 partitions buffered, 149 760 rows
 
 Flush 149 760 rows → 96 parquet files:
-  <span style="color:var(--green);font-weight:600">0.125s  (1 201 221 rows/s)</span>
+  <span style="color:var(--green);font-weight:600">0.137s  (1 094 874 rows/s)</span>
 
 Done.</pre>
+
+    <!-- delta note -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.7rem;font-size:.78rem;margin-top:.8rem;color:var(--muted)">
+      <strong style="color:var(--fg)">F3 changes in this run:</strong>
+      F3-1 SIGPIPE SIG_IGN · F3-2 wp→wf · F3-3 loop_stop force=true · F3-4 ValueUnsafe() ·
+      F3-5 sync parse outside g_mutex · F3-6 Row unordered_map · <strong style="color:var(--green)">F3-7 parse_topic memchr walk (+62%)</strong>
+    </div>
 
     <!-- KPI summary cards -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:.8rem">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.7rem;font-size:.8rem">
         <div style="color:var(--muted);margin-bottom:.2rem">Parse headroom</div>
-        <div style="font-size:1.1rem;font-weight:700;color:var(--green)">34×</div>
+        <div style="font-size:1.1rem;font-weight:700;color:var(--green)">33×</div>
         <div style="color:var(--muted);font-size:.75rem">above 14 976 msg/s fleet target</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.7rem;font-size:.8rem">
+        <div style="color:var(--muted);margin-bottom:.2rem">parse_topic alone</div>
+        <div style="font-size:1.1rem;font-weight:700;color:var(--green)">178× <span style="font-size:.75rem">(+62%)</span></div>
+        <div style="color:var(--muted);font-size:.75rem">2.67M ops/s — memchr walk (F3-7)</div>
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.7rem;font-size:.8rem">
         <div style="color:var(--muted);margin-bottom:.2rem">Flush throughput</div>
         <div style="font-size:1.1rem;font-weight:700;color:var(--green)">~1 M rows/s</div>
-        <div style="color:var(--muted);font-size:.75rem">149 k rows in 0.125s</div>
+        <div style="color:var(--muted);font-size:.75rem">149 k rows in 0.137s</div>
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.7rem;font-size:.8rem">
-        <div style="color:var(--muted);margin-bottom:.2rem">Full flush at 80k msg/s</div>
-        <div style="font-size:1.1rem;font-weight:700;color:var(--green)">&lt; 5s</div>
-        <div style="color:var(--muted);font-size:.75rem">for 60s × 80k = 4.8M rows</div>
-      </div>
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.7rem;font-size:.8rem">
-        <div style="color:var(--muted);margin-bottom:.2rem">Compression</div>
-        <div style="font-size:1.1rem;font-weight:700;color:var(--green)">13–19 MB/s</div>
-        <div style="color:var(--muted);font-size:.75rem">snappy, all batch sizes</div>
+        <div style="color:var(--muted);margin-bottom:.2rem">Tests</div>
+        <div style="font-size:1.1rem;font-weight:700;color:var(--green)">37 / 37</div>
+        <div style="color:var(--muted);font-size:.75rem">all passing incl. unordered_map (F3-6)</div>
       </div>
     </div>
   </div>
