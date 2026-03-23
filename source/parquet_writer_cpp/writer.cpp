@@ -719,12 +719,11 @@ static void health_thread_fn(int port) {
     listen(srv, 4);
     std::cout << "[health] listening on :" << port << "\n";
     while (!g_shutdown) {
-        struct pollfd pfds[2] = {
-            { srv,               POLLIN, 0 },
-            { g_signal_pipe[0],  POLLIN, 0 },  // wake immediately on g_shutdown
-        };
-        if (poll(pfds, 2, 1000) <= 0) continue;
-        if (pfds[1].revents & POLLIN) break;  // shutdown signal — exit promptly
+        // 100ms timeout: exits within 100ms of g_shutdown without sharing the
+        // signal pipe (which is also drained by flush_thread_fn — two consumers
+        // on one pipe causes spurious wakeups at message-arrival rate).
+        struct pollfd srv_pfd = { srv, POLLIN, 0 };
+        if (poll(&srv_pfd, 1, 100) <= 0) continue;
         int cli = accept(srv, nullptr, nullptr);
         if (cli < 0) continue;
         char buf[4096] = {};                                     // m10: 4 KB covers Chrome/Firefox headers
