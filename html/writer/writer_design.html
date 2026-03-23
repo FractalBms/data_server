@@ -4,15 +4,47 @@
 <meta charset="UTF-8">
 <title>Parquet Writer — Design Document</title>
 <style>
+  /* ── dark mode (default) ── */
   :root {
     --bg: #0d1117; --surface: #161b22; --border: #30363d;
     --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
     --green: #3fb950; --yellow: #d29922; --red: #f85149;
     --orange: #e3b341; --purple: #bc8cff;
+    --code-bg: #21262d; --code-text: #e6edf3;
+    --pre-bg: #0d1117; --th-bg: #21262d; --tr-alt: #0d1117;
+    --kpi-bg: #0d1117; --arch-bg: #0d1117; --thread-bg: #0d1117;
   }
+
+  /* ── light / print mode ── */
+  body.light {
+    --bg: #ffffff; --surface: #f6f8fa; --border: #d0d7de;
+    --text: #1f2328; --muted: #57606a; --accent: #0550ae;
+    --green: #1a7f37; --yellow: #9a6700; --red: #cf222e;
+    --orange: #953800; --purple: #6639ba;
+    --code-bg: #eaeef2; --code-text: #1f2328;
+    --pre-bg: #f6f8fa; --th-bg: #eaeef2; --tr-alt: #f6f8fa;
+    --kpi-bg: #f6f8fa; --arch-bg: #f6f8fa; --thread-bg: #f6f8fa;
+  }
+
+  /* ── auto light on print (whichever mode the page is in) ── */
+  @media print {
+    body {
+      --bg: #ffffff; --surface: #f6f8fa; --border: #c8d1d9;
+      --text: #1f2328; --muted: #57606a; --accent: #0550ae;
+      --green: #1a7f37; --yellow: #9a6700; --red: #cf222e;
+      --orange: #953800; --purple: #6639ba;
+      --code-bg: #eaeef2; --code-text: #1f2328;
+      --pre-bg: #f6f8fa; --th-bg: #eaeef2; --tr-alt: #f6f8fa;
+      --kpi-bg: #f6f8fa; --arch-bg: #f6f8fa; --thread-bg: #f6f8fa;
+    }
+    .theme-toggle { display: none; }
+    .nav { display: none; }
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif;
-         padding: 32px; line-height: 1.7; max-width: 1100px; margin: 0 auto; }
+         padding: 32px; line-height: 1.7; max-width: 1100px; margin: 0 auto;
+         transition: background 0.2s, color 0.2s; }
 
   h1 { color: var(--accent); font-size: 1.7rem; margin-bottom: 4px; }
   .subtitle { color: var(--muted); font-size: 0.88rem; margin-bottom: 36px; }
@@ -29,17 +61,17 @@
              border-radius: 8px; padding: 22px 24px; margin-bottom: 20px; }
 
   pre, code { font-family: 'Consolas', 'Courier New', monospace; }
-  code { background: #21262d; border: 1px solid var(--border); padding: 1px 5px;
-         border-radius: 4px; font-size: 0.82rem; color: #e6edf3; }
-  pre  { background: #0d1117; border: 1px solid var(--border); border-radius: 6px;
+  code { background: var(--code-bg); border: 1px solid var(--border); padding: 1px 5px;
+         border-radius: 4px; font-size: 0.82rem; color: var(--code-text); }
+  pre  { background: var(--pre-bg); border: 1px solid var(--border); border-radius: 6px;
          padding: 14px; font-size: 0.82rem; line-height: 1.6; overflow-x: auto;
-         color: #e6edf3; margin: 10px 0; }
+         color: var(--code-text); margin: 10px 0; }
 
   table { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin: 10px 0; }
-  th    { background: #21262d; color: var(--accent); text-align: left;
+  th    { background: var(--th-bg); color: var(--accent); text-align: left;
           padding: 7px 12px; border: 1px solid var(--border); }
   td    { padding: 6px 12px; border: 1px solid var(--border); vertical-align: top; }
-  tr:nth-child(even) td { background: #0d1117; }
+  tr:nth-child(even) td { background: var(--tr-alt); }
 
   .ok   { color: var(--green); }
   .warn { color: var(--yellow); }
@@ -48,28 +80,34 @@
 
   .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 14px 0; }
   @media (max-width: 800px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
-  .kpi-card { background: #0d1117; border: 1px solid var(--border); border-radius: 6px;
+  .kpi-card { background: var(--kpi-bg); border: 1px solid var(--border); border-radius: 6px;
               padding: 14px; text-align: center; }
   .kpi-val  { font-size: 1.6rem; font-family: monospace; color: var(--green); line-height: 1.1; }
   .kpi-lbl  { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
 
-  .arch-box { background: #0d1117; border: 1px solid var(--border); border-radius: 6px;
+  .arch-box { background: var(--arch-bg); border: 1px solid var(--border); border-radius: 6px;
               padding: 16px; font-family: monospace; font-size: 0.82rem; line-height: 1.9;
-              white-space: pre; overflow-x: auto; margin: 10px 0; }
+              white-space: pre; overflow-x: auto; margin: 10px 0; color: var(--code-text); }
 
   .alert { border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 0.84rem; }
   .alert-info   { background: #0c2d6b22; border: 1px solid #1a4d9e; color: var(--accent); }
-  .alert-ok     { background: #0d4429; border: 1px solid #1a6e3a; color: var(--green); }
-  .alert-warn   { background: #2d2000; border: 1px solid #5a4000; color: var(--yellow); }
+  .alert-ok     { background: #0d442922; border: 1px solid #1a6e3a; color: var(--green); }
+  .alert-warn   { background: #2d200022; border: 1px solid #5a4000; color: var(--yellow); }
+  body.light .alert-info { background: #dbeafe; border-color: #93c5fd; }
+  body.light .alert-ok   { background: #dcfce7; border-color: #86efac; }
+  body.light .alert-warn { background: #fef9c3; border-color: #fde047; }
 
   .tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 0.72rem;
          font-weight: 700; margin-left: 6px; }
   .tag-green  { background: #0d4429; color: var(--green); border: 1px solid #1a6e3a; }
   .tag-blue   { background: #0c2d6b; color: var(--accent); border: 1px solid #1a4d9e; }
   .tag-yellow { background: #2d2000; color: var(--yellow); border: 1px solid #5a4000; }
+  body.light .tag-green  { background: #dcfce7; border-color: #86efac; }
+  body.light .tag-blue   { background: #dbeafe; border-color: #93c5fd; }
+  body.light .tag-yellow { background: #fef9c3; border-color: #fde047; }
 
   .thread-row { display: flex; gap: 12px; margin: 10px 0; }
-  .thread-box { flex: 1; background: #0d1117; border: 1px solid var(--border);
+  .thread-box { flex: 1; background: var(--thread-bg); border: 1px solid var(--border);
                 border-radius: 6px; padding: 12px; }
   .thread-name { font-size: 0.8rem; font-weight: 700; color: var(--accent); margin-bottom: 6px; }
   .thread-desc { font-size: 0.8rem; color: var(--muted); }
@@ -78,9 +116,34 @@
   .nav a { color: var(--muted); text-decoration: none; font-size: 0.8rem;
            padding: 3px 9px; border: 1px solid var(--border); border-radius: 4px; }
   .nav a:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* ── theme toggle button ── */
+  .theme-toggle {
+    position: fixed; top: 16px; right: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 6px 14px;
+    font-size: 0.8rem; cursor: pointer; z-index: 999;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    transition: background 0.2s, color 0.2s;
+  }
+  .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
 </style>
+
+<script>
+  function toggleTheme() {
+    const body = document.body;
+    const btn  = document.getElementById('theme-btn');
+    if (body.classList.toggle('light')) {
+      btn.textContent = '🌙 Dark mode';
+    } else {
+      btn.textContent = '🖨 Print / Light mode';
+    }
+  }
+</script>
 </head>
 <body>
+
+<button class="theme-toggle" id="theme-btn" onclick="toggleTheme()">🖨 Print / Light mode</button>
 
 <h1>Parquet Writer — Design Document</h1>
 <div class="subtitle">
