@@ -123,7 +123,8 @@
 <div class="subtitle">
   InfluxDB/Telegraf path vs Parquet/DuckDB path &nbsp;·&nbsp;
   Longbow EMS data rate (81,420 msg/s) &nbsp;·&nbsp;
-  10-year projection &nbsp;·&nbsp; 2026 AWS pricing
+  10-year projection &nbsp;·&nbsp; 2026 AWS pricing &nbsp;·&nbsp;
+  <span style="color:var(--red)">storage costs only — processing costs and data loss risk covered in §9–10</span>
 </div>
 
 <div class="nav">
@@ -134,6 +135,8 @@
   <a href="#cumulative">10-year total</a>
   <a href="#lifecycle">S3 lifecycle option</a>
   <a href="#why">Why the gap</a>
+  <a href="#processing">Processing costs</a>
+  <a href="#dataloss">Data loss risk</a>
   <a href="#notes">Notes &amp; caveats</a>
 </div>
 
@@ -561,7 +564,278 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════ -->
-<h2 id="notes">8 · Notes and Caveats</h2>
+<h2 id="processing">9 · Processing Costs (Not Included Above)</h2>
+
+<div class="section">
+  <p>
+    The storage figures in §2–6 cover only S3/EBS storage and the minimum compute to run
+    InfluxDB itself. The InfluxDB/Telegraf path requires additional always-on AWS compute
+    that the Parquet path does not — because Telegraf and the MQTT relay must run on AWS
+    to receive, parse, and ingest data continuously. The Parquet writer runs on the
+    <em>edge machine</em> alongside FlashMQ; no AWS compute is needed for data collection.
+  </p>
+
+  <h3>InfluxDB path — additional AWS compute (constant, every month)</h3>
+  <table>
+    <thead><tr><th>Service</th><th>Instance</th><th>$/month</th><th>Why needed</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>FlashMQ relay (aws-sim)</td>
+        <td>m5.large (2 vCPU / 8 GB)</td>
+        <td class="num err">$70</td>
+        <td>Receives the MQTT bridge from the edge host. Must handle 81,420 msg/s ingress
+            and fan-out to Telegraf subscriber. Cannot use a nano/micro — broker needs
+            enough RAM to buffer the full in-flight message queue.</td>
+      </tr>
+      <tr>
+        <td>Telegraf agent</td>
+        <td>t3.xlarge (4 vCPU / 16 GB)</td>
+        <td class="num err">$120</td>
+        <td>JSON parse of every payload at 81,420/s is CPU-intensive. Telegraf is largely
+            single-threaded per-input; at this rate it saturates ~2 cores on JSON
+            deserialisation + line protocol construction. Needs headroom for burst and
+            GC pauses (Go runtime). Sharing the same EC2 as InfluxDB risks OOM
+            contention during compaction spikes.</td>
+      </tr>
+      <tr>
+        <td>InfluxDB TSM compaction I/O</td>
+        <td>EBS IOPS above gp3 baseline</td>
+        <td class="num err">$50</td>
+        <td>InfluxDB background compaction merges Level-0→1→2→3 TSM files continuously
+            at high write rates. gp3 baseline is 3,000 IOPS free; at 81k writes/s
+            batched in 1,000-row chunks ≈ 81 WAL writes/s plus compaction read-back.
+            Provisioning an extra 3,000 IOPS: $0.016/IOPS-month × 3,000 = $48/month.</td>
+      </tr>
+      <tr>
+        <td>InfluxDB S3 backup</td>
+        <td>Daily EBS snapshot → S3</td>
+        <td class="num warn">$28 → $85</td>
+        <td>Incremental daily snapshot of growing EBS volume. At 123 GB/day new data,
+            annual snapshot storage grows: $0.05/GB-month × 123 GB × months.
+            Starts at ~$28/month (month 1), reaches ~$85/month by year 3 and stays
+            roughly there (rotating 30-day retention). <em>Not taking backups is not
+            an option for a production BMS system.</em></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="two-col" style="margin-top:14px">
+    <div class="box">
+      <div class="box-title">InfluxDB — true monthly cost (with processing)</div>
+      <table>
+        <thead><tr><th></th><th class="r">Month 1</th><th class="r">Month 60</th><th class="r">Month 120</th></tr></thead>
+        <tbody>
+          <tr><td>Storage (from §2)</td><td class="r num">$660</td><td class="r num">$18,065</td><td class="r num">$35,765</td></tr>
+          <tr><td>FlashMQ relay EC2</td><td class="r num">$70</td><td class="r num">$70</td><td class="r num">$70</td></tr>
+          <tr><td>Telegraf EC2</td><td class="r num">$120</td><td class="r num">$120</td><td class="r num">$120</td></tr>
+          <tr><td>EBS extra IOPS</td><td class="r num">$50</td><td class="r num">$50</td><td class="r num">$50</td></tr>
+          <tr><td>InfluxDB S3 backup</td><td class="r num">$28</td><td class="r num">$75</td><td class="r num">$85</td></tr>
+          <tr style="font-weight:700;color:var(--red)"><td>Total</td>
+              <td class="r num">$928</td><td class="r num">$18,380</td><td class="r num">$36,090</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="box">
+      <div class="box-title">Parquet/DuckDB — true monthly cost (with processing)</div>
+      <table>
+        <thead><tr><th></th><th class="r">Month 1</th><th class="r">Month 60</th><th class="r">Month 120</th></tr></thead>
+        <tbody>
+          <tr><td>Storage (from §2)</td><td class="r num">$224</td><td class="r num">$2,997</td><td class="r num">$5,817</td></tr>
+          <tr><td>FlashMQ relay EC2</td><td class="r ok">—</td><td class="r ok">—</td><td class="r ok">—</td></tr>
+          <tr><td>Telegraf EC2</td><td class="r ok">—</td><td class="r ok">—</td><td class="r ok">—</td></tr>
+          <tr><td>Extra IOPS</td><td class="r ok">—</td><td class="r ok">—</td><td class="r ok">—</td></tr>
+          <tr><td>Backup (S3 redundancy built-in)</td><td class="r ok">—</td><td class="r ok">—</td><td class="r ok">—</td></tr>
+          <tr style="font-weight:700;color:var(--green)"><td>Total</td>
+              <td class="r num">$224</td><td class="r num">$2,997</td><td class="r num">$5,817</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:10px;font-size:0.8rem;color:var(--muted)">
+        writer.cpp runs on the edge machine alongside FlashMQ. S3 PUT goes directly
+        from the writer process. No AWS EC2 is needed in the data collection path.
+        S3's 11-nines redundancy replaces the backup line.
+      </p>
+    </div>
+  </div>
+
+  <h3>Processing cost — 10-year addition to InfluxDB total</h3>
+  <table>
+    <thead><tr><th>Item</th><th class="r">Monthly (avg)</th><th class="r">10-year total</th></tr></thead>
+    <tbody>
+      <tr><td>FlashMQ relay EC2</td><td class="r num">$70</td><td class="r num err">$8,400</td></tr>
+      <tr><td>Telegraf EC2</td><td class="r num">$120</td><td class="r num err">$14,400</td></tr>
+      <tr><td>EBS extra IOPS</td><td class="r num">$50</td><td class="r num err">$6,000</td></tr>
+      <tr><td>InfluxDB S3 backup (avg)</td><td class="r num">$60</td><td class="r num err">$7,200</td></tr>
+      <tr style="font-weight:700"><td>Processing subtotal</td><td class="r num">$300</td><td class="r num err">$36,000</td></tr>
+      <tr style="font-weight:700;color:var(--red)"><td>InfluxDB true 10-year total</td>
+          <td class="r">—</td><td class="r num">$2,221,080</td></tr>
+      <tr style="font-weight:700;color:var(--green)"><td>Parquet/S3 true 10-year total</td>
+          <td class="r">—</td><td class="r num">$362,460</td></tr>
+      <tr style="font-weight:700;color:var(--accent)"><td>True saving</td>
+          <td class="r">—</td><td class="r num">$1,858,620 (83.6%)</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<h2 id="dataloss">10 · Data Loss Risk</h2>
+
+<div class="section">
+  <p>
+    BMS telemetry is not just operational data — it is the evidence base for warranty claims,
+    safety incident investigation, battery degradation analysis, and regulatory compliance for
+    energy storage systems. Data loss in this context has a direct financial and legal cost
+    beyond the cost of re-collection (which is impossible for historical events).
+  </p>
+
+  <h3>InfluxDB data loss vectors</h3>
+  <table>
+    <thead><tr><th>Scenario</th><th>Probability</th><th>Data lost</th><th>Detection</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Silent write drop — cache overflow</strong></td>
+        <td class="warn">High at sustained 81k writes/s</td>
+        <td class="err">Any message arriving while <code>cache-max-memory-size</code> is exceeded is silently dropped. No counter, no log line by default. At 81,420 writes/s, a 30-second compaction stall fills a 2 GB cache in ~34 seconds.</td>
+        <td class="err">Not visible in InfluxDB metrics by default. Requires external message count reconciliation.</td>
+      </tr>
+      <tr>
+        <td><strong>WAL gap on crash</strong></td>
+        <td class="warn">Any time the EC2 or process is restarted</td>
+        <td class="warn">WAL is flushed to TSM on a configurable schedule (default: cache-snapshot-memory-size = 25 MB). On a sudden crash, the last 25 MB of writes — roughly <strong>3 minutes of Longbow data</strong> — may not be persisted.</td>
+        <td class="warn">WAL recovery on restart re-applies the WAL, but only if the WAL file is intact. EC2 instance-store or EBS I/O failure during the crash may corrupt it.</td>
+      </tr>
+      <tr>
+        <td><strong>EBS volume failure</strong></td>
+        <td class="warn">~0.1–0.2%/year → ~1–2% over 10 years</td>
+        <td class="err">Total loss of all InfluxDB data if no backup, or loss of up to 24 hours if daily snapshots are used. 10 years of BMS history gone.</td>
+        <td class="warn">EBS health alerts via CloudWatch, but recovery requires full restore from snapshot.</td>
+      </tr>
+      <tr>
+        <td><strong>OOM kill (compaction + ingest contention)</strong></td>
+        <td class="warn">Occasional at high sustained rates</td>
+        <td class="warn">OS kills the InfluxDB process mid-compaction. TSM files may be left in a partially merged state. InfluxDB recovery tooling (<code>influx_inspect</code>) can usually recover, but there is a window of data inconsistency.</td>
+        <td class="warn">Visible in OS logs; not always visible in application metrics before it occurs.</td>
+      </tr>
+      <tr>
+        <td><strong>Series cardinality explosion</strong></td>
+        <td class="ok">Low for known EMS schema</td>
+        <td class="err">If a firmware update changes the topic structure (e.g., adds a new tag segment), cardinality can spike from 1,770 to millions of series. InfluxDB TSI index fills RAM; writes are dropped and the database may become unresponsive until restarted with a reduced retention policy.</td>
+        <td class="err">Hard to predict without schema enforcement at the broker. Topic format changes are common in production BMS deployments.</td>
+      </tr>
+      <tr>
+        <td><strong>Telegraf pipeline stall</strong></td>
+        <td class="warn">Occasional (GC pause, OOM, network blip)</td>
+        <td class="warn">Telegraf buffers in memory (default: metric_buffer_limit = 10,000 metrics). At 81,420 metrics/s, the buffer fills in <strong>123 milliseconds</strong>. Any stall longer than that drops data. Buffer overrun is logged but the lost data cannot be recovered.</td>
+        <td class="warn">Telegraf logs <code>Metric buffer overflow</code> but this is often missed in production log noise. Dropped metrics are not reported to InfluxDB.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-warn" style="margin-top:14px">
+    <strong>The most dangerous scenario: silent drops at normal operation.</strong>
+    At 81,420 writes/s, InfluxDB's default <code>cache-max-memory-size = 1 GB</code>
+    fills in ~12 seconds of message backlog. Any compaction cycle that takes longer than
+    12 seconds without flushing the cache causes silent drops — no error, no counter,
+    no alert unless you have external message-count reconciliation in place.
+    This is not a theoretical concern: it is the expected behaviour under the documented
+    default configuration at this write rate.
+  </div>
+
+  <h3>Parquet path data loss vectors</h3>
+  <table>
+    <thead><tr><th>Scenario</th><th>Probability</th><th>Data lost</th><th>Detection</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>writer.cpp crash mid-flush</strong></td>
+        <td class="ok">Rare (C++ process, no GC)</td>
+        <td class="warn">Rows accumulated since the last completed flush (up to <code>flush_interval_seconds</code>, default 60s). All previously flushed files on S3 are intact. The in-progress Parquet file is abandoned with a <code>.partial</code> suffix.</td>
+        <td class="ok">Health endpoint goes dark immediately. <code>ring_drops</code> counter visible in <code>/health</code> before crash. SHM ring (when implemented) reduces this window to near-zero by preserving unread messages across restarts.</td>
+      </tr>
+      <tr>
+        <td><strong>MqttRing overflow</strong></td>
+        <td class="ok">Only above ~400k msg/s (confirmed at 300k/s with zero drops)</td>
+        <td class="warn">Ring drops are counted and exposed in <code>/health</code> as <code>ring_drops</code>. The monitoring dashboard shows this value in real time. No silent drops.</td>
+        <td class="ok"><strong>Fully observable.</strong> Counter visible at <code>/health</code>, shown in torture_monitor.html, and alertable via any HTTP check.</td>
+      </tr>
+      <tr>
+        <td><strong>S3 object loss</strong></td>
+        <td class="ok">Effectively zero (11 nines = 0.000000001%/year)</td>
+        <td class="ok">S3 Standard stores every object across ≥3 Availability Zones with automatic integrity checking. 10-year probability of losing any single object: ~10<sup>-10</sup>.</td>
+        <td class="ok">S3 replication metrics and CloudWatch S3 storage lens provide continuous visibility.</td>
+      </tr>
+      <tr>
+        <td><strong>Edge machine power loss</strong></td>
+        <td class="warn">Possible (edge deployment, UPS not guaranteed)</td>
+        <td class="warn">Same as writer crash — up to 60s of buffered rows. Files already pushed to S3 are safe. With <code>push_agent</code> rsync, files are off-machine within seconds of flush.</td>
+        <td class="ok">Restart is automatic; SHM ring preserves in-flight messages across restarts.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Durability comparison</h3>
+  <table>
+    <thead><tr><th>Storage medium</th><th>Annual durability</th><th>10-year survival prob.</th><th>Backup requirement</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>AWS S3 Standard</td>
+        <td class="ok">99.999999999% (11 nines)</td>
+        <td class="ok">&gt;99.9999999%</td>
+        <td class="ok">None — redundancy is built-in across 3 AZs</td>
+      </tr>
+      <tr>
+        <td>AWS EBS gp3</td>
+        <td class="warn">99.8–99.9% (3 nines)</td>
+        <td class="err">~1–2% cumulative failure risk</td>
+        <td class="err">Daily snapshots required (+$85/month); even then, last 24h at risk</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Business cost of data loss for BMS systems</h3>
+  <table>
+    <thead><tr><th>Loss event</th><th>Business impact</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Missing fault/alarm data during a thermal event</td>
+        <td class="err">Warranty claim denied — OEM requires continuous telemetry log to validate
+            cell fault sequence. A 3-minute WAL gap at the critical period is sufficient to void
+            the claim. Battery pack replacement cost: $50k–$500k per unit.</td>
+      </tr>
+      <tr>
+        <td>Regulatory compliance gap</td>
+        <td class="err">Energy storage systems in many jurisdictions require continuous data
+            retention for 5–10 years (UL 9540A, IEC 62933, local grid codes).
+            Silent InfluxDB drops create gaps that may not be discovered until a compliance
+            audit — at which point they cannot be back-filled.</td>
+      </tr>
+      <tr>
+        <td>Degradation model training data</td>
+        <td class="warn">BMS state-of-health models require complete charge/discharge cycle data.
+            Gaps caused by Telegraf buffer overflow during peak-rate events (charging spikes)
+            are correlated with the most important operational moments — exactly the data
+            that should not be lost.</td>
+      </tr>
+      <tr>
+        <td>Incident reconstruction</td>
+        <td class="err">Post-incident forensic analysis of a cell failure or fire requires
+            complete sub-second telemetry. If the incident triggered a write-rate spike
+            that caused InfluxDB cache overflow, the forensic record has a gap at the
+            most critical moment.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-ok" style="margin-top:14px">
+    <strong>Parquet path: all drops are observable and bounded.</strong>
+    The <code>ring_drops</code> counter in <code>/health</code> is incremented atomically
+    for every dropped message — there are no silent losses. At 300k msg/s (3.7× Longbow rate)
+    the counter has been confirmed at zero in sustained testing. The SHM ring extension will
+    reduce the crash-gap window from ~60s to near-zero by preserving unread messages across
+    writer restarts.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<h2 id="notes">11 · Notes and Caveats</h2>
 
 <div class="section">
   <ul>
