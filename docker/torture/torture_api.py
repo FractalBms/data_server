@@ -217,7 +217,7 @@ class Handler(BaseHTTPRequestHandler):
                 cmd = [
                     "docker", "run", "-d",
                     "--name", cname,
-                    "--network", "torture_torture",
+                    "--network", "torture_net",
                     "--restart", "unless-stopped",
                     "stress-pub:torture",
                     "--host", "broker", "--port", "1883",
