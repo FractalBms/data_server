@@ -44,14 +44,30 @@ FlashMQ aws-sim :1884  (fractal-phil)
 cd html && python3 -m http.server 8080 --bind 0.0.0.0 &
 
 # Stress runner
-.venv/bin/python source/stress_runner/stress_runner.py --config source/stress_runner/config.yaml > /tmp/stress_runner.log 2>&1 &
+.venv/bin/python source/stress_runner/stress_runner.py --config source/stress_runner/config.yaml > ~/logs/stress_runner.log 2>&1 &
 
 # Parquet writer (C++ binary, pre-built)
-cd source/parquet_writer_cpp && ./parquet_writer --config writer_config.yaml > /tmp/writer-host.log 2>&1 &
+cd source/parquet_writer_cpp && ./parquet_writer --config writer_config.yaml > ~/logs/writer-host.log 2>&1 &
 
 # Push agent (must run from its own dir)
-cd source/rsync_push && /home/phil/work/gen-ai/data_server/.venv/bin/python push_agent.py > /tmp/push_agent.log 2>&1 &
+cd source/rsync_push && /home/phil/work/gen-ai/data_server/.venv/bin/python push_agent.py > ~/logs/push_agent.log 2>&1 &
 ```
+
+### gx10-d94c (192.168.86.48) — git repo at ~/work/gen-ai/data_server
+
+```bash
+# Evelyn simulation (46 units × 1770 points = 81,420 topics/sweep)
+bash scripts/gx10-evelyn-start.sh   # logs → /data/logs/,  data → /data/parquet-evelyn/
+bash scripts/gx10-evelyn-stop.sh
+
+# Health check
+curl http://localhost:8771/health
+```
+
+- External drive: `/dev/sda` mounted at `/data` (1.8TB ext4, fstab entry present)
+- Logs: `/data/logs/`
+- Parquet data: `/data/parquet-evelyn/`
+- sudo password: spark1
 
 ### lp3 (192.168.86.20) — git repo at ~/work/gen-ai/data_server
 
@@ -60,7 +76,7 @@ cd source/rsync_push && /home/phil/work/gen-ai/data_server/.venv/bin/python push
 cd ~/work/gen-ai/data_server/source/parquet_writer_cpp && make parquet_writer
 
 # Start writer
-./parquet_writer --config writer_config.yaml > /tmp/writer-host.log 2>&1 &
+./parquet_writer --config writer_config.yaml > ~/logs/writer-host.log 2>&1 &
 ```
 
 - Git remote uses HTTPS (no GitHub SSH key on lp3): `https://github.com/philflex2020/data_server.git`
@@ -105,6 +121,8 @@ python manager/manager.py --config manager/config.fractal.yaml
 | `/srv/data/parquet/` | phil-dev / lp3 | writer.cpp output (partitioned parquet) |
 | `/srv/data/parquet-test/` | lp3 | test writer output (config_test.yaml) |
 | `/srv/data/parquet-aws-sim/` | fractal-phil | rsynced copy (DuckDB source) |
+| `/data/parquet-evelyn/` | gx10 | real_writer Evelyn sim output (external drive) |
+| `/data/logs/` | gx10 | real_writer + stress_real_pub logs (external drive) |
 | `/etc/flashmq/bridge-conf.d/` | phil-dev / lp3 | FlashMQ bridge config (generated) |
 
 ## Python environment

@@ -34,7 +34,7 @@ mqtt:
   timestamp_format: iso8601
 
 output:
-  base_path: /home/phil/parquet-evelyn
+  base_path: /data/parquet-evelyn
   project_id: 0
   site_id: "0215D1D8"
   partitions:
