@@ -158,6 +158,7 @@ struct RackState {
     float soc  = 50.0f;  // %
     float temp = 25.0f;  // °C
     bool  inject_overvolt = false;
+    float drift = 0.0f;  // accumulated SOC divergence from system mean (%)
 };
 
 struct UnitState {
@@ -183,11 +184,24 @@ struct UnitState {
 // Physics helpers
 // ============================================================================
 
+// Piecewise OCV — calibrated to Evelyn BESS site (0226571E) real measurements.
+// evelyn_data_analysis.html §5: residual V−(1145+0.5×SOC) mean=−47 V → base≈1098+0.5×SOC.
+// At SOC=94%: real V=1137 V → soft top-end compression modelled above 85%.
+// Range: 1070 V (SOC=0%) → ~1139 V (SOC=100%).
 static float soc_to_voltage(float soc) {
-    // LFP approximate: 1320V at 10% SOC, 1390V at 95%
-    return 1320.0f + 0.74f * std::max(0.0f, std::min(100.0f, soc));
+    soc = std::max(0.0f, std::min(100.0f, soc));
+    if (soc < 15.0f) return 1070.0f + 1.20f * soc;            // 1070..1088
+    if (soc < 85.0f) return 1088.0f + 0.65f * (soc - 15.0f); // 1088..1133.5
+    if (soc < 95.0f) return 1133.5f + 0.40f * (soc - 85.0f); // 1133.5..1137.5 (soft plateau)
+    return             1137.5f + 0.25f * (soc - 95.0f);       // 1137.5..1138.75 (saturation)
 }
-static float soc_to_cell_v(float soc) { return soc_to_voltage(soc) / 450.0f; }
+// Terminal voltage: OCV ± I × R_int; R_int rises at SOC extremes (SOC-dependent polarisation).
+static float soc_to_voltage_t(float soc, float current_a, bool charging) {
+    float r_factor = 1.0f + 1.5f * std::exp(-0.12f * std::min(soc, 100.0f - soc));
+    return soc_to_voltage(soc) + (charging ? 1.0f : -1.0f) * current_a * 0.008f * r_factor;
+}
+// ~325 cells: evelyn pack at 94% SOC → 1137 V / 3.50 V/cell ≈ 325 cells
+static float soc_to_cell_v(float soc) { return soc_to_voltage(soc) / 325.0f; }
 
 // ============================================================================
 // Global state
@@ -205,6 +219,7 @@ static std::mutex               g_ws_mtx;
 static std::vector<int>         g_ws_fds;
 
 static void ws_broadcast(const std::string& msg);  // forward declaration
+static void on_connect(struct mosquitto*, void*, int);   // forward declaration
 
 // ============================================================================
 // Signal classification
@@ -311,16 +326,21 @@ static double gen_value(const TopicEntry& e) {
     switch (e.sig) {
         case Sig::SYS_SOC:      return apply_noise(u.soc, np);
         case Sig::SYS_CURRENT:  return offline ? 0.0 : apply_noise(u.current, np);
-        case Sig::SYS_VOLTAGE:  return offline ? 0.0 : apply_noise(soc_to_voltage(u.soc), np);
+        case Sig::SYS_VOLTAGE:  return offline ? 0.0 :
+                                    apply_noise(soc_to_voltage_t(u.soc, u.current,
+                                                u.mode==Mode::CHARGING), np);
         case Sig::SYS_POWER:    return offline ? 0.0 :
-                                    apply_noise(soc_to_voltage(u.soc) * u.current / 1000.0f, np);
+                                    apply_noise(soc_to_voltage_t(u.soc, u.current,
+                                                u.mode==Mode::CHARGING) * u.current / 1000.0f, np);
         case Sig::AVG_CELL_V:   return apply_noise(soc_to_cell_v(u.soc), np);
         case Sig::MAX_CELL_V:   return apply_noise(soc_to_cell_v(u.soc) + 0.003, np);
         case Sig::MIN_CELL_V:   return apply_noise(soc_to_cell_v(u.soc) - 0.003, np);
 
         case Sig::RACK_SOC:     return apply_noise(rack.soc, np);
         case Sig::RACK_TEMP:    return apply_noise(rack.temp, np);
-        case Sig::RACK_VOLTAGE: return offline ? 0.0 : apply_noise(soc_to_voltage(rack.soc) / 5.0f, np);
+        case Sig::RACK_VOLTAGE: return offline ? 0.0 :
+                                    apply_noise(soc_to_voltage_t(rack.soc, u.current,
+                                                u.mode==Mode::CHARGING) / 5.0f, np);
         case Sig::RACK_CURRENT: return offline ? 0.0 : apply_noise(u.current, np);
 
         // Fault flags: no noise — discrete 0/1
@@ -349,6 +369,22 @@ static double gen_value(const TopicEntry& e) {
 // ============================================================================
 // Template loader
 // ============================================================================
+
+// Read unit_ids array from the template JSON (used when --unit-id is not specified).
+static std::vector<std::string> load_unit_ids_from_template(const std::string& path) {
+    simdjson::ondemand::parser parser;
+    auto json = simdjson::padded_string::load(path);
+    auto doc  = parser.iterate(json);
+    std::vector<std::string> ids;
+    simdjson::ondemand::array arr;
+    if (doc["unit_ids"].get(arr) != simdjson::SUCCESS) return ids;
+    for (auto id : arr) {
+        std::string_view sv;
+        if (id.get_string().get(sv) == simdjson::SUCCESS)
+            ids.emplace_back(sv);
+    }
+    return ids;
+}
 
 static std::vector<TopicEntry> build_topics(const std::string& path,
                                              const std::vector<std::string>& unit_ids) {
@@ -388,6 +424,186 @@ static std::vector<TopicEntry> build_topics(const std::string& path,
 }
 
 // ============================================================================
+// Peripheral simulation globals
+// ============================================================================
+
+static std::string g_site_id;
+static std::string g_mqtt_host_g;
+static int         g_mqtt_port_g = 1883;
+
+// Slow-varying peripheral state — written by physics_thread_fn (under g_state_mtx),
+// read by peripheral_thread_fn (captured under same lock during snapshot).
+static float g_agc_setpoint  = -10000.0f;  // kW  HS-CONTROL-AGC; slow random walk
+static float g_freq_response =     0.0f;   // kW  PCS_P--Frequency Response; Hz-droop
+static float g_p_correction  =     0.0f;   // kW  PCS_P--P Correction; mean-reverting
+
+static void pub_f(struct mosquitto* m, int qos,
+                  const char* topic, double v, const char* ts) {
+    char buf[192];
+    int n = snprintf(buf, sizeof(buf), "{\"ts\":\"%s\",\"value\":%.4f}", ts, v);
+    mosquitto_publish(m, nullptr, topic, n, buf, qos, false);
+}
+static void pub_i(struct mosquitto* m, int qos,
+                  const char* topic, int v, const char* ts) {
+    char buf[128];
+    int n = snprintf(buf, sizeof(buf), "{\"ts\":\"%s\",\"value\":%d}", ts, v);
+    mosquitto_publish(m, nullptr, topic, n, buf, qos, false);
+}
+
+// Publish site / meter / PCS peripheral topics at 1 Hz
+static void peripheral_thread_fn(int qos) {
+    struct mosquitto* mosq = mosquitto_new("ems-periph", true, nullptr);
+    if (!mosq) return;
+    mosquitto_connect_callback_set(mosq, on_connect);
+
+    while (!g_stop.load()) {
+        if (mosquitto_connect(mosq, g_mqtt_host_g.c_str(), g_mqtt_port_g, 60) == MOSQ_ERR_SUCCESS)
+            break;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    if (g_stop.load()) { mosquitto_destroy(mosq); return; }
+    mosquitto_loop_start(mosq);
+
+    char ts[64], topic[256];
+
+    while (!g_stop.load()) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        // Timestamp
+        {
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch()).count();
+            time_t sec = ms/1000; int msec = ms%1000;
+            struct tm tm_val; gmtime_r(&sec, &tm_val);
+            snprintf(ts, sizeof(ts), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                     tm_val.tm_year+1900, tm_val.tm_mon+1, tm_val.tm_mday,
+                     tm_val.tm_hour, tm_val.tm_min, tm_val.tm_sec, msec);
+        }
+
+        // Snapshot unit states + peripheral slow state
+        struct PCSSnap { std::string uid; float p_kw, p_kvar, cmd_p; bool acbrk, ena; };
+        std::vector<PCSSnap> snaps;
+        float total_kw = 0, total_kvar = 0, mean_soc = 0;
+        float agc_kw = 0, freq_resp_kw = 0, p_corr_kw = 0;
+        {
+            std::lock_guard<std::mutex> lk(g_state_mtx);
+            if (g_units.empty()) continue;
+            for (const auto& u : g_units) {
+                float sign = (u.mode == Mode::DISCHARGING) ?  1.0f :
+                             (u.mode == Mode::CHARGING)    ? -1.0f : 0.0f;
+                float v    = soc_to_voltage_t(u.soc, u.current, u.mode==Mode::CHARGING);
+                float p_kw   = (!u.contactor||u.mode==Mode::OFFLINE) ? 0.0f :
+                               sign * u.current * v / 1000.0f;
+                float p_kvar = p_kw * 0.12f;
+                total_kw   += p_kw;
+                total_kvar += p_kvar;
+                mean_soc   += u.soc;
+                bool acbrk = u.contactor && u.mode != Mode::OFFLINE;
+                bool ena   = u.mode != Mode::OFFLINE;
+                snaps.push_back({u.id, p_kw, p_kvar, p_kw, acbrk, ena});
+            }
+            mean_soc    /= (float)g_units.size();
+            agc_kw       = g_agc_setpoint;
+            freq_resp_kw = g_freq_response;
+            p_corr_kw    = g_p_correction;
+        }
+
+        // Derived meter values
+        float meter_kw   = -total_kw  * 1.02f;
+        float meter_kvar = -total_kvar;
+        float meter_hz   = (float)apply_noise(60.0, 0.05);
+        float meter_v    = (float)apply_noise(131.6, 0.3);
+        float s_va       = std::sqrt(total_kw*total_kw + total_kvar*total_kvar);
+        float meter_i    = meter_v > 0 ? std::abs(total_kw*1000.0f)/(meter_v*1.732f) : 0.0f;
+        float meter_pf   = s_va > 0.1f ? total_kw/s_va : 0.0f;
+
+        const char* sid = g_site_id.c_str();
+
+#define PT(fmt, ...) snprintf(topic, sizeof(topic), fmt, __VA_ARGS__)
+
+        // ── Site ──────────────────────────────────────────────────────────
+        PT("ems/site/%s/root/SOC/float",                    sid);  pub_f(mosq,qos,topic,mean_soc,ts);
+        PT("ems/site/%s/root/BESSkW/float",                 sid);  pub_f(mosq,qos,topic,total_kw,ts);
+        PT("ems/site/%s/root/Ptot/float",                   sid);  pub_f(mosq,qos,topic,total_kw,ts);
+        PT("ems/site/%s/root/Qtot/float",                   sid);  pub_f(mosq,qos,topic,total_kvar,ts);
+        PT("ems/site/%s/root/HS-CONTROL-f/float",           sid);  pub_f(mosq,qos,topic,meter_hz,ts);
+        PT("ems/site/%s/root/HS-CONTROL-P/float",           sid);  pub_f(mosq,qos,topic,total_kw,ts);
+        PT("ems/site/%s/root/HS-CONTROL-Q/float",           sid);  pub_f(mosq,qos,topic,total_kvar,ts);
+        PT("ems/site/%s/root/HS-CONTROL-P-Measured/float",  sid);  pub_f(mosq,qos,topic,total_kw*0.995f,ts);
+        PT("ems/site/%s/root/HS-CONTROL-AGC/float",         sid);  pub_f(mosq,qos,topic,agc_kw,ts);
+        PT("ems/site/%s/root/Group1_P/float",                sid);  pub_f(mosq,qos,topic,total_kw,ts);
+        PT("ems/site/%s/root/Group2_Q/float",                sid);  pub_f(mosq,qos,topic,0.0,ts);
+        PT("ems/site/%s/root/RTAC_P/float",                  sid);  pub_f(mosq,qos,topic,total_kw,ts);
+        PT("ems/site/%s/root/PCS_P/float",                   sid);  pub_f(mosq,qos,topic,total_kw,ts);
+        PT("ems/site/%s/root/PCS_P--P Correction/float",     sid);  pub_f(mosq,qos,topic,p_corr_kw,ts);
+        PT("ems/site/%s/root/PCS_P--Frequency Response/float",sid); pub_f(mosq,qos,topic,freq_resp_kw,ts);
+
+        // ── Meter ─────────────────────────────────────────────────────────
+        PT("ems/site/%s/meter/meter_1/kW/float",             sid);  pub_f(mosq,qos,topic,meter_kw,ts);
+        PT("ems/site/%s/meter/meter_1/kVAR/float",           sid);  pub_f(mosq,qos,topic,meter_kvar,ts);
+        PT("ems/site/%s/meter/meter_1/Hz/float",             sid);  pub_f(mosq,qos,topic,meter_hz,ts);
+        PT("ems/site/%s/meter/meter_1/Voltage/float",        sid);  pub_f(mosq,qos,topic,meter_v,ts);
+        PT("ems/site/%s/meter/meter_1/Current/float",        sid);  pub_f(mosq,qos,topic,meter_i,ts);
+        PT("ems/site/%s/meter/meter_1/PF/float",             sid);  pub_f(mosq,qos,topic,meter_pf,ts);
+        PT("ems/site/%s/meter/meter_1/CLR_NET_LOAD_MW/float",sid);  pub_f(mosq,qos,topic,-total_kw,ts);
+        PT("ems/site/%s/meter/meter_1/CLR_NET_MW/float",     sid);  pub_f(mosq,qos,topic,-total_kw,ts);
+
+        // ── PCS per unit ──────────────────────────────────────────────────
+        for (const auto& s : snaps) {
+            const char* uid = s.uid.c_str();
+            PT("ems/site/%s/unit/%s/pcs/pcs_1/PCS_P/float",           sid,uid);
+            pub_f(mosq,qos,topic,s.p_kw,ts);
+            PT("ems/site/%s/unit/%s/pcs/pcs_1/PCS_Q/float",           sid,uid);
+            pub_f(mosq,qos,topic,s.p_kvar,ts);
+            PT("ems/site/%s/unit/%s/pcs/pcs_1/CMD_P/float",           sid,uid);
+            pub_f(mosq,qos,topic,s.cmd_p,ts);
+            PT("ems/site/%s/unit/%s/pcs/pcs_1/kW/float",              sid,uid);
+            pub_f(mosq,qos,topic,s.p_kw*0.97f,ts);
+            PT("ems/site/%s/unit/%s/pcs/pcs_1/DCkW/float",            sid,uid);
+            pub_f(mosq,qos,topic,s.p_kw,ts);
+            PT("ems/site/%s/unit/%s/pcs/pcs_1/Hz/float",              sid,uid);
+            pub_f(mosq,qos,topic,meter_hz,ts);
+            PT("ems/site/%s/unit/%s/pcs/pcs_1/StatusSymmCurrentComp_CurrentRealPS/float",sid,uid);
+            pub_f(mosq,qos,topic,s.p_kw*1.92f,ts);
+            PT("ems/site/%s/unit/%s/pcs/pcs_1/ACBreaker/boolean_integer",sid,uid);
+            pub_i(mosq,qos,topic,s.acbrk?1:0,ts);
+            PT("ems/site/%s/unit/%s/pcs/pcs_1/EnabledStatus/boolean_integer",sid,uid);
+            pub_i(mosq,qos,topic,s.ena?1:0,ts);
+        }
+
+        // ── RTAC — feeder meters + QSE interface ─────────────────────────
+        // Feeder shares calibrated from evelyn: F1 47%, F2 18%, F3 21%, F4 7%, F5 7%
+        // Point names use _P_WATTS suffix but unit is kW (SCADA naming convention).
+        static const float feeder_share[5] = {0.47f, 0.18f, 0.21f, 0.07f, 0.07f};
+        for (int f = 1; f <= 5; ++f) {
+            float f_p  = (float)apply_noise(total_kw * feeder_share[f-1], 20.0);
+            float f_pf = (float)apply_noise(0.09, 30.0);
+            PT("ems/site/%s/rtac/rtac_1/MET_F%d_P_WATTS/float", sid, f);
+            pub_f(mosq,qos,topic,f_p,ts);
+            PT("ems/site/%s/rtac/rtac_1/MET_F%d_PF/float", sid, f);
+            pub_f(mosq,qos,topic,f_pf,ts);
+        }
+        // QSE signals — grid scheduling interface (kW, sign: positive = grid load)
+        float bess_load_kw = -total_kw;  // positive when BESS charging (drawing from grid)
+        PT("ems/site/%s/rtac/rtac_1/QSE_Line_flows_MW/float",                  sid);
+        pub_f(mosq,qos,topic,total_kw/1000.0f,ts);
+        PT("ems/site/%s/rtac/rtac_1/QSE_Transformer_flows_MW/float",           sid);
+        pub_f(mosq,qos,topic,total_kw/1000.0f,ts);
+        PT("ems/site/%s/rtac/rtac_1/QSE_BESS_LOAD_MW/float",                   sid);
+        pub_f(mosq,qos,topic,bess_load_kw,ts);
+        PT("ems/site/%s/rtac/rtac_1/QSE_CLR_Scheduled_Power_Consumption/float",sid);
+        pub_f(mosq,qos,topic,bess_load_kw,ts);
+        PT("ems/site/%s/rtac/rtac_1/QSE_CLR_Net_Load_MW/float",                sid);
+        pub_f(mosq,qos,topic,bess_load_kw,ts);
+#undef PT
+    }
+
+    mosquitto_loop_stop(mosq, true);
+    mosquitto_disconnect(mosq);
+    mosquitto_destroy(mosq);
+}
+
+// ============================================================================
 // Physics update — runs every 100 ms
 // ============================================================================
 
@@ -410,17 +626,19 @@ static void physics_thread_fn() {
             else if (u.mode == Mode::DISCHARGING)  I = u.current;
             // STANDBY: I stays 0
 
-            // SOC drift: dSOC/dt = I/capacity * (100/3600) %/s
+            // SOC drift with coulombic efficiency: 96% charge, ~102% discharge (1/0.98)
             if (u.mode != Mode::STANDBY) {
-                float dsoc = (I / u.capacity) * (100.0f / 3600.0f) * DT;
+                float eta  = (u.mode == Mode::CHARGING) ? 0.96f : (1.0f / 0.98f);
+                float dsoc = (I / u.capacity) * (100.0f / 3600.0f) * DT * eta;
                 if (u.mode == Mode::CHARGING)    u.soc += dsoc;
                 else                             u.soc -= dsoc;
                 u.soc = std::max(0.0f, std::min(100.0f, u.soc));
 
-                // Update rack SOCs proportionally (small imbalance via tiny noise)
+                // Rack SOC: drift diverges slowly each cycle (max ±3% spread at full divergence)
                 for (int ri = 0; ri < 5; ++ri) {
-                    float noise = (float)(ri - 2) * 0.05f;  // ±0.1% spread
-                    u.racks[ri].soc = std::max(0.0f, std::min(100.0f, u.soc + noise));
+                    u.racks[ri].drift += (float)(ri - 2) * 2e-4f * std::abs(dsoc);
+                    u.racks[ri].drift  = std::max(-3.0f, std::min(3.0f, u.racks[ri].drift));
+                    u.racks[ri].soc    = std::max(0.0f, std::min(100.0f, u.soc + u.racks[ri].drift));
                 }
 
                 // Update energy counters
@@ -448,6 +666,17 @@ static void physics_thread_fn() {
                 fprintf(stderr, "[physics] %s: SOC critical — STANDBY\n", u.id.c_str());
             }
         }
+
+        // Update slow-varying peripheral state (inside lock, after per-unit loop)
+        // AGC: slow random walk, mean-biased toward −10 MW, clamped [−40, +5] MW
+        g_agc_setpoint += ((float)rand() / RAND_MAX - 0.52f) * 200.0f * DT;
+        g_agc_setpoint  = std::max(-40000.0f, std::min(5000.0f, g_agc_setpoint));
+        // Freq response: proportional to simulated ±20 mHz Hz deviation, 20 MW/Hz droop
+        float hz_dev    = ((float)rand() / RAND_MAX - 0.5f) * 0.04f;
+        g_freq_response = hz_dev * -200000.0f;
+        // P correction: mean-reverting random (time constant ~20 s)
+        g_p_correction += ((float)rand() / RAND_MAX - 0.5f) * 500.0f * DT;
+        g_p_correction *= (1.0f - 0.05f * DT);
     }
 }
 
@@ -612,6 +841,7 @@ static std::string build_status(uint64_t mps) {
     s.reserve(4096);
     s += "{\"type\":\"status\",\"mps\":"; s += std::to_string(mps);
     s += ",\"rate\":"; s += std::to_string(g_rate.load());
+    s += ",\"site_id\":\""; s += g_site_id; s += "\"";
     s += ",\"units\":[";
 
     std::lock_guard<std::mutex> lk(g_state_mtx);
@@ -907,6 +1137,7 @@ int main(int argc, char* argv[]) {
         else if (!strcmp(argv[i],"--id")       && i+1<argc) base_id    = argv[++i];
         else if (!strcmp(argv[i],"--ws-port")  && i+1<argc) ws_port    = atoi(argv[++i]);
         else if (!strcmp(argv[i],"--soc")      && i+1<argc) init_soc   = atof(argv[++i]);
+        else if (!strcmp(argv[i],"--site-id")  && i+1<argc) g_site_id  = argv[++i];
     }
 
     if (tpl.empty()) { tpl = find_template(argv[0]); }
@@ -920,10 +1151,18 @@ int main(int argc, char* argv[]) {
     if (!unit_ids_arg.empty()) {
         unit_ids = unit_ids_arg;
     } else {
-        uint32_t base = 0x0215F5DD;
-        for (int i=0;i<n_units;++i) {
-            char buf[16]; snprintf(buf,sizeof(buf),"%08X",base+i);
-            unit_ids.push_back(buf);
+        // Prefer unit_ids from the template JSON (real deployment IDs).
+        // Fall back to synthetic hex IDs only if the template has none.
+        unit_ids = load_unit_ids_from_template(tpl);
+        if (unit_ids.empty()) {
+            uint32_t base = 0x0215F5DD;
+            for (int i=0;i<n_units;++i) {
+                char buf[16]; snprintf(buf,sizeof(buf),"%08X",base+i);
+                unit_ids.push_back(buf);
+            }
+        } else if (n_units != 4) {
+            // --units was explicitly set; truncate or warn
+            if ((int)unit_ids.size() > n_units) unit_ids.resize(n_units);
         }
     }
 
@@ -962,14 +1201,18 @@ int main(int argc, char* argv[]) {
         ws_port, init_soc);
     fflush(stdout);
 
+    g_mqtt_host_g = host;
+    g_mqtt_port_g = port;
+
     std::thread ph(physics_thread_fn);
     std::thread pu(publish_thread_fn, host, port, base_id, qos);
     std::thread ws(ws_server_fn, ws_port);
     std::thread st(stats_fn, (int)g_topics.size());
+    std::thread periph(peripheral_thread_fn, qos);
 
     pu.join();
     g_stop.store(true);
-    ph.join(); ws.join(); st.join();
+    ph.join(); ws.join(); st.join(); periph.join();
 
     mosquitto_lib_cleanup();
     return 0;

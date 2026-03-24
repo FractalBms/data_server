@@ -534,6 +534,82 @@ TEST("current_state: mixed source types — sparse columns null-padded") {
 }
 
 // ---------------------------------------------------------------------------
+// WAL  (write_wal_ipc + wal_replay_file round-trips)
+// ---------------------------------------------------------------------------
+
+TEST("wal: empty rows — no file written") {
+    auto dir  = tmp_dir();
+    auto path = dir + "/empty.wal.arrow";
+    auto st   = write_wal_ipc(path, {});
+    EXPECT_TRUE(st.ok());
+    EXPECT_FALSE(fs::exists(path));
+    fs::remove_all(dir);
+}
+
+TEST("wal: single row round-trips") {
+    auto dir  = tmp_dir();
+    auto path = dir + "/single.wal.arrow";
+    std::vector<Row> rows{ make_battery_row(1, 2, 3, 4, 3.7, 1700000000.0) };
+    EXPECT_TRUE(write_wal_ipc(path, rows).ok());
+    EXPECT_TRUE(fs::exists(path));
+    auto back = wal_replay_file(path);
+    EXPECT_EQ(back.size(), 1u);
+    EXPECT_NEAR(back[0].floats.at("voltage"),   3.7,          1e-9);
+    EXPECT_NEAR(back[0].floats.at("timestamp"), 1700000000.0, 1.0);
+    EXPECT_EQ(back[0].ints.at("site_id"),   1);
+    EXPECT_EQ(back[0].ints.at("rack_id"),   2);
+    EXPECT_EQ(back[0].ints.at("module_id"), 3);
+    EXPECT_EQ(back[0].ints.at("cell_id"),   4);
+    fs::remove_all(dir);
+}
+
+TEST("wal: N rows round-trip — count preserved") {
+    auto dir  = tmp_dir();
+    auto path = dir + "/batch.wal.arrow";
+    std::vector<Row> rows;
+    for (int i = 0; i < 50; i++)
+        rows.push_back(make_battery_row(0, i%3, i%4, i%6, 3.5 + i*0.01, 1700000000.0 + i));
+    EXPECT_TRUE(write_wal_ipc(path, rows).ok());
+    auto back = wal_replay_file(path);
+    EXPECT_EQ(back.size(), 50u);
+    fs::remove_all(dir);
+}
+
+TEST("wal: all int and float columns survive round-trip") {
+    auto dir  = tmp_dir();
+    auto path = dir + "/cols.wal.arrow";
+    std::vector<Row> rows{ make_battery_row(0, 0, 0, 0, 3.8, 1700000001.0) };
+    EXPECT_TRUE(write_wal_ipc(path, rows).ok());
+    auto back = wal_replay_file(path);
+    EXPECT_EQ(back.size(), 1u);
+    // int columns
+    EXPECT_EQ(back[0].ints.count("project_id"), 1u);
+    EXPECT_EQ(back[0].ints.count("site_id"),    1u);
+    // float columns
+    EXPECT_EQ(back[0].floats.count("voltage"),     1u);
+    EXPECT_EQ(back[0].floats.count("temperature"), 1u);
+    EXPECT_EQ(back[0].floats.count("soc"),         1u);
+    fs::remove_all(dir);
+}
+
+TEST("wal: replay nonexistent file returns empty vector") {
+    auto rows = wal_replay_file("/tmp/no_such_file_xyz.wal.arrow");
+    EXPECT_TRUE(rows.empty());
+}
+
+TEST("wal: replay truncated/corrupt file returns empty vector") {
+    auto dir  = tmp_dir();
+    auto path = dir + "/corrupt.wal.arrow";
+    // Write some garbage bytes
+    std::ofstream f(path, std::ios::binary);
+    f << "not arrow ipc data at all\x00\x01\x02";
+    f.close();
+    auto rows = wal_replay_file(path);
+    EXPECT_TRUE(rows.empty());
+    fs::remove_all(dir);
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 

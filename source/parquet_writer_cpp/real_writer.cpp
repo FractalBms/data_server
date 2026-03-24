@@ -41,6 +41,7 @@
 #include <arrow/api.h>
 #include <arrow/io/file.h>
 #include <arrow/ipc/api.h>
+#include <parquet/arrow/reader.h>
 #include <parquet/arrow/writer.h>
 #include <parquet/properties.h>
 #include <simdjson.h>
@@ -121,6 +122,12 @@ struct Config {
     // Health HTTP endpoint
     bool        health_enabled      {true};
     int         health_port         {8771};
+
+    // Compactor — merges small flush files into larger ones in the background
+    bool        compact_enabled         {false};
+    int         compact_interval_seconds{600};   // how often to scan (default: 10 min)
+    int         compact_min_files       {3};     // min files in a dir to trigger compaction
+    int         compact_min_age_seconds {0};     // 0 = 2 × flush_interval_seconds
 };
 
 Config load_config(const std::string& path) {
@@ -174,6 +181,12 @@ Config load_config(const std::string& path) {
         if (auto h = y["health"]) {
             if (h["enabled"]) cfg.health_enabled = h["enabled"].as<bool>();
             if (h["port"])    cfg.health_port    = h["port"].as<int>();
+        }
+        if (auto c = y["compact"]) {
+            if (c["enabled"])           cfg.compact_enabled           = c["enabled"].as<bool>();
+            if (c["interval_seconds"])  cfg.compact_interval_seconds  = c["interval_seconds"].as<int>();
+            if (c["min_files"])         cfg.compact_min_files         = c["min_files"].as<int>();
+            if (c["min_age_seconds"])   cfg.compact_min_age_seconds   = c["min_age_seconds"].as<int>();
         }
         if (auto g = y["guard"]) {
             if (g["min_free_gb"])
@@ -519,6 +532,21 @@ arrow::Status flush_partition(const std::string& path,
     return arrow::Status::OK();
 }
 
+// Write a pre-built Arrow Table directly to a Parquet file.
+// Used by the compactor, which works at the Table level to avoid Row round-trips.
+static arrow::Status write_parquet_table(const std::string& path,
+                                          const std::shared_ptr<arrow::Table>& table,
+                                          const std::string& compression) {
+    auto props = parquet::WriterProperties::Builder()
+        .compression(to_parquet_compression(compression))
+        ->build();
+    ARROW_ASSIGN_OR_RAISE(auto out, arrow::io::FileOutputStream::Open(path));
+    ARROW_RETURN_NOT_OK(parquet::arrow::WriteTable(
+        *table, arrow::default_memory_pool(), out,
+        static_cast<int64_t>(table->num_rows()), props));
+    return arrow::Status::OK();
+}
+
 // ---------------------------------------------------------------------------
 // WAL — write-ahead log for crash recovery  (Arrow IPC format)
 // ---------------------------------------------------------------------------
@@ -602,6 +630,149 @@ static std::vector<Row> wal_replay_file(const std::string& path) {
     return rows;
 }
 
+// g_cfg and g_shutdown declared here (before compactor) so compact_thread_fn can reference them.
+// All other globals remain in the "Global state" section below.
+static std::atomic<bool> g_shutdown{false};
+static const Config*     g_cfg{nullptr};
+
+// ---------------------------------------------------------------------------
+// Compactor — merges small flush files into larger ones, runs independently
+//
+// Operates entirely on the filesystem — no locks, no interaction with writer
+// hot path.  Safety rules:
+//   1. Only touches files older than compact_min_age_seconds (default: 2 × flush_interval)
+//      so it never races with the current flush.
+//   2. write-to-.tmp → rename → delete sources — same atomic pattern as flush.
+//   3. Skips *.tmp, current_state.parquet, hot.parquet (non-timestamp names).
+//   4. Both flush files (YYYYMMDDTHHMMSSZ.parquet) and previous compact files
+//      (compact_*.parquet) are eligible — naturally produces larger files each round.
+// ---------------------------------------------------------------------------
+
+// Read a parquet file into an Arrow Table (used by compactor — avoids Row deserialization).
+static arrow::Result<std::shared_ptr<arrow::Table>>
+read_parquet_table(const std::string& path) {
+    ARROW_ASSIGN_OR_RAISE(auto infile, arrow::io::ReadableFile::Open(path));
+    ARROW_ASSIGN_OR_RAISE(auto reader,
+        parquet::arrow::OpenFile(infile, arrow::default_memory_pool()));
+    std::shared_ptr<arrow::Table> table;
+    ARROW_RETURN_NOT_OK(reader->ReadTable(&table));
+    return table;
+}
+
+// Compact all files in one leaf directory.  Returns count of source files consumed.
+static int compact_directory(const fs::path& dir,
+                               const std::vector<fs::path>& files,
+                               const Config& cfg) {
+    std::vector<std::shared_ptr<arrow::Table>> tables;
+    tables.reserve(files.size());
+    for (const auto& f : files) {
+        auto r = read_parquet_table(f.string());
+        if (!r.ok()) {
+            std::cerr << "[compact] skip " << f.filename().string()
+                      << ": " << r.status().ToString() << "\n";
+            return 0;  // bail — don't delete anything if any read fails
+        }
+        tables.push_back(*r);
+    }
+
+    // Unify schemas across partitions that may have different column sets.
+    arrow::ConcatenateTablesOptions opts;
+    opts.unify_schemas = true;
+    auto r_merged = arrow::ConcatenateTables(tables, opts);
+    if (!r_merged.ok()) {
+        std::cerr << "[compact] merge failed in " << dir.string()
+                  << ": " << r_merged.status().ToString() << "\n";
+        return 0;
+    }
+    auto merged = *r_merged;
+
+    auto ts       = time_suffix();
+    auto tmp_path = (dir / ("compact_" + ts + ".parquet.tmp")).string();
+    auto out_path = (dir / ("compact_" + ts + ".parquet")).string();
+
+    auto st = write_parquet_table(tmp_path, merged, cfg.compression);
+    if (!st.ok()) {
+        std::cerr << "[compact] write failed: " << st.ToString() << "\n";
+        std::error_code ec; fs::remove(tmp_path, ec);
+        return 0;
+    }
+
+    std::error_code ec;
+    fs::rename(tmp_path, out_path, ec);
+    if (ec) {
+        std::cerr << "[compact] rename failed: " << ec.message() << "\n";
+        fs::remove(tmp_path, ec);
+        return 0;
+    }
+
+    int deleted = 0;
+    for (const auto& f : files) {
+        fs::remove(f, ec);
+        if (!ec) ++deleted;
+        else std::cerr << "[compact] remove " << f.filename().string()
+                       << " failed: " << ec.message() << "\n";
+    }
+
+    std::cout << "[compact] " << deleted << " → " << out_path
+              << " (" << merged->num_rows() << " rows)\n";
+    return deleted;
+}
+
+static void compact_thread_fn() {
+    const int min_age_s = g_cfg->compact_min_age_seconds > 0
+        ? g_cfg->compact_min_age_seconds
+        : g_cfg->flush_interval_seconds * 2;
+
+    std::cout << "[compact] thread started"
+              << "  interval=" << g_cfg->compact_interval_seconds << "s"
+              << "  min_files=" << g_cfg->compact_min_files
+              << "  min_age=" << min_age_s << "s\n";
+
+    while (!g_shutdown) {
+        for (int i = 0; i < g_cfg->compact_interval_seconds && !g_shutdown; ++i)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (g_shutdown) break;
+
+        auto cutoff = fs::file_time_type::clock::now()
+                      - std::chrono::seconds(min_age_s);
+
+        // Scan base_path recursively; group eligible files by parent directory.
+        std::error_code ec;
+        std::map<fs::path, std::vector<fs::path>> dir_files;
+
+        for (const auto& entry :
+             fs::recursive_directory_iterator(g_cfg->base_path, ec)) {
+            if (!entry.is_regular_file(ec)) continue;
+            const auto& p = entry.path();
+            if (p.extension() != ".parquet") continue;
+
+            auto fname = p.filename().string();
+            // Skip temp files
+            if (fname.size() > 4 && fname.substr(fname.size() - 4) == ".tmp") continue;
+            // Only compact flush files (start with digit) or previous compact files
+            bool is_flush   = !fname.empty() && std::isdigit((unsigned char)fname[0]);
+            bool is_compact = fname.size() > 8 && fname.substr(0, 8) == "compact_";
+            if (!is_flush && !is_compact) continue;
+
+            auto mtime = entry.last_write_time(ec);
+            if (ec || mtime > cutoff) continue;
+
+            dir_files[p.parent_path()].push_back(p);
+        }
+        if (ec) std::cerr << "[compact] scan error: " << ec.message() << "\n";
+
+        int total_consumed = 0;
+        for (auto& [dir, files] : dir_files) {
+            if ((int)files.size() < g_cfg->compact_min_files) continue;
+            std::sort(files.begin(), files.end());   // timestamp order
+            total_consumed += compact_directory(dir, files, *g_cfg);
+        }
+        if (total_consumed > 0)
+            std::cout << "[compact] cycle done — consumed " << total_consumed << " files\n";
+    }
+    std::cout << "[compact] thread exiting\n";
+}
+
 // ---------------------------------------------------------------------------
 // Global state
 // ---------------------------------------------------------------------------
@@ -610,8 +781,7 @@ static std::map<PartitionKey, Partition> g_buffers;
 static std::map<SensorKey, Row>          g_current_state;
 static std::mutex                        g_mutex;
 static std::condition_variable           g_flush_cv;
-static std::atomic<bool>                 g_shutdown{false};
-static const Config*                     g_cfg{nullptr};
+// g_shutdown and g_cfg declared earlier (before compactor thread)
 static size_t                            g_total_buffered{0};
 
 // Metrics — all atomics so health thread can read without lock
@@ -1116,9 +1286,10 @@ static bool validate_config(const Config& cfg) {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main  (omitted when REAL_WRITER_NO_MAIN is defined, e.g. for unit tests)
 // ---------------------------------------------------------------------------
 
+#ifndef REAL_WRITER_NO_MAIN
 int main(int argc, char* argv[]) {
     std::string config_path = "real_writer_config.yaml";
     for (int i = 1; i < argc - 1; i++)
@@ -1166,9 +1337,13 @@ int main(int argc, char* argv[]) {
     std::thread health_t;
     if (cfg.health_enabled)
         health_t = std::thread(health_thread_fn);
+    std::thread compact_t;
+    if (cfg.compact_enabled)
+        compact_t = std::thread(compact_thread_fn);
 
     flusher.join();
-    if (health_t.joinable()) health_t.join();
+    if (health_t.joinable())  health_t.join();
+    if (compact_t.joinable()) compact_t.join();
 
     mosquitto_loop_stop(mosq, /*force=*/true);
     mosquitto_disconnect(mosq);
@@ -1176,3 +1351,4 @@ int main(int argc, char* argv[]) {
     mosquitto_lib_cleanup();
     return 0;
 }
+#endif // REAL_WRITER_NO_MAIN

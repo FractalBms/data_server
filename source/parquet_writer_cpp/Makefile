@@ -31,7 +31,11 @@ TEST_FLAGS := $(CXXFLAGS) -DPARQUET_WRITER_NO_MAIN \
               -DTEST_PYTHON_BIN=\"$(TEST_PYTHON)\" \
               $(ARROW_CFLAGS) $(MOSQ_CFLAGS) $(YAML_CFLAGS) $(SIMDJSON_CFLAGS)
 
-.PHONY: all clean deps test kpi
+REAL_TEST_FLAGS := -std=c++20 -O2 -Wall -Wextra -DREAL_WRITER_NO_MAIN \
+              -DTEST_PYTHON_BIN=\"$(TEST_PYTHON)\" \
+              $(ARROW_CFLAGS) $(MOSQ_CFLAGS) $(YAML_CFLAGS) $(SIMDJSON_CFLAGS)
+
+.PHONY: all clean deps test test_real kpi kpi_real
 
 all: parquet_writer real_writer
 
@@ -39,23 +43,35 @@ parquet_writer: writer.cpp
 	$(CXX) $(ALL_CFLAGS) $< -o $@ $(ALL_LIBS)
 
 real_writer: real_writer.cpp
-	$(CXX) $(ALL_CFLAGS) $< -o $@ $(ALL_LIBS)
+	$(CXX) $(ALL_CFLAGS) -std=c++20 $< -o $@ $(ALL_LIBS)
 
 tests/test_writer: tests/test_writer.cpp writer.cpp tests/test_runner.h
 	$(CXX) $(TEST_FLAGS) -I. tests/test_writer.cpp -o $@ $(ALL_LIBS)
 
+tests/test_real_writer: tests/test_real_writer.cpp real_writer.cpp tests/test_runner.h
+	$(CXX) $(REAL_TEST_FLAGS) -I. tests/test_real_writer.cpp -o $@ $(ALL_LIBS)
+
 tests/kpi_writer: tests/kpi_writer.cpp writer.cpp
 	$(CXX) $(TEST_FLAGS) -I. tests/kpi_writer.cpp -o $@ $(ALL_LIBS)
+
+tests/kpi_real_writer: tests/kpi_real_writer.cpp real_writer.cpp tests/test_runner.h
+	$(CXX) $(REAL_TEST_FLAGS) -I. tests/kpi_real_writer.cpp -o $@ $(ALL_LIBS)
 
 test: tests/test_writer
 	./tests/test_writer
 
+test_real: tests/test_real_writer
+	./tests/test_real_writer
+
 kpi: tests/kpi_writer
 	./tests/kpi_writer
+
+kpi_real: tests/kpi_real_writer
+	./tests/kpi_real_writer
 
 # Install missing dev packages (requires sudo)
 deps:
 	sudo apt-get install -y libmosquitto-dev libyaml-cpp-dev libsimdjson-dev
 
 clean:
-	rm -f parquet_writer real_writer tests/test_writer tests/kpi_writer
+	rm -f parquet_writer real_writer tests/test_writer tests/test_real_writer tests/kpi_writer tests/kpi_real_writer

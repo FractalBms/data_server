@@ -76,3 +76,11 @@ health:
 guard:
   # Abort flush if free disk space falls below this threshold.
   min_free_gb: 1.0
+
+compact:
+  # Background compactor — merges small flush files into larger ones.
+  # Zero interaction with the write path; works purely on already-flushed files.
+  enabled: false
+  interval_seconds: 600   # scan every 10 minutes
+  min_files: 3            # don't compact unless >= 3 eligible files in a directory
+  min_age_seconds: 0      # 0 = 2 × flush_interval_seconds (safe age before touching files)
