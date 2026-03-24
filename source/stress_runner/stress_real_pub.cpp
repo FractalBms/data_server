@@ -414,7 +414,8 @@ static std::vector<TopicEntry> build_topics(const std::string& path,
             bool is_int = (e.dtype == "integer" || e.dtype == "boolean_integer");
             int rack_idx = -1;
             Sig sig = classify(e.device, e.instance, e.point, is_int, rack_idx);
-            std::string topic = "unit/" + unit_ids[ui] + "/" + e.device + "/" +
+            std::string topic = (g_topic_prefix.empty() ? "" : g_topic_prefix + "/")
+                              + "unit/" + unit_ids[ui] + "/" + e.device + "/" +
                                 e.instance + "/" + e.point + "/" + e.dtype;
             result.push_back({ std::move(topic), is_int, sig,
                                (int)ui, rack_idx, pool++ });
@@ -428,6 +429,7 @@ static std::vector<TopicEntry> build_topics(const std::string& path,
 // ============================================================================
 
 static std::string g_site_id;
+static std::string g_topic_prefix;   // e.g. "A" → publishes "A/unit/{id}/..."
 static std::string g_mqtt_host_g;
 static int         g_mqtt_port_g = 1883;
 
@@ -1137,7 +1139,8 @@ int main(int argc, char* argv[]) {
         else if (!strcmp(argv[i],"--id")       && i+1<argc) base_id    = argv[++i];
         else if (!strcmp(argv[i],"--ws-port")  && i+1<argc) ws_port    = atoi(argv[++i]);
         else if (!strcmp(argv[i],"--soc")      && i+1<argc) init_soc   = atof(argv[++i]);
-        else if (!strcmp(argv[i],"--site-id")  && i+1<argc) g_site_id  = argv[++i];
+        else if (!strcmp(argv[i],"--site-id")     && i+1<argc) g_site_id      = argv[++i];
+        else if (!strcmp(argv[i],"--topic-prefix") && i+1<argc) g_topic_prefix = argv[++i];
     }
 
     if (tpl.empty()) { tpl = find_template(argv[0]); }
@@ -1195,8 +1198,8 @@ int main(int argc, char* argv[]) {
     }
 
     fprintf(stdout,
-        "[ems] host=%s:%d  template=%s  units=%zu  topics/sweep=%zu  rate=%s  ws=:%d  soc=%.0f%%\n",
-        host.c_str(), port, tpl.c_str(),
+        "[ems] host=%s:%d  prefix=%s  units=%zu  topics/sweep=%zu  rate=%s  ws=:%d  soc=%.0f%%\n",
+        host.c_str(), port, g_topic_prefix.empty() ? "(none)" : g_topic_prefix.c_str(),
         unit_ids.size(), g_topics.size(), rate?std::to_string(rate).c_str():"unlimited",
         ws_port, init_soc);
     fflush(stdout);
