@@ -27,42 +27,30 @@ services:
 
   # ── Baseline broker ──────────────────────────────────────────────────────
   flashmq-baseline:
-    image: ubuntu:22.04
+    image: flashmq-local:latest
     container_name: flashmq-baseline
-    command: >
-      bash -c "
-        apt-get update -qq &&
-        apt-get install -y -qq flashmq &&
-        flashmq --config-file /etc/flashmq/flashmq.conf
-      "
     ports:
       - "11883:1883"
     volumes:
       - ./flashmq/flashmq.conf:/etc/flashmq/flashmq.conf:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/1883"]
+      test: ["CMD", "/bin/bash", "-c", "echo > /dev/tcp/localhost/1883"]
       interval: 10s
       timeout: 5s
       retries: 10
 
   # ── Filtered broker ───────────────────────────────────────────────────────
   flashmq-filtered:
-    image: ubuntu:22.04
+    image: flashmq-local:latest
     container_name: flashmq-filtered
-    command: >
-      bash -c "
-        apt-get update -qq &&
-        apt-get install -y -qq flashmq &&
-        flashmq --config-file /etc/flashmq/flashmq.conf
-      "
     ports:
       - "11884:1883"
     volumes:
       - ./flashmq/flashmq.conf:/etc/flashmq/flashmq.conf:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/1883"]
+      test: ["CMD", "/bin/bash", "-c", "echo > /dev/tcp/localhost/1883"]
       interval: 10s
       timeout: 5s
       retries: 10

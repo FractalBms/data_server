@@ -164,6 +164,10 @@ python manager/manager.py --config manager/config.fractal.yaml
 | 8779 | sim-B WebSocket | gx10 |
 | 8789 | sim-C WebSocket | gx10 |
 | 8799 | sim-D WebSocket | gx10 |
+| 8096 | InfluxDB compare-baseline (native) | gx10 |
+| 8097 | InfluxDB compare-filtered (native) | gx10 |
+| 11888 | FlashMQ compare-baseline (native) | gx10 |
+| 11889 | FlashMQ compare-filtered (native) | gx10 |
 
 ## Key paths
 
@@ -190,20 +194,43 @@ python manager/manager.py --config manager/config.fractal.yaml
 - Host Parquet Store panel feeds from push_agent `:8770/parquet_stats`
 - Writer status is inferred from stress_runner WebSocket mps > 0
 
-## Evelyn cost-comparison stack (Docker)
+## Evelyn cost-comparison stack
 
 Demonstrates Filter A+B savings from `html/writer/evelyn_cost_analysis.html`.
+Live results at: `http://192.168.86.46:8080/writer/evelyn_live_compare.html`
 
 Two parallel ingest paths fed from identical EMS generators:
 
 | Path | Broker | Telegraf | InfluxDB | Filtering |
 |---|---|---|---|---|
-| Baseline | :11883 | all signals | :8086 `ems-baseline` | none — mirrors Longbow today |
-| Filtered | :11884 | Filter A+B | :8087 `ems-filtered` | A: drop strings, B: dedup int/bool |
+| Baseline | :11888 | all signals | :8096 `ems-baseline` | none — mirrors Longbow today |
+| Filtered | :11889 | Filter A+B | :8097 `ems-filtered` | A: drop strings, B: dedup int/bool |
 
-Expected savings: **~26.8% fewer rows** (Conservative scenario).
+Measured savings: **~27% fewer rows** (matches Conservative scenario ~26.8%).
 
-### Run on Docker host (phil-256g .34, or gx10 .48 with Docker)
+### Run natively on gx10 (192.168.86.48) — preferred
+
+```bash
+# Start all: FlashMQ×2, Telegraf×2, InfluxDB×2, generators
+bash scripts/evelyn-compare-native-start.sh               # 1 unit, 175 msg/s (default)
+bash scripts/evelyn-compare-native-start.sh --rate 81420 --units 46  # full Evelyn load
+
+# Stop all
+bash scripts/evelyn-compare-native-stop.sh
+# Wipe data:  rm -rf /data/influx-base/* /data/influx-filt/*
+```
+
+Requires on gx10: `/tmp/FlashMQ/build/flashmq`, `/usr/local/bin/telegraf`, `/usr/local/bin/influxd`
+(binaries extracted from Docker images — see session notes if they need to be re-extracted)
+
+### Access (native)
+
+- **Live compare UI**: `http://192.168.86.46:8080/writer/evelyn_live_compare.html` (host=.48, ports 8096/8097)
+- **InfluxDB baseline**: `http://192.168.86.48:8096`
+- **InfluxDB filtered**: `http://192.168.86.48:8097`
+- **Token**: `ems-token-secret`  **Org**: `ems-org`
+
+### Run on Docker host (phil-256g .34) — alternative
 
 ```bash
 # Start Docker stack (FlashMQ×2, Telegraf×2, InfluxDB×2, Grafana)
@@ -212,37 +239,23 @@ bash scripts/evelyn-compare-docker-start.sh
 # Stop stack (keep volumes)
 bash scripts/evelyn-compare-docker-stop.sh
 # Wipe data:  cd docker/evelyn-compare && docker compose down -v
-```
 
-### Run generators (on gx10 .48)
-
-```bash
-# Both generators publish identical full Evelyn data (81,420 msg/s each).
-# Filtering is Telegraf-side — fair apples-to-apples comparison.
+# Run generators separately (Docker paths use ports 11883/11884, InfluxDB :8086/:8087)
 bash scripts/evelyn-compare-generators.sh --docker-host 192.168.86.34
-
-# Stop generators
 bash scripts/evelyn-compare-generators.sh --stop
 ```
-
-### Access
-
-- **Grafana dashboard**: `http://<docker-host>:3000`  (admin/admin)
-- **InfluxDB baseline**: `http://<docker-host>:8086`
-- **InfluxDB filtered**: `http://<docker-host>:8087`
-- **Token**: `ems-token-secret`  **Org**: `ems-org`
 
 ### Filter details
 
 | Filter | What | Implementation | Reduction |
 |---|---|---|---|
-| A | Drop string dtype rows | MQTT topic subscription: only `unit/+/+/+/+/float\|integer\|boolean_integer` | ~4% |
-| B | Int/bool change-on-value | `[[processors.dedup]] dedup_interval=10m` on `ems_int` | ~23% |
+| A | Drop string dtype rows | `tagdrop = {dtype = ["string"]}` on InfluxDB output | ~4% |
+| B | Int/bool change-on-value | `[[processors.dedup]] dedup_interval=60s` with tagpass on integer/boolean_integer | ~23% |
 | A+B combined | Conservative scenario | Both above | **~26.8%** |
 | A+B+float COV | Moderate | + Telegraf dedup on floats | ~40.6% |
 | A+B+p95 deadband | Aggressive | + per-signal threshold | ~85.5% |
 
-Config files: `docker/evelyn-compare/telegraf/telegraf-{baseline,filtered}.conf`
+Config files written by start script to `/tmp/telegraf-native-{base,filt}.conf`
 
 ## Diagnostic scripts
 
