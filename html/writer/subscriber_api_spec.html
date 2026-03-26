@@ -560,7 +560,7 @@ influxdb3:
 
 parquet:
   path: <span class="st">"s3://ems-archive/parquet"</span>   <span class="cm"># or local /data/parquet-archive</span>
-  partition: <span class="st">"hive"</span>              <span class="cm"># year=YYYY/month=MM/day=DD/ — required for both DuckDB and Athena</span>
+  <span class="cm"># path layout: {bucket}/parquet/{site_id}/{yyyy}/{mm}/{dd}/data.parquet</span>
   s3:
     region:     <span class="st">"us-east-1"</span>
     access_key: <span class="st">"..."</span>
@@ -685,9 +685,9 @@ live:
   <div class="phase-body">
     <ul style="font-size:.8rem;color:var(--muted)">
       <li>Implement <code>AthenaBackend</code> — boto3 <code>start_query_execution</code> → poll → <code>get_query_results</code></li>
-      <li>Same SQL as DuckDB (Hive-partitioned parquet); Athena uses the same <code>year=/month=/day=</code> layout</li>
+      <li>Same SQL as DuckDB; plain path layout <code>{site_id}/{yyyy}/{mm}/{dd}/</code> — no Hive key=value paths needed</li>
       <li>Config flag <code>cold_backend: athena</code> to switch — zero caller change; DuckDB tests validate SQL first</li>
-      <li>Glue Data Catalog table auto-crawled from S3 prefix on first archive run</li>
+      <li>Athena table uses <strong>partition projection</strong> (table property) — no Glue crawler, no <code>MSCK REPAIR TABLE</code>; Athena derives partitions from the path template at query time</li>
       <li>Query result pagination: Athena returns max 1,000 rows per page; backend loops <code>get_query_results</code> with <code>NextToken</code> until <code>limit</code> reached</li>
       <li><strong>Local simulation:</strong> DuckDB with identical SQL and partition layout — Phase 0 DuckDB tests are the Athena integration test proxy. If DuckDB passes, Athena will work.</li>
       <li><strong>Tests:</strong> unit test with mock boto3 (moto library); integration test against real Athena on a small date-range once archive is in S3</li>
@@ -696,14 +696,15 @@ live:
 </div>
 
 <div class="callout good" style="margin-bottom:1.5rem">
-  <strong>DuckDB as local Athena simulator:</strong> the partition layout
-  (<code>year=YYYY/month=MM/day=DD/</code>) and SQL dialect are identical between DuckDB and Athena.
-  Write the archive files once; DuckDB queries them locally during development and CI,
-  Athena queries the same files in production. Switch with one config line — no SQL changes.
+  <strong>DuckDB as local Athena simulator:</strong> plain path layout and SQL dialect are
+  identical between DuckDB and Athena. Write the archive files once; DuckDB queries them
+  locally during development and CI, Athena queries the same files in production.
+  Switch with one config line — no SQL changes, no file changes.
   <br><br>
-  <strong>Partition format matters:</strong> the archive job must write
-  <code>s3://ems-archive/parquet/site_id=42/year=2025/month=06/day=01/data.parquet</code>
-  — Athena's partition pruning and Glue crawler both depend on this exact layout.
+  <strong>Path layout:</strong> <code>s3://ems-archive/parquet/{site_id}/{yyyy}/{mm}/{dd}/data.parquet</code>
+  — simple, human-readable, no <code>key=value</code> segments required.
+  DuckDB uses a glob (<code>42/2025/06/**</code>); Athena uses partition projection with a
+  <code>storage.location.template</code> pointing at the same path pattern. No Glue crawler needed.
 </div>
 
 <h3>DuckDB vs Athena — cold backend comparison</h3>
@@ -717,8 +718,8 @@ live:
     <tr><td>Concurrent queries</td><td>limited by EC2 RAM</td><td>managed, scales automatically</td></tr>
     <tr><td>External tool access</td><td>only via subscriber_api</td><td>Grafana, QuickSight, console SQL</td></tr>
     <tr><td>SQL dialect</td><td>DuckDB SQL</td><td>Presto/Trino SQL — nearly identical</td></tr>
-    <tr><td>Partition pruning</td><td>✓ Hive path filter</td><td>✓ Glue catalog partitions</td></tr>
-    <tr><td>Setup required</td><td>none — already running</td><td>Glue crawler + Athena workgroup</td></tr>
+    <tr><td>Partition pruning</td><td>✓ glob pattern on path</td><td>✓ partition projection (no Glue crawler)</td></tr>
+    <tr><td>Setup required</td><td>none — already running</td><td>Athena workgroup + one-time table DDL</td></tr>
     <tr><td>When to use</td><td>dev, CI, fractal-phil queries</td><td>production AWS archive queries</td></tr>
   </tbody>
 </table>
