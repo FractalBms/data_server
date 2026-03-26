@@ -6,7 +6,7 @@
  * Fault flags fire automatically on threshold crossings.
  * All state is controllable at runtime via WebSocket JSON commands.
  *
- * Topic format:  unit/{unit_id}/{device}/{instance}/{point_name}/{dtype}
+ * Topic format:  ems/site/{site_id}/unit/{unit_id}/{device}/{instance}/{point_name}/{dtype}
  * Payload:       {"ts":"2024-11-15T21:27:52.775Z","value":...}
  *
  * Build:
@@ -61,6 +61,7 @@
 #include <cstring>
 #include <ctime>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -213,8 +214,9 @@ static std::mutex               g_state_mtx;
 static std::atomic<bool>        g_stop{false};
 static std::atomic<uint64_t>    g_published{0};
 static std::atomic<int>         g_rate{0};
-static std::string              g_site_id;
-static std::string              g_topic_prefix;   // e.g. "A" → publishes "A/unit/{id}/..."
+static std::string              g_site_id;         // first site (backward compat)
+static std::vector<std::string> g_site_ids;        // all sites (parsed from --site-id a,b,c)
+static std::string              g_topic_prefix;    // legacy, no longer used for unit topics
 
 // WebSocket broadcast — list of connected client fds
 static std::mutex               g_ws_mtx;
@@ -407,18 +409,20 @@ static std::vector<TopicEntry> build_topics(const std::string& path,
         entries.push_back({std::string(dv),std::string(iv),std::string(pv),std::string(tv)});
     }
 
-    const std::string pfx = g_topic_prefix.empty() ? "" : g_topic_prefix + "/";
-
     std::vector<TopicEntry> result;
     result.reserve(unit_ids.size() * entries.size());
     uint32_t pool = 0;
 
     for (size_t ui = 0; ui < unit_ids.size(); ++ui) {
+        // Assign unit to site round-robin
+        const std::string& site = g_site_ids.empty() ? g_site_id :
+                                  g_site_ids[ui % g_site_ids.size()];
+        const std::string site_pfx = "ems/site/" + site + "/unit/";
         for (const auto& e : entries) {
             bool is_int = (e.dtype == "integer" || e.dtype == "boolean_integer");
             int rack_idx = -1;
             Sig sig = classify(e.device, e.instance, e.point, is_int, rack_idx);
-            std::string topic = pfx + "unit/" + unit_ids[ui] + "/" + e.device + "/" +
+            std::string topic = site_pfx + unit_ids[ui] + "/" + e.device + "/" +
                                 e.instance + "/" + e.point + "/" + e.dtype;
             result.push_back({ std::move(topic), is_int, sig,
                                (int)ui, rack_idx, pool++ });
@@ -454,8 +458,8 @@ static void pub_i(struct mosquitto* m, int qos,
 }
 
 // Publish site / meter / PCS peripheral topics at 1 Hz
-static void peripheral_thread_fn(int qos) {
-    struct mosquitto* mosq = mosquitto_new("ems-periph", true, nullptr);
+static void peripheral_thread_fn(const std::string& client_id, int qos) {
+    struct mosquitto* mosq = mosquitto_new(client_id.c_str(), true, nullptr);
     if (!mosq) return;
     mosquitto_connect_callback_set(mosq, on_connect);
 
@@ -520,84 +524,75 @@ static void peripheral_thread_fn(int qos) {
         float meter_i    = meter_v > 0 ? std::abs(total_kw*1000.0f)/(meter_v*1.732f) : 0.0f;
         float meter_pf   = s_va > 0.1f ? total_kw/s_va : 0.0f;
 
-        const char* sid = g_site_id.c_str();
+        const std::vector<std::string>& all_sites =
+            g_site_ids.empty() ? std::vector<std::string>{g_site_id} : g_site_ids;
+        const size_t n_sites = all_sites.size();
 
 #define PT(fmt, ...) snprintf(topic, sizeof(topic), fmt, __VA_ARGS__)
 
-        // ── Site ──────────────────────────────────────────────────────────
-        PT("ems/site/%s/root/SOC/float",                    sid);  pub_f(mosq,qos,topic,mean_soc,ts);
-        PT("ems/site/%s/root/BESSkW/float",                 sid);  pub_f(mosq,qos,topic,total_kw,ts);
-        PT("ems/site/%s/root/Ptot/float",                   sid);  pub_f(mosq,qos,topic,total_kw,ts);
-        PT("ems/site/%s/root/Qtot/float",                   sid);  pub_f(mosq,qos,topic,total_kvar,ts);
-        PT("ems/site/%s/root/HS-CONTROL-f/float",           sid);  pub_f(mosq,qos,topic,meter_hz,ts);
-        PT("ems/site/%s/root/HS-CONTROL-P/float",           sid);  pub_f(mosq,qos,topic,total_kw,ts);
-        PT("ems/site/%s/root/HS-CONTROL-Q/float",           sid);  pub_f(mosq,qos,topic,total_kvar,ts);
-        PT("ems/site/%s/root/HS-CONTROL-P-Measured/float",  sid);  pub_f(mosq,qos,topic,total_kw*0.995f,ts);
-        PT("ems/site/%s/root/HS-CONTROL-AGC/float",         sid);  pub_f(mosq,qos,topic,agc_kw,ts);
-        PT("ems/site/%s/root/Group1_P/float",                sid);  pub_f(mosq,qos,topic,total_kw,ts);
-        PT("ems/site/%s/root/Group2_Q/float",                sid);  pub_f(mosq,qos,topic,0.0,ts);
-        PT("ems/site/%s/root/RTAC_P/float",                  sid);  pub_f(mosq,qos,topic,total_kw,ts);
-        PT("ems/site/%s/root/PCS_P/float",                   sid);  pub_f(mosq,qos,topic,total_kw,ts);
-        PT("ems/site/%s/root/PCS_P--P Correction/float",     sid);  pub_f(mosq,qos,topic,p_corr_kw,ts);
-        PT("ems/site/%s/root/PCS_P--Frequency Response/float",sid); pub_f(mosq,qos,topic,freq_resp_kw,ts);
-
-        // ── Meter ─────────────────────────────────────────────────────────
-        PT("ems/site/%s/meter/meter_1/kW/float",             sid);  pub_f(mosq,qos,topic,meter_kw,ts);
-        PT("ems/site/%s/meter/meter_1/kVAR/float",           sid);  pub_f(mosq,qos,topic,meter_kvar,ts);
-        PT("ems/site/%s/meter/meter_1/Hz/float",             sid);  pub_f(mosq,qos,topic,meter_hz,ts);
-        PT("ems/site/%s/meter/meter_1/Voltage/float",        sid);  pub_f(mosq,qos,topic,meter_v,ts);
-        PT("ems/site/%s/meter/meter_1/Current/float",        sid);  pub_f(mosq,qos,topic,meter_i,ts);
-        PT("ems/site/%s/meter/meter_1/PF/float",             sid);  pub_f(mosq,qos,topic,meter_pf,ts);
-        PT("ems/site/%s/meter/meter_1/CLR_NET_LOAD_MW/float",sid);  pub_f(mosq,qos,topic,-total_kw,ts);
-        PT("ems/site/%s/meter/meter_1/CLR_NET_MW/float",     sid);  pub_f(mosq,qos,topic,-total_kw,ts);
-
-        // ── PCS per unit ──────────────────────────────────────────────────
-        for (const auto& s : snaps) {
-            const char* uid = s.uid.c_str();
-            PT("ems/site/%s/unit/%s/pcs/pcs_1/PCS_P/float",           sid,uid);
-            pub_f(mosq,qos,topic,s.p_kw,ts);
-            PT("ems/site/%s/unit/%s/pcs/pcs_1/PCS_Q/float",           sid,uid);
-            pub_f(mosq,qos,topic,s.p_kvar,ts);
-            PT("ems/site/%s/unit/%s/pcs/pcs_1/CMD_P/float",           sid,uid);
-            pub_f(mosq,qos,topic,s.cmd_p,ts);
-            PT("ems/site/%s/unit/%s/pcs/pcs_1/kW/float",              sid,uid);
-            pub_f(mosq,qos,topic,s.p_kw*0.97f,ts);
-            PT("ems/site/%s/unit/%s/pcs/pcs_1/DCkW/float",            sid,uid);
-            pub_f(mosq,qos,topic,s.p_kw,ts);
-            PT("ems/site/%s/unit/%s/pcs/pcs_1/Hz/float",              sid,uid);
-            pub_f(mosq,qos,topic,meter_hz,ts);
-            PT("ems/site/%s/unit/%s/pcs/pcs_1/StatusSymmCurrentComp_CurrentRealPS/float",sid,uid);
-            pub_f(mosq,qos,topic,s.p_kw*1.92f,ts);
-            PT("ems/site/%s/unit/%s/pcs/pcs_1/ACBreaker/boolean_integer",sid,uid);
-            pub_i(mosq,qos,topic,s.acbrk?1:0,ts);
-            PT("ems/site/%s/unit/%s/pcs/pcs_1/EnabledStatus/boolean_integer",sid,uid);
-            pub_i(mosq,qos,topic,s.ena?1:0,ts);
-        }
-
-        // ── RTAC — feeder meters + QSE interface ─────────────────────────
-        // Feeder shares calibrated from evelyn: F1 47%, F2 18%, F3 21%, F4 7%, F5 7%
-        // Point names use _P_WATTS suffix but unit is kW (SCADA naming convention).
+        float bess_load_kw = -total_kw;
         static const float feeder_share[5] = {0.47f, 0.18f, 0.21f, 0.07f, 0.07f};
-        for (int f = 1; f <= 5; ++f) {
-            float f_p  = (float)apply_noise(total_kw * feeder_share[f-1], 20.0);
-            float f_pf = (float)apply_noise(0.09, 30.0);
-            PT("ems/site/%s/rtac/rtac_1/MET_F%d_P_WATTS/float", sid, f);
-            pub_f(mosq,qos,topic,f_p,ts);
-            PT("ems/site/%s/rtac/rtac_1/MET_F%d_PF/float", sid, f);
-            pub_f(mosq,qos,topic,f_pf,ts);
+
+        for (size_t si = 0; si < n_sites; ++si) {
+            const char* sid = all_sites[si].c_str();
+
+            // ── Site ──────────────────────────────────────────────────────
+            PT("ems/site/%s/root/SOC/float",                    sid);  pub_f(mosq,qos,topic,mean_soc,ts);
+            PT("ems/site/%s/root/BESSkW/float",                 sid);  pub_f(mosq,qos,topic,total_kw,ts);
+            PT("ems/site/%s/root/Ptot/float",                   sid);  pub_f(mosq,qos,topic,total_kw,ts);
+            PT("ems/site/%s/root/Qtot/float",                   sid);  pub_f(mosq,qos,topic,total_kvar,ts);
+            PT("ems/site/%s/root/HS-CONTROL-f/float",           sid);  pub_f(mosq,qos,topic,meter_hz,ts);
+            PT("ems/site/%s/root/HS-CONTROL-P/float",           sid);  pub_f(mosq,qos,topic,total_kw,ts);
+            PT("ems/site/%s/root/HS-CONTROL-Q/float",           sid);  pub_f(mosq,qos,topic,total_kvar,ts);
+            PT("ems/site/%s/root/HS-CONTROL-P-Measured/float",  sid);  pub_f(mosq,qos,topic,total_kw*0.995f,ts);
+            PT("ems/site/%s/root/HS-CONTROL-AGC/float",         sid);  pub_f(mosq,qos,topic,agc_kw,ts);
+            PT("ems/site/%s/root/Group1_P/float",                sid);  pub_f(mosq,qos,topic,total_kw,ts);
+            PT("ems/site/%s/root/Group2_Q/float",                sid);  pub_f(mosq,qos,topic,0.0,ts);
+            PT("ems/site/%s/root/RTAC_P/float",                  sid);  pub_f(mosq,qos,topic,total_kw,ts);
+            PT("ems/site/%s/root/PCS_P/float",                   sid);  pub_f(mosq,qos,topic,total_kw,ts);
+            PT("ems/site/%s/root/PCS_P--P Correction/float",     sid);  pub_f(mosq,qos,topic,p_corr_kw,ts);
+            PT("ems/site/%s/root/PCS_P--Frequency Response/float",sid); pub_f(mosq,qos,topic,freq_resp_kw,ts);
+
+            // ── Meter ─────────────────────────────────────────────────────
+            PT("ems/site/%s/meter/meter_1/kW/float",             sid);  pub_f(mosq,qos,topic,meter_kw,ts);
+            PT("ems/site/%s/meter/meter_1/kVAR/float",           sid);  pub_f(mosq,qos,topic,meter_kvar,ts);
+            PT("ems/site/%s/meter/meter_1/Hz/float",             sid);  pub_f(mosq,qos,topic,meter_hz,ts);
+            PT("ems/site/%s/meter/meter_1/Voltage/float",        sid);  pub_f(mosq,qos,topic,meter_v,ts);
+            PT("ems/site/%s/meter/meter_1/Current/float",        sid);  pub_f(mosq,qos,topic,meter_i,ts);
+            PT("ems/site/%s/meter/meter_1/PF/float",             sid);  pub_f(mosq,qos,topic,meter_pf,ts);
+            PT("ems/site/%s/meter/meter_1/CLR_NET_LOAD_MW/float",sid);  pub_f(mosq,qos,topic,-total_kw,ts);
+            PT("ems/site/%s/meter/meter_1/CLR_NET_MW/float",     sid);  pub_f(mosq,qos,topic,-total_kw,ts);
+
+            // ── PCS per unit (only units assigned to this site) ───────────
+            for (size_t ui = 0; ui < snaps.size(); ++ui) {
+                if (ui % n_sites != si) continue;
+                const auto& s = snaps[ui];
+                const char* uid = s.uid.c_str();
+                PT("ems/site/%s/unit/%s/pcs/pcs_1/PCS_P/float",           sid,uid);  pub_f(mosq,qos,topic,s.p_kw,ts);
+                PT("ems/site/%s/unit/%s/pcs/pcs_1/PCS_Q/float",           sid,uid);  pub_f(mosq,qos,topic,s.p_kvar,ts);
+                PT("ems/site/%s/unit/%s/pcs/pcs_1/CMD_P/float",           sid,uid);  pub_f(mosq,qos,topic,s.cmd_p,ts);
+                PT("ems/site/%s/unit/%s/pcs/pcs_1/kW/float",              sid,uid);  pub_f(mosq,qos,topic,s.p_kw*0.97f,ts);
+                PT("ems/site/%s/unit/%s/pcs/pcs_1/DCkW/float",            sid,uid);  pub_f(mosq,qos,topic,s.p_kw,ts);
+                PT("ems/site/%s/unit/%s/pcs/pcs_1/Hz/float",              sid,uid);  pub_f(mosq,qos,topic,meter_hz,ts);
+                PT("ems/site/%s/unit/%s/pcs/pcs_1/StatusSymmCurrentComp_CurrentRealPS/float",sid,uid);
+                pub_f(mosq,qos,topic,s.p_kw*1.92f,ts);
+                PT("ems/site/%s/unit/%s/pcs/pcs_1/ACBreaker/boolean_integer",sid,uid);    pub_i(mosq,qos,topic,s.acbrk?1:0,ts);
+                PT("ems/site/%s/unit/%s/pcs/pcs_1/EnabledStatus/boolean_integer",sid,uid);pub_i(mosq,qos,topic,s.ena?1:0,ts);
+            }
+
+            // ── RTAC ──────────────────────────────────────────────────────
+            for (int f = 1; f <= 5; ++f) {
+                float f_p  = (float)apply_noise(total_kw * feeder_share[f-1], 20.0);
+                float f_pf = (float)apply_noise(0.09, 30.0);
+                PT("ems/site/%s/rtac/rtac_1/MET_F%d_P_WATTS/float", sid, f);  pub_f(mosq,qos,topic,f_p,ts);
+                PT("ems/site/%s/rtac/rtac_1/MET_F%d_PF/float",      sid, f);  pub_f(mosq,qos,topic,f_pf,ts);
+            }
+            PT("ems/site/%s/rtac/rtac_1/QSE_Line_flows_MW/float",                  sid);  pub_f(mosq,qos,topic,total_kw/1000.0f,ts);
+            PT("ems/site/%s/rtac/rtac_1/QSE_Transformer_flows_MW/float",           sid);  pub_f(mosq,qos,topic,total_kw/1000.0f,ts);
+            PT("ems/site/%s/rtac/rtac_1/QSE_BESS_LOAD_MW/float",                   sid);  pub_f(mosq,qos,topic,bess_load_kw,ts);
+            PT("ems/site/%s/rtac/rtac_1/QSE_CLR_Scheduled_Power_Consumption/float",sid);  pub_f(mosq,qos,topic,bess_load_kw,ts);
+            PT("ems/site/%s/rtac/rtac_1/QSE_CLR_Net_Load_MW/float",                sid);  pub_f(mosq,qos,topic,bess_load_kw,ts);
         }
-        // QSE signals — grid scheduling interface (kW, sign: positive = grid load)
-        float bess_load_kw = -total_kw;  // positive when BESS charging (drawing from grid)
-        PT("ems/site/%s/rtac/rtac_1/QSE_Line_flows_MW/float",                  sid);
-        pub_f(mosq,qos,topic,total_kw/1000.0f,ts);
-        PT("ems/site/%s/rtac/rtac_1/QSE_Transformer_flows_MW/float",           sid);
-        pub_f(mosq,qos,topic,total_kw/1000.0f,ts);
-        PT("ems/site/%s/rtac/rtac_1/QSE_BESS_LOAD_MW/float",                   sid);
-        pub_f(mosq,qos,topic,bess_load_kw,ts);
-        PT("ems/site/%s/rtac/rtac_1/QSE_CLR_Scheduled_Power_Consumption/float",sid);
-        pub_f(mosq,qos,topic,bess_load_kw,ts);
-        PT("ems/site/%s/rtac/rtac_1/QSE_CLR_Net_Load_MW/float",                sid);
-        pub_f(mosq,qos,topic,bess_load_kw,ts);
 #undef PT
     }
 
@@ -756,11 +751,9 @@ static void publish_thread_fn(const std::string& host, int port,
         int rate = g_rate.load();
         if (rate > 0) {
             int msgs = (int)g_topics.size();
-            double target = (double)msgs / rate;
-            double elapsed = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - sweep_start).count();
-            if (elapsed < target)
-                std::this_thread::sleep_for(std::chrono::duration<double>(target - elapsed));
+            auto wake = sweep_start + std::chrono::duration<double>((double)msgs / rate);
+            while (!g_stop.load() && std::chrono::steady_clock::now() < wake)
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
         ++loop;
     }
@@ -1140,7 +1133,12 @@ int main(int argc, char* argv[]) {
         else if (!strcmp(argv[i],"--id")       && i+1<argc) base_id    = argv[++i];
         else if (!strcmp(argv[i],"--ws-port")  && i+1<argc) ws_port    = atoi(argv[++i]);
         else if (!strcmp(argv[i],"--soc")      && i+1<argc) init_soc   = atof(argv[++i]);
-        else if (!strcmp(argv[i],"--site-id")     && i+1<argc) g_site_id      = argv[++i];
+        else if (!strcmp(argv[i],"--site-id") && i+1<argc) {
+            std::string arg = argv[++i];
+            std::stringstream ss(arg); std::string tok;
+            while (std::getline(ss, tok, ',')) if (!tok.empty()) g_site_ids.push_back(tok);
+            if (!g_site_ids.empty()) g_site_id = g_site_ids[0];
+        }
         else if (!strcmp(argv[i],"--topic-prefix") && i+1<argc) g_topic_prefix = argv[++i];
     }
 
@@ -1188,6 +1186,12 @@ int main(int argc, char* argv[]) {
 
     // Load topics
     mosquitto_lib_init();
+    // Default to two site IDs if none provided
+    if (g_site_ids.empty()) {
+        g_site_ids = {"0215D1D8", "0227C829"};
+        g_site_id  = g_site_ids[0];
+    }
+
     signal(SIGINT, sig_handler); signal(SIGTERM, sig_handler);
     g_rate.store(rate);
 
@@ -1198,9 +1202,11 @@ int main(int argc, char* argv[]) {
         mosquitto_lib_cleanup(); return 1;
     }
 
+    std::string sites_str;
+    for (size_t i=0;i<g_site_ids.size();++i){ if(i) sites_str+=','; sites_str+=g_site_ids[i]; }
     fprintf(stdout,
-        "[ems] host=%s:%d  prefix=%s  units=%zu  topics/sweep=%zu  rate=%s  ws=:%d  soc=%.0f%%\n",
-        host.c_str(), port, g_topic_prefix.empty() ? "(none)" : g_topic_prefix.c_str(),
+        "[ems] host=%s:%d  sites=%s  units=%zu  topics/sweep=%zu  rate=%s  ws=:%d  soc=%.0f%%\n",
+        host.c_str(), port, sites_str.c_str(),
         unit_ids.size(), g_topics.size(), rate?std::to_string(rate).c_str():"unlimited",
         ws_port, init_soc);
     fflush(stdout);
@@ -1212,7 +1218,7 @@ int main(int argc, char* argv[]) {
     std::thread pu(publish_thread_fn, host, port, base_id, qos);
     std::thread ws(ws_server_fn, ws_port);
     std::thread st(stats_fn, (int)g_topics.size());
-    std::thread periph(peripheral_thread_fn, qos);
+    std::thread periph(peripheral_thread_fn, base_id + "-periph", qos);
 
     pu.join();
     g_stop.store(true);

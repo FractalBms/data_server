@@ -80,10 +80,11 @@
   #feed { background: #0a0d11; border: 1px solid var(--border); border-radius: 6px;
           padding: 6px 10px; font-family: 'Consolas', monospace; font-size: 0.76rem;
           height: 260px; overflow-y: auto; }
-  .msg-row { display: grid; grid-template-columns: 130px 1fr auto; gap: 8px;
+  .msg-row { display: grid; grid-template-columns: 260px 1fr auto; gap: 8px;
              padding: 2px 0; border-bottom: 1px solid #1c2128; align-items: baseline; }
   .msg-row:last-child { border: none; }
   .msg-topic { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg-topic .seg-site { color: var(--yellow); }
   .msg-topic .seg-unit { color: var(--accent); }
   .msg-topic .seg-dev  { color: var(--purple); }
   .msg-topic .seg-point{ color: var(--text); }
@@ -170,12 +171,27 @@
   <span id="conn-label">disconnected</span>
   <input type="text" id="broker-host" value="192.168.86.46" style="width:130px" placeholder="host">
   <input type="number" id="broker-port" value="8083" style="width:70px" placeholder="port">
-  <input type="text" id="sub-topic" value="unit/#" style="width:140px" placeholder="topic filter">
+  <input type="text" id="sub-topic" value="ems/#" style="width:140px" placeholder="topic filter">
   <button class="btn" id="conn-btn" onclick="toggleConnect()">Connect</button>
   <button class="btn danger" onclick="clearAll()">Clear</button>
   <label style="font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:4px">
     <input type="checkbox" id="pause-chk"> Pause feed
   </label>
+</div>
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+  <span style="color:var(--muted);font-size:.82rem;font-weight:600">Site:</span>
+  <select id="site-sel" onchange="onSiteChange()"
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);
+                 padding:3px 8px;border-radius:4px;font-size:.82rem;font-family:Consolas,monospace;min-width:140px">
+    <option value="">all</option>
+  </select>
+  <span style="color:var(--muted);font-size:.82rem;font-weight:600">Unit:</span>
+  <select id="unit-sel" onchange="applyUnitSub()"
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);
+                 padding:3px 8px;border-radius:4px;font-size:.82rem;font-family:Consolas,monospace;min-width:150px">
+    <option value="">all</option>
+  </select>
+  <span style="font-size:.75rem;color:var(--muted)" id="sub-display"></span>
 </div>
 
 <!-- Stats bar -->
@@ -240,8 +256,16 @@
       <h3>
         <span id="sig-title">Unit signals</span>
         <span style="color:var(--muted);font-weight:400;font-size:.72rem" id="sig-count"></span>
+        <label style="font-size:.75rem;color:var(--muted);font-weight:400;display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="sig-graphs-toggle" onchange="onSigGraphsToggle()"> Show graphs
+        </label>
       </h3>
-      <div class="sig-grid" id="sig-grid"></div>
+      <!-- Instance filter (bms_1, bms_2 etc) -->
+      <div id="inst-filter-row" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:.75rem;color:var(--muted)">
+        <span>Instance:</span>
+        <span class="dbtn on" data-inst="all" onclick="setInstFilter(this)">all</span>
+      </div>
+      <div class="sig-grid" id="sig-grid" style="display:none"></div>
     </div>
 
     <!-- Device breakdown -->
@@ -266,8 +290,13 @@ let selectedUnit= null;
 let devFilter   = 'all';
 let topicFilter = '';
 
+let sigGraphsEnabled = false;
+let instFilter = 'all';  // instance filter (e.g. bms_1, bms_2, all)
+
 // unit → { id, count, lastSeen, signals: Map<shortname, {val, ts, history:[]}> }
 const units     = new Map();
+// siteId → Set of unit IDs seen on that site
+const sites     = new Map();
 // topic → count
 const topicCounts = new Map();
 // device → count
@@ -310,19 +339,62 @@ function setConn(state) {
   else                          { dot.className='dot err'; lbl.textContent='disconnected'; }
 }
 
+// ── topic parser — handles production ems/site/... and legacy unit/... ────────
+
+function parseTopic(topic) {
+  const p = topic.split('/');
+
+  // Production: ems/site/{site_id}/...
+  if (p[0] === 'ems' && p[1] === 'site' && p.length >= 6) {
+    const siteId = p[2];
+
+    // 9-seg: ems/site/{site}/unit/{uid}/{dev}/{inst}/{point}/{dtype}
+    if (p[3] === 'unit' && p.length === 9)
+      return { siteId, uid: p[4], device: p[5], instance: p[6], point: p[7], dtype: p[8] };
+
+    // 8-seg: ems/site/{site}/unit/{uid}/root/{point}/{dtype}
+    if (p[3] === 'unit' && p.length === 8)
+      return { siteId, uid: p[4], device: 'root', instance: 'root', point: p[6], dtype: p[7] };
+
+    // 7-seg: ems/site/{site}/{meas}/{dev_id}/{point}/{dtype}  (meter/rtac/pcs)
+    if (p[3] !== 'unit' && p.length === 7)
+      return { siteId, uid: `site:${siteId}`, device: p[3], instance: p[4], point: p[5], dtype: p[6] };
+
+    // 6-seg: ems/site/{site}/root/{point}/{dtype}
+    if (p[3] === 'root' && p.length === 6)
+      return { siteId, uid: `site:${siteId}`, device: 'root', instance: 'root', point: p[4], dtype: p[5] };
+  }
+
+  // Legacy: unit/{uid}/{device}/{instance}/{point}/{dtype}
+  if (p[0] === 'unit' && p.length >= 5)
+    return { siteId: null, uid: p[1], device: p[2]||'unknown', instance: p[3]||'', point: p[4]||'', dtype: p[5]||'' };
+
+  return null;
+}
+
 // ── message handler ──────────────────────────────────────────────────────────
 
 function onMessage(topic, payload) {
   totalRx++;
 
-  // Parse topic: unit/{uid}/{device}/{instance}/{point}/{dtype}
-  const parts = topic.split('/');
-  if (parts.length < 5 || parts[0] !== 'unit') return;
-  const uid     = parts[1];
-  const device  = parts[2] || 'unknown';
-  const instance= parts[3] || '';
-  const point   = parts[4] || '';
-  const dtype   = parts[5] || '';
+  const parsed = parseTopic(topic);
+  if (!parsed) return;
+  const { siteId, uid, device, instance, point, dtype } = parsed;
+
+  // Track site → unit mapping and populate site/unit selects
+  if (siteId !== null && !uid.startsWith('site:')) {
+    const siteKey   = siteId || '(no site)';
+    const siteLabel = siteId || '(no site)';
+    if (!sites.has(siteKey)) {
+      sites.set(siteKey, new Set());
+      addSelectOption('site-sel', siteKey, siteLabel);
+    }
+    if (!sites.get(siteKey).has(uid)) {
+      sites.get(siteKey).add(uid);
+      const curSite = document.getElementById('site-sel').value;
+      if (!curSite || curSite === siteKey) addSelectOption('unit-sel', uid, uid);
+    }
+  }
   const shortname = `${device}/${instance}/${point}`;
 
   let value = null, ts = null;
@@ -356,7 +428,7 @@ function onMessage(topic, payload) {
 
   // Feed
   if (!document.getElementById('pause-chk').checked) {
-    if (matchesFilter(uid, device, shortname, point)) addFeedRow(uid, device, instance, point, dtype, value, ts);
+    if (matchesFilter(uid, device, shortname, point)) addFeedRow(siteId, uid, device, instance, point, dtype, value, ts);
   }
 
   // Update selected unit signals live
@@ -366,9 +438,9 @@ function onMessage(topic, payload) {
 // ── feed ─────────────────────────────────────────────────────────────────────
 
 let feedBuf = [];
-function addFeedRow(uid, device, instance, point, dtype, value, ts) {
+function addFeedRow(siteId, uid, device, instance, point, dtype, value, ts) {
   const maxRows = parseInt(document.getElementById('max-rows').value) || 200;
-  feedBuf.push({ uid, device, instance, point, dtype, value, ts });
+  feedBuf.push({ siteId, uid, device, instance, point, dtype, value, ts });
   if (feedBuf.length > FEED_MAX) { feedBuf.shift(); dropped++; }
   schedFeedFlush();
 }
@@ -394,8 +466,9 @@ function flushFeed() {
     const shortTs = m.ts ? m.ts.slice(11,23) : '--';
     const valStr  = typeof m.value === 'number' ? m.value.toFixed(
                       Number.isInteger(m.value) ? 0 : (m.dtype==='float'?3:1)) : String(m.value);
+    const siteLabel = m.siteId ? m.siteId.slice(-4) : '';
     row.innerHTML =
-      `<span class="msg-topic"><span class="seg-unit">${m.uid.slice(-4)}</span>/<span class="seg-dev">${m.device}</span>/<span class="seg-point">${m.point}</span></span>` +
+      `<span class="msg-topic">${siteLabel ? `<span class="seg-site">${siteLabel}</span>/` : ''}<span class="seg-unit">${m.uid.slice(-4)}</span>/<span class="seg-dev">${m.device}</span>/${m.instance}/<span class="seg-point">${m.point}</span></span>` +
       `<span class="msg-val">${valStr}</span>` +
       `<span class="msg-ts">${shortTs}</span>`;
     frag.appendChild(row);
@@ -425,17 +498,118 @@ function setDevFilter(el) {
   devFilter = el.dataset.dev;
 }
 
+// ── subscription narrowing ────────────────────────────────────────────────────
+
+function addSelectOption(selId, value, label) {
+  const sel = document.getElementById(selId);
+  if ([...sel.options].some(o => o.value === value)) return;
+  const opt = document.createElement('option');
+  opt.value = value; opt.textContent = label;
+  sel.appendChild(opt);
+}
+
+function onSiteChange() {
+  const site = document.getElementById('site-sel').value;
+  const unitSel = document.getElementById('unit-sel');
+  // Rebuild unit dropdown for selected site
+  unitSel.innerHTML = '<option value="">all</option>';
+  const pool = site ? (sites.get(site) || new Set()) : new Set([...sites.values()].flatMap(s => [...s]));
+  for (const uid of [...pool].sort()) addSelectOption('unit-sel', uid, uid);
+  applyUnitSub();
+}
+
+function applyUnitSub() {
+  const site = document.getElementById('site-sel').value;
+  const uid  = document.getElementById('unit-sel').value;
+  const siteSegment = (site && site !== '(no site)') ? site : '+';
+  let topic;
+  if (site && uid)  topic = `ems/site/${siteSegment}/unit/${uid}/#`;
+  else if (site)    topic = `ems/site/${siteSegment}/#`;
+  else if (uid)     topic = `ems/site/+/unit/${uid}/#`;
+  else              topic = 'ems/#';
+  document.getElementById('sub-topic').value = topic;
+  const disp = document.getElementById('sub-display');
+  if (disp) disp.textContent = `→ ${topic}`;
+  if (!client || !client.connected) return;
+  client.unsubscribe('#');
+  client.unsubscribe('ems/#');
+  client.subscribe(topic, { qos: 0 });
+  clearFeedData();
+}
+
+function clearFeedData() {
+  // Clears message data but preserves site/unit dropdown options and current selection
+  units.clear(); topicCounts.clear(); devCounts.clear(); pointCounts.clear();
+  selectedPoints = null;
+  instFilter = 'all';
+  document.getElementById('inst-filter-row').style.display = 'none';
+  document.getElementById('point-list').innerHTML = '';
+  updatePointBadge();
+  sigCardMap.clear();
+  totalRx = dropped = lastTotal = mps = 0;
+  document.getElementById('feed').innerHTML = '';
+  document.getElementById('unit-list').innerHTML = '<span style="color:var(--muted);font-size:.8rem">waiting…</span>';
+  document.getElementById('sig-grid').innerHTML = '';
+  document.getElementById('sig-section').style.display = 'none';
+  document.getElementById('dev-breakdown').innerHTML = '<span style="color:var(--muted);font-size:.8rem">no data yet</span>';
+}
+
 // ── unit list ─────────────────────────────────────────────────────────────────
 
 function selectUnit(uid) {
   selectedUnit = uid;
+  document.getElementById('unit-sel').value = uid || '';
+  applyUnitSub();
   renderUnitList();
   if (uid) {
     document.getElementById('sig-section').style.display = '';
-    renderSigGrid(uid);
+    const gridEl = document.getElementById('sig-grid');
+    gridEl.style.display = sigGraphsEnabled ? '' : 'none';
+    if (sigGraphsEnabled) renderSigGrid(uid);
+    updateInstFilterBar(uid);
   } else {
     document.getElementById('sig-section').style.display = 'none';
   }
+}
+
+function onSigGraphsToggle() {
+  sigGraphsEnabled = document.getElementById('sig-graphs-toggle').checked;
+  const gridEl = document.getElementById('sig-grid');
+  gridEl.style.display = sigGraphsEnabled ? '' : 'none';
+  if (sigGraphsEnabled && selectedUnit) renderSigGrid(selectedUnit);
+  else if (!sigGraphsEnabled) { gridEl.innerHTML = ''; sigCardMap.clear(); }
+}
+
+function updateInstFilterBar(uid) {
+  const u = units.get(uid);
+  if (!u) return;
+  const instances = new Set();
+  for (const name of u.signals.keys()) {
+    const inst = name.split('/')[1];
+    if (inst) instances.add(inst);
+  }
+  const row = document.getElementById('inst-filter-row');
+  if (instances.size <= 1) { row.style.display = 'none'; return; }
+  row.style.display = 'flex';
+  // rebuild buttons (preserve existing all btn)
+  row.innerHTML = '<span>Instance:</span><span class="dbtn on" data-inst="all" onclick="setInstFilter(this)">all</span>';
+  for (const inst of [...instances].sort()) {
+    const btn = document.createElement('span');
+    btn.className = 'dbtn' + (instFilter === inst ? ' on' : '');
+    btn.dataset.inst = inst;
+    btn.textContent = inst;
+    btn.onclick = () => setInstFilter(btn);
+    row.appendChild(btn);
+  }
+  // re-apply current filter highlight
+  row.querySelectorAll('.dbtn').forEach(b => b.classList.toggle('on', b.dataset.inst === instFilter || (instFilter === 'all' && b.dataset.inst === 'all')));
+}
+
+function setInstFilter(el) {
+  document.getElementById('inst-filter-row').querySelectorAll('.dbtn').forEach(b => b.classList.remove('on'));
+  el.classList.add('on');
+  instFilter = el.dataset.inst;
+  if (sigGraphsEnabled && selectedUnit) { sigCardMap.clear(); document.getElementById('sig-grid').innerHTML = ''; renderSigGrid(selectedUnit); }
 }
 
 function renderUnitList() {
@@ -462,9 +636,10 @@ function renderUnitList() {
 
 let sigUpdatePending = false;
 function schedSigUpdate() {
+  if (!sigGraphsEnabled) return;
   if (sigUpdatePending) return;
   sigUpdatePending = true;
-  setTimeout(() => { sigUpdatePending = false; if (selectedUnit) renderSigGrid(selectedUnit); }, 200);
+  setTimeout(() => { sigUpdatePending = false; if (selectedUnit) { updateInstFilterBar(selectedUnit); renderSigGrid(selectedUnit); } }, 200);
 }
 
 // Which signal cards are already in the grid (by shortname)
@@ -479,6 +654,14 @@ function renderSigGrid(uid) {
   const grid = document.getElementById('sig-grid');
 
   for (const [name, sig] of u.signals) {
+    // Apply instance filter
+    const nameParts = name.split('/');
+    const cardInst  = nameParts[1];
+    if (instFilter !== 'all' && cardInst !== instFilter) continue;
+    // Apply point name filter
+    const cardPoint = nameParts[2] || name;
+    if (selectedPoints !== null && !selectedPoints.has(cardPoint)) continue;
+
     let card = sigCardMap.get(name);
     if (!card) {
       card = document.createElement('div');
@@ -656,7 +839,13 @@ function renderDevBreakdown() {
 }
 
 function clearAll() {
-  units.clear(); topicCounts.clear(); devCounts.clear(); pointCounts.clear();
+  units.clear(); sites.clear(); topicCounts.clear(); devCounts.clear(); pointCounts.clear();
+  instFilter = 'all';
+  document.getElementById('inst-filter-row').style.display = 'none';
+  document.getElementById('site-sel').innerHTML = '<option value="">all</option>';
+  document.getElementById('unit-sel').innerHTML = '<option value="">all</option>';
+  const disp = document.getElementById('sub-display');
+  if (disp) disp.textContent = '';
   selectedPoints = null;
   document.getElementById('point-list').innerHTML = '';
   updatePointBadge();

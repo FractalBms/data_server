@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Telegraf Demo Control</title>
+<style>
+  :root {
+    --bg:#0d1117; --surface:#161b22; --border:#30363d;
+    --text:#c9d1d9; --muted:#8b949e; --accent:#58a6ff;
+    --green:#3fb950; --yellow:#d29922; --red:#f85149;
+    --orange:#e3b341; --purple:#bc8cff; --code-bg:#21262d;
+    --green-bg:#0d4429; --yellow-bg:#2d2000;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text);
+         font-family:'Segoe UI',system-ui,sans-serif; padding:14px; }
+
+  .nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .nav a { color:var(--muted); text-decoration:none; font-size:.82rem;
+           padding:3px 8px; border:1px solid var(--border); border-radius:4px; }
+  .nav a:hover { color:var(--accent); border-color:var(--accent); }
+  .nav a.here  { color:var(--accent); border-color:var(--accent); background:#0c2d6b22; }
+
+  h1 { color:var(--accent); font-size:1.2rem; margin-bottom:4px; }
+  .subtitle { color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+  h2 { color:var(--orange); font-size:.9rem; margin:20px 0 10px;
+       padding-bottom:4px; border-bottom:1px solid var(--border); }
+
+  .btn { border:1px solid var(--border); background:var(--surface); color:var(--text);
+         padding:5px 14px; border-radius:4px; cursor:pointer; font-size:.82rem;
+         transition:border-color .15s,color .15s,background .15s; }
+  .btn:hover  { border-color:var(--accent); color:var(--accent); }
+  .btn.start  { border-color:var(--green); color:var(--green); }
+  .btn.start:hover { background:var(--green-bg); }
+  .btn.stop   { border-color:var(--red); color:var(--red); }
+  .btn.stop:hover  { background:#2d000044; }
+  .btn:disabled { opacity:.4; cursor:default; }
+  input[type=number], input[type=text], select {
+    background:var(--surface); border:1px solid var(--border); color:var(--text);
+    padding:3px 8px; border-radius:4px; font-size:.82rem; }
+  input:focus, select:focus { outline:none; border-color:var(--accent); }
+  label { font-size:.8rem; color:var(--muted); }
+
+  /* ── host selector ── */
+  .host-tabs { display:flex; gap:6px; margin-bottom:14px; }
+  .host-tab { padding:6px 18px; border:1px solid var(--border); border-radius:6px;
+              cursor:pointer; font-size:.82rem; font-family:'Consolas',monospace;
+              transition:all .15s; user-select:none; }
+  .host-tab:hover { border-color:var(--accent); color:var(--accent); }
+  .host-tab.active { border-color:var(--accent); background:#0c2d6b44; color:var(--accent); font-weight:700; }
+  .host-tab .dot { display:inline-block; width:7px; height:7px; border-radius:50%;
+                   background:var(--muted); margin-right:6px; vertical-align:middle; }
+  .host-tab .dot.up { background:var(--green); box-shadow:0 0 4px var(--green); }
+  .host-tab .dot.partial { background:var(--yellow); }
+
+  /* ── control panel ── */
+  .ctrl-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+              background:var(--surface); border:1px solid var(--border);
+              border-radius:8px; padding:12px 16px; margin-bottom:12px; }
+  .ctrl-sep { color:var(--border); }
+  .chk-label { display:flex; align-items:center; gap:6px; font-size:.82rem;
+               cursor:pointer; user-select:none; }
+  input[type=checkbox] { accent-color:var(--accent); }
+
+  /* ── status cards ── */
+  .status-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin-bottom:14px; }
+  .scard { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:7px 10px; }
+  .scard-k { font-size:.66rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .scard-v { font-size:1.05rem; font-weight:700; font-family:'Consolas',monospace; color:var(--accent); }
+
+  /* ── log output ── */
+  #log-out { background:#0a0d11; border:1px solid var(--border); border-radius:6px;
+             padding:8px 12px; font-family:'Consolas',monospace; font-size:.72rem;
+             height:120px; overflow-y:auto; color:var(--muted); margin-bottom:14px; }
+  .log-ok  { color:var(--green); }
+  .log-err { color:var(--red); }
+  .log-ts  { color:#444c57; margin-right:6px; }
+
+  /* ── SVG diagram ── */
+  .diagram-wrap { background:var(--surface); border:1px solid var(--border);
+                  border-radius:8px; padding:16px; margin-bottom:16px; overflow-x:auto; }
+  svg.arch { display:block; margin:0 auto; }
+  .lbl-title  { fill:#c9d1d9; font-size:11px; font-weight:700; font-family:'Consolas',monospace; }
+  .lbl-sub    { fill:#8b949e; font-size:9px;  font-family:'Consolas',monospace; }
+  .lbl-accent { fill:#58a6ff; font-size:10px; font-family:'Consolas',monospace; font-weight:700; }
+  .lbl-green  { fill:#3fb950; font-size:10px; font-family:'Consolas',monospace; font-weight:700; }
+  .lbl-yellow { fill:#d29922; font-size:10px; font-family:'Consolas',monospace; font-weight:700; }
+  .lbl-stat   { fill:#c9d1d9; font-size:9px;  font-family:'Consolas',monospace; }
+
+  /* ── config diff ── */
+  .cfg-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:900px) { .cfg-grid { grid-template-columns:1fr; } }
+  .cfg-panel { background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .cfg-hdr { padding:8px 14px; font-size:.8rem; font-weight:700;
+             display:flex; justify-content:space-between; align-items:center; }
+  .cfg-hdr.base { background:#0c2d6b44; border-bottom:2px solid var(--accent); color:var(--accent); }
+  .cfg-hdr.filt { background:#0d442944; border-bottom:2px solid var(--green);  color:var(--green); }
+  .cfg-hdr span { font-size:.7rem; font-weight:400; color:var(--muted); }
+  pre.cfg  { font-family:'Consolas',monospace; font-size:.71rem; line-height:1.55;
+             padding:12px 14px; overflow-x:auto; color:var(--text); background:none;
+             max-height:540px; overflow-y:auto; }
+  .hl-comment { color:#444c57; }
+  .hl-section { color:var(--purple); }
+  .hl-key     { color:var(--orange); }
+  .hl-str     { color:#a5d6ff; }
+  .hl-val     { color:var(--green); }
+  .diff-a { display:block; background:#2d200022; border-left:3px solid var(--yellow);
+            margin-left:-14px; padding-left:11px; }
+  .diff-b { display:block; background:#0d442922; border-left:3px solid var(--green);
+            margin-left:-14px; padding-left:11px; }
+
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin-top:8px; font-size:.76rem; }
+  .legend-item { display:flex; align-items:center; gap:6px; }
+  .legend-sw { width:14px; height:4px; border-radius:2px; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="mqtt_viewer.html">MQTT Viewer</a>
+  <a href="ems_simulator_control.html">EMS Control</a>
+  <a href="evelyn_live_compare.html">Live Compare</a>
+  <a href="influx_viewer.html">InfluxDB Viewer</a>
+  <a href="telegraf_demo_control.html" class="here">Demo Control</a>
+</div>
+
+<h1>Telegraf Demo Control</h1>
+<p class="subtitle">Start / stop the Evelyn filter demo stack on any host · Filter A+B Conservative ~27% row reduction</p>
+
+<!-- Host selector -->
+<div class="host-tabs">
+  <div class="host-tab active" data-host="phil-dev" onclick="selectHost('phil-dev')">
+    <span class="dot" id="dot-phil-dev"></span>phil-dev <span style="color:var(--muted);font-size:.72rem">.46</span>
+  </div>
+  <div class="host-tab" data-host="gx10" onclick="selectHost('gx10')">
+    <span class="dot" id="dot-gx10"></span>gx10 <span style="color:var(--muted);font-size:.72rem">.48</span>
+  </div>
+  <div class="host-tab" data-host="fractal" onclick="selectHost('fractal')">
+    <span class="dot" id="dot-fractal"></span>fractal-phil <span style="color:var(--muted);font-size:.72rem">.51</span>
+  </div>
+</div>
+
+<!-- Control bar -->
+<div class="ctrl-row">
+  <button class="btn start" id="btn-start" onclick="doStart()">▶ Start</button>
+  <button class="btn stop"  id="btn-stop"  onclick="doStop()">■ Stop</button>
+  <span class="ctrl-sep">|</span>
+  <label class="chk-label"><input type="checkbox" id="opt-filtered" checked> Filtered path</label>
+  <label class="chk-label"><input type="checkbox" id="opt-nogen">    No generator (Telegraf only)</label>
+  <span class="ctrl-sep">|</span>
+  <label>Units <input type="number" id="opt-units" value="1" style="width:55px" min="1" max="46"></label>
+  <label>Rate <input type="number" id="opt-rate" value="175" style="width:70px" min="1"></label>
+  <span class="ctrl-sep">|</span>
+  <label>Demo server
+    <input type="text" id="server-url" value="http://192.168.86.46:8788" style="width:200px">
+  </label>
+  <button class="btn" onclick="pollStatus()">↺ Refresh</button>
+</div>
+
+<!-- Log output -->
+<div id="log-out"><span style="color:var(--muted)">— ready —</span></div>
+
+<!-- Stats -->
+<div class="status-grid">
+  <div class="scard"><div class="scard-k">Baseline rows/s</div><div class="scard-v" id="s-base-rps" style="color:var(--accent)">—</div></div>
+  <div class="scard"><div class="scard-k">Filtered rows/s</div><div class="scard-v" id="s-filt-rps" style="color:var(--green)">—</div></div>
+  <div class="scard"><div class="scard-k">Row reduction</div><div class="scard-v" id="s-reduction" style="color:var(--yellow)">—</div></div>
+  <div class="scard"><div class="scard-k">Base total (60s)</div><div class="scard-v" id="s-base-total" style="color:var(--accent)">—</div></div>
+  <div class="scard"><div class="scard-k">Filt total (60s)</div><div class="scard-v" id="s-filt-total" style="color:var(--green)">—</div></div>
+  <div class="scard"><div class="scard-k">Processes</div><div class="scard-v" id="s-procs">—</div></div>
+</div>
+
+<!-- Architecture SVG -->
+<h2>System Layout — <span id="svg-host-label" style="color:var(--accent)">phil-dev</span></h2>
+<div class="diagram-wrap">
+<svg class="arch" width="780" height="290" viewBox="0 0 780 290">
+  <defs>
+    <marker id="arr"      markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#30363d"/></marker>
+    <marker id="arrBlue"  markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#58a6ff88"/></marker>
+    <marker id="arrGreen" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#3fb95088"/></marker>
+  </defs>
+
+  <!-- Generator -->
+  <rect x="8" y="108" width="132" height="72" rx="6" fill="#1a0f2e44" stroke="#bc8cff" stroke-width="1.5"/>
+  <text x="74" y="129" text-anchor="middle" class="lbl-title">Generator</text>
+  <text x="74" y="144" text-anchor="middle" class="lbl-sub">stress_real_pub</text>
+  <text x="74" y="158" text-anchor="middle" class="lbl-sub" id="svg-gen-rate">175 msg/s · 1 unit</text>
+  <text x="74" y="171" text-anchor="middle" class="lbl-sub">ems/site/{id}/unit/…</text>
+
+  <!-- FlashMQ -->
+  <rect x="182" y="93" width="132" height="102" rx="6" fill="#0c2d6b44" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="248" y="116" text-anchor="middle" class="lbl-title">FlashMQ</text>
+  <text x="248" y="131" text-anchor="middle" class="lbl-sub">MQTT broker</text>
+  <text x="248" y="147" text-anchor="middle" class="lbl-accent" id="svg-mq-port">:1883</text>
+  <text x="248" y="163" text-anchor="middle" class="lbl-sub">sub: ems/#</text>
+  <text x="248" y="178" text-anchor="middle" class="lbl-stat" id="svg-mq-status">systemd</text>
+
+  <!-- Telegraf Base -->
+  <rect x="362" y="28" width="154" height="96" rx="6" fill="#0c2d6b44" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="439" y="50"  text-anchor="middle" class="lbl-title">Telegraf Baseline</text>
+  <text x="439" y="65"  text-anchor="middle" class="lbl-sub">json_v2 · pivot</text>
+  <text x="439" y="80"  text-anchor="middle" class="lbl-sub">all signals</text>
+  <text x="439" y="95"  text-anchor="middle" class="lbl-sub" id="svg-tele-base-id">telegraf-46-base</text>
+  <text x="439" y="115" text-anchor="middle" class="lbl-accent">→ :8096</text>
+
+  <!-- Telegraf Filtered (hidden when no-gen) -->
+  <g id="svg-filt-group">
+  <rect x="362" y="158" width="154" height="115" rx="6" fill="#0d442944" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="439" y="178" text-anchor="middle" class="lbl-title">Telegraf Filtered</text>
+  <text x="439" y="192" text-anchor="middle" class="lbl-sub">json_v2 · starlark · dedup · pivot</text>
+  <text x="439" y="207" text-anchor="middle" class="lbl-yellow">Filter A: drop strings</text>
+  <text x="439" y="220" text-anchor="middle" class="lbl-yellow">Filter B: float×100→float_i</text>
+  <text x="439" y="233" text-anchor="middle" class="lbl-yellow">dedup int/bool/float_i 60s</text>
+  <text x="439" y="247" text-anchor="middle" class="lbl-sub" id="svg-tele-filt-id">telegraf-46-filt</text>
+  <text x="439" y="261" text-anchor="middle" class="lbl-green">→ :8097</text>
+  </g>
+
+  <!-- InfluxDB Base -->
+  <rect x="562" y="28" width="132" height="96" rx="6" fill="#0c2d6b44" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="628" y="50"  text-anchor="middle" class="lbl-title">InfluxDB Baseline</text>
+  <text x="628" y="65"  text-anchor="middle" class="lbl-accent">:8096</text>
+  <text x="628" y="80"  text-anchor="middle" class="lbl-sub">ems-baseline</text>
+  <text x="628" y="95"  text-anchor="middle" class="lbl-sub">float / integer / bool / str</text>
+  <text x="628" y="115" text-anchor="middle" class="lbl-stat" id="svg-base-rps">— rows/s</text>
+
+  <!-- InfluxDB Filtered -->
+  <g id="svg-filt-influx">
+  <rect x="562" y="158" width="132" height="103" rx="6" fill="#0d442944" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="628" y="180" text-anchor="middle" class="lbl-title">InfluxDB Filtered</text>
+  <text x="628" y="195" text-anchor="middle" class="lbl-green">:8097</text>
+  <text x="628" y="210" text-anchor="middle" class="lbl-sub">ems-filtered</text>
+  <text x="628" y="225" text-anchor="middle" class="lbl-sub">no strings · int/bool/float_i deduped</text>
+  <text x="628" y="240" text-anchor="middle" class="lbl-yellow" id="svg-reduction">~27% fewer rows</text>
+  <text x="628" y="255" text-anchor="middle" class="lbl-stat" id="svg-filt-rps">— rows/s</text>
+  </g>
+
+  <!-- Arrows -->
+  <line x1="140" y1="144" x2="180" y2="144" stroke="#30363d" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+  <path d="M314,122 C338,122 344,76 360,76"  stroke="#58a6ff88" stroke-width="2" fill="none" stroke-dasharray="6,3" marker-end="url(#arrBlue)"/>
+  <path d="M314,166 C338,166 344,209 360,209" stroke="#3fb95088" stroke-width="2" fill="none" stroke-dasharray="6,3" marker-end="url(#arrGreen)"/>
+  <line x1="516" y1="76"  x2="560" y2="76"  stroke="#58a6ff88" stroke-width="2" fill="none" stroke-dasharray="6,3" marker-end="url(#arrBlue)"/>
+  <line x1="516" y1="209" x2="560" y2="209" stroke="#3fb95088" stroke-width="2" fill="none" stroke-dasharray="6,3" marker-end="url(#arrGreen)"/>
+</svg>
+<div class="legend">
+  <div class="legend-item"><div class="legend-sw" style="background:var(--accent)"></div><span>Baseline path (all signals)</span></div>
+  <div class="legend-item"><div class="legend-sw" style="background:var(--green)"></div><span>Filtered path (Filter A+B)</span></div>
+  <div class="legend-item"><div class="legend-sw" style="background:var(--yellow)"></div><span>Filter effect</span></div>
+</div>
+</div>
+
+<!-- Config diff -->
+<h2>Telegraf Config Diff</h2>
+<div class="cfg-grid">
+
+  <div class="cfg-panel">
+    <div class="cfg-hdr base">Baseline <span id="cfg-base-fname">/tmp/telegraf-46-base.conf</span></div>
+    <pre class="cfg"><span class="hl-comment"># All signals — no filtering</span>
+
+<span class="hl-section">[agent]</span>
+  <span class="hl-key">interval</span>       = <span class="hl-str">"1s"</span>
+  <span class="hl-key">precision</span>      = <span class="hl-str">"1ms"</span>
+  <span class="hl-key">omit_hostname</span>  = <span class="hl-val">true</span>
+
+<span class="hl-section">[[inputs.mqtt_consumer]]</span>
+  <span class="hl-key">servers</span>     = [<span class="hl-str">"tcp://localhost:<span id="cfg-base-port">1883</span>"</span>]
+  <span class="hl-key">topics</span>      = [<span class="hl-str">"ems/#"</span>]
+  <span class="hl-key">client_id</span>   = <span class="hl-str">"<span id="cfg-base-cid">telegraf-46-base</span>"</span>
+  <span class="hl-key">data_format</span> = <span class="hl-str">"json_v2"</span>
+
+  <span class="hl-comment">  # no tagdrop — strings pass through</span>
+
+  <span class="hl-section">[[inputs.mqtt_consumer.json_v2]]</span>
+    <span class="hl-key">timestamp_path</span>   = <span class="hl-str">"ts"</span>
+    <span class="hl-key">timestamp_format</span> = <span class="hl-str">"2006-01-02T15:04:05.000Z"</span>
+
+    <span class="hl-section">[[inputs.mqtt_consumer.json_v2.field]]</span>
+      <span class="hl-key">path</span> = <span class="hl-str">"value"</span>
+
+    <span class="hl-section">[[inputs.mqtt_consumer.topic_parsing]]</span>
+      <span class="hl-key">topic</span>       = <span class="hl-str">"ems/site/+/unit/+/+/+/+/+"</span>
+      <span class="hl-key">tags</span>        = <span class="hl-str">"_/_/site_id/_/unit_id/…/data_type"</span>
+      <span class="hl-key">measurement</span> = <span class="hl-str">"_/_/_/measurement/…"</span>
+
+<span class="hl-section">[[processors.pivot]]</span>
+  <span class="hl-key">order</span>     = <span class="hl-val">1</span>
+  <span class="hl-key">tag_key</span>   = <span class="hl-str">"data_type"</span>
+  <span class="hl-key">value_key</span> = <span class="hl-str">"value"</span>
+
+<span class="hl-section">[[outputs.influxdb_v2]]</span>
+  <span class="hl-key">urls</span>    = [<span class="hl-str">"http://localhost:8096"</span>]
+  <span class="hl-key">bucket</span>  = <span class="hl-str">"ems-baseline"</span>
+  <span class="hl-key">namedrop</span> = [<span class="hl-str">"internal_*"</span>]</pre>
+  </div>
+
+  <div class="cfg-panel">
+    <div class="cfg-hdr filt">Filtered <span id="cfg-filt-fname">/tmp/telegraf-46-filt.conf</span></div>
+    <pre class="cfg"><span class="hl-comment"># Filter A + Filter B (starlark float scaling + dedup) — Conservative+</span>
+
+<span class="hl-section">[agent]</span>
+  <span class="hl-key">interval</span>       = <span class="hl-str">"1s"</span>
+  <span class="hl-key">precision</span>      = <span class="hl-str">"1ms"</span>
+  <span class="hl-key">omit_hostname</span>  = <span class="hl-val">true</span>
+
+<span class="hl-section">[[inputs.mqtt_consumer]]</span>
+  <span class="hl-key">servers</span>     = [<span class="hl-str">"tcp://localhost:<span id="cfg-filt-port">1883</span>"</span>]
+  <span class="hl-key">topics</span>      = [<span class="hl-str">"ems/#"</span>]
+  <span class="hl-key">client_id</span>   = <span class="hl-str">"<span id="cfg-filt-cid">telegraf-46-filt</span>"</span>
+  <span class="hl-key">data_format</span> = <span class="hl-str">"json_v2"</span>
+<span class="diff-a">
+  <span class="hl-comment">  # ── Filter A: drop string dtype ──────────────────</span>
+  <span class="hl-section">  [inputs.mqtt_consumer.tagdrop]</span>
+    <span class="hl-key">  data_type</span> = [<span class="hl-str">"string"</span>]    <span class="hl-comment">← ~4% reduction</span>
+  <span class="hl-comment">  # ─────────────────────────────────────────────────</span>
+</span>
+  <span class="hl-section">[[inputs.mqtt_consumer.json_v2]]</span>
+    <span class="hl-key">timestamp_path</span>   = <span class="hl-str">"ts"</span>
+    <span class="hl-key">timestamp_format</span> = <span class="hl-str">"2006-01-02T15:04:05.000Z"</span>
+
+    <span class="hl-section">[[inputs.mqtt_consumer.json_v2.field]]</span>
+      <span class="hl-key">path</span> = <span class="hl-str">"value"</span>
+
+    <span class="hl-section">[[inputs.mqtt_consumer.topic_parsing]]</span>
+      <span class="hl-key">topic</span>       = <span class="hl-str">"ems/site/+/unit/+/+/+/+/+"</span>
+      <span class="hl-key">tags</span>        = <span class="hl-str">"_/_/site_id/_/unit_id/…/data_type"</span>
+      <span class="hl-key">measurement</span> = <span class="hl-str">"_/_/_/measurement/…"</span>
+<span class="diff-b">
+  <span class="hl-comment">  # ── Filter B step 1: float×100 → float_i (order=0) ───</span>
+  <span class="hl-comment">  # Scales floats to int so dedup can exact-match them.</span>
+  <span class="hl-comment">  # On read: divide float_i by 100 to recover value.</span>
+  <span class="hl-section">[[processors.starlark]]</span>
+    <span class="hl-key">  order</span> = <span class="hl-val">0</span>
+    <span class="hl-key">  source</span> = <span class="hl-str">'''
+    def apply(metric):
+        if metric.tags.get("data_type") != "float":
+            return metric
+        v = metric.fields.get("value")
+        if v == None: return metric
+        metric.fields["value"] = int(float(v) * 100)
+        metric.tags["data_type"] = "float_i"
+        return metric
+    '''</span>
+
+  <span class="hl-comment">  # ── Filter B step 2: dedup int/bool/float_i (order=1) ─</span>
+  <span class="hl-section">[[processors.dedup]]</span>
+    <span class="hl-key">  order</span>          = <span class="hl-val">1</span>
+    <span class="hl-key">  dedup_interval</span> = <span class="hl-str">"60s"</span>
+    <span class="hl-section">  [processors.dedup.tagpass]</span>
+      <span class="hl-key">data_type</span> = [<span class="hl-str">"integer"</span>, <span class="hl-str">"boolean_integer"</span>, <span class="hl-str">"float_i"</span>]
+  <span class="hl-comment">  # ─────────────────────────────────────────────────────</span>
+</span>
+<span class="hl-section">[[processors.pivot]]</span>
+  <span class="hl-key">order</span>     = <span class="hl-val">1</span>
+  <span class="hl-key">tag_key</span>   = <span class="hl-str">"data_type"</span>
+  <span class="hl-key">value_key</span> = <span class="hl-str">"value"</span>
+
+<span class="hl-section">[[outputs.influxdb_v2]]</span>
+  <span class="hl-key">urls</span>    = [<span class="hl-str">"http://localhost:8097"</span>]
+  <span class="hl-key">bucket</span>  = <span class="hl-str">"ems-filtered"</span>
+  <span class="hl-key">namedrop</span> = [<span class="hl-str">"internal_*"</span>]</pre>
+  </div>
+
+</div>
+<div class="legend" style="margin-top:10px">
+  <div class="legend-item"><div class="legend-sw" style="background:var(--yellow);height:3px;border-radius:2px"></div><span><strong style="color:var(--yellow)">Filter A</strong> — drop string rows at input (~4%)</span></div>
+  <div class="legend-item"><div class="legend-sw" style="background:var(--green);height:3px;border-radius:2px"></div><span><strong style="color:var(--green)">Filter B</strong> — float×100→float_i (Starlark) then dedup int/bool/float_i 60s (~23%+)</span></div>
+</div>
+
+<script>
+'use strict';
+
+let selectedHost = 'phil-dev';
+let statsTimer   = null;
+
+const HOST_META = {
+  'phil-dev': { ip:'192.168.86.46', mq_port:1883,  base_port:8096, filt_port:8097,
+                base_cid:'telegraf-46-base', filt_cid:'telegraf-46-filt',
+                base_file:'/tmp/telegraf-46-base.conf', filt_file:'/tmp/telegraf-46-filt.conf' },
+  'gx10':     { ip:'192.168.86.48', mq_port:11888, base_port:8096, filt_port:8097,
+                base_cid:'telegraf-compare-base', filt_cid:'telegraf-compare-filt',
+                base_file:'/tmp/telegraf-native-base.conf', filt_file:'/tmp/telegraf-native-filt.conf' },
+  'fractal':  { ip:'192.168.86.51', mq_port:1883,  base_port:8096, filt_port:8097,
+                base_cid:'telegraf-46-base', filt_cid:'telegraf-46-filt',
+                base_file:'/tmp/telegraf-46-base.conf', filt_file:'/tmp/telegraf-46-filt.conf' },
+};
+
+// ── host selection ────────────────────────────────────────────────────────────
+function selectHost(name) {
+  selectedHost = name;
+  document.querySelectorAll('.host-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.host === name));
+  const m = HOST_META[name];
+  document.getElementById('svg-host-label').textContent   = name;
+  document.getElementById('svg-mq-port').textContent      = ':' + m.mq_port;
+  document.getElementById('svg-tele-base-id').textContent = m.base_cid;
+  document.getElementById('svg-tele-filt-id').textContent = m.filt_cid;
+  document.getElementById('cfg-base-port').textContent    = m.mq_port;
+  document.getElementById('cfg-filt-port').textContent    = m.mq_port;
+  document.getElementById('cfg-base-cid').textContent     = m.base_cid;
+  document.getElementById('cfg-filt-cid').textContent     = m.filt_cid;
+  document.getElementById('cfg-base-fname').textContent   = m.base_file;
+  document.getElementById('cfg-filt-fname').textContent   = m.filt_file;
+  clearStats();
+  fetchStats();
+}
+
+// ── logging ───────────────────────────────────────────────────────────────────
+function log(msg, cls) {
+  const el  = document.getElementById('log-out');
+  const ts  = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.innerHTML = `<span class="log-ts">${ts}</span><span class="${cls||''}">${msg}</span>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── start / stop ──────────────────────────────────────────────────────────────
+function serverUrl() { return document.getElementById('server-url').value.trim(); }
+
+async function doStart() {
+  const filtered = document.getElementById('opt-filtered').checked;
+  const no_gen   = document.getElementById('opt-nogen').checked;
+  const units    = parseInt(document.getElementById('opt-units').value) || 1;
+  const rate     = parseInt(document.getElementById('opt-rate').value)  || 175;
+  log(`Starting ${selectedHost} (filtered=${filtered}, units=${units}, rate=${rate})…`);
+  setButtons(false);
+  try {
+    const resp = await fetch(`${serverUrl()}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: selectedHost, filtered, no_gen, units, rate }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      log(`Started OK`, 'log-ok');
+      log(data.output.slice(0, 400));
+    } else {
+      log(`Start failed: ${data.output.slice(0,300)}`, 'log-err');
+    }
+  } catch(e) { log(`Cannot reach demo server: ${e.message}`, 'log-err'); }
+  setButtons(true);
+  setTimeout(pollStatus, 2000);
+}
+
+async function doStop() {
+  log(`Stopping ${selectedHost}…`);
+  setButtons(false);
+  try {
+    const resp = await fetch(`${serverUrl()}/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: selectedHost }),
+    });
+    const data = await resp.json();
+    log(data.ok ? 'Stopped OK' : `Stop failed: ${data.output}`, data.ok ? 'log-ok' : 'log-err');
+  } catch(e) { log(`Cannot reach demo server: ${e.message}`, 'log-err'); }
+  setButtons(true);
+  setTimeout(pollStatus, 1500);
+}
+
+function setButtons(enabled) {
+  document.getElementById('btn-start').disabled = !enabled;
+  document.getElementById('btn-stop').disabled  = !enabled;
+}
+
+// ── status polling ────────────────────────────────────────────────────────────
+async function pollStatus() {
+  try {
+    const resp = await fetch(`${serverUrl()}/status`);
+    const data = await resp.json();
+    for (const [name, s] of Object.entries(data)) {
+      const dot = document.getElementById(`dot-${name}`);
+      if (!dot) continue;
+      if (s.base_up && s.filt_up)   { dot.className = 'dot up'; }
+      else if (s.base_up || s.filt_up) { dot.className = 'dot partial'; }
+      else                           { dot.className = 'dot'; }
+    }
+    const cur = data[selectedHost];
+    if (cur) document.getElementById('s-procs').textContent = cur.procs ? cur.procs.length : '?';
+  } catch(e) { /* server not up yet */ }
+}
+
+// ── InfluxDB stats ────────────────────────────────────────────────────────────
+const TOKEN = 'ems-token-secret', ORG = 'ems-org', WINDOW_S = 60;
+
+async function influxCount(ip, port, bucket) {
+  const q = `from(bucket:"${bucket}")|>range(start:-${WINDOW_S}s)|>filter(fn:(r)=>r._measurement=="unit")|>group()|>count()`;
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const resp = await fetch(`http://${ip}:${port}/api/v2/query?org=${encodeURIComponent(ORG)}`, {
+      method:'POST',
+      headers:{'Authorization':`Token ${TOKEN}`,'Content-Type':'application/vnd.flux','Accept':'application/csv'},
+      body:q,
+      signal:ctrl.signal,
+    });
+    clearTimeout(tid);
+    if (!resp.ok) return null;
+    const csv = await resp.text();
+    const lines = csv.split('\n').filter(l=>l.trim()&&!l.startsWith('#'));
+    if (lines.length < 2) return null;
+    const hdrs = lines[0].split(',').map(h=>h.trim());
+    const vals = lines[1].split(',').map(v=>v.trim());
+    const obj = {}; hdrs.forEach((h,i)=>obj[h]=vals[i]);
+    return parseInt(obj._value||0);
+  } catch(e) {
+    clearTimeout(tid);
+    return null;
+  }
+}
+
+async function fetchStats() {
+  const m = HOST_META[selectedHost];
+  try {
+    const [baseN, filtN] = await Promise.all([
+      influxCount(m.ip, m.base_port, 'ems-baseline'),
+      influxCount(m.ip, m.filt_port, 'ems-filtered'),
+    ]);
+    // Only update display elements when we have a real value — never blank out last known values
+    if (baseN !== null) {
+      const baseRps = (baseN/WINDOW_S).toFixed(1);
+      document.getElementById('s-base-rps').textContent   = baseRps+'/s';
+      document.getElementById('s-base-total').textContent = baseN.toLocaleString();
+      document.getElementById('svg-base-rps').textContent = baseRps+' rows/s';
+    }
+    if (filtN !== null) {
+      const filtRps = (filtN/WINDOW_S).toFixed(1);
+      document.getElementById('s-filt-rps').textContent   = filtRps+'/s';
+      document.getElementById('s-filt-total').textContent = filtN.toLocaleString();
+      document.getElementById('svg-filt-rps').textContent = filtRps+' rows/s';
+    }
+    if (baseN !== null && filtN !== null && baseN > 0) {
+      const pct = ((1-filtN/baseN)*100).toFixed(1)+'%';
+      document.getElementById('s-reduction').textContent   = pct;
+      document.getElementById('svg-reduction').textContent = pct+' fewer rows';
+    }
+  } catch(e) { /* preserve last known values */ }
+}
+
+function clearStats() {
+  ['s-base-rps','s-filt-rps','s-reduction','s-base-total','s-filt-total'].forEach(
+    id => document.getElementById(id).textContent = '—');
+  document.getElementById('svg-base-rps').textContent = '—';
+  document.getElementById('svg-filt-rps').textContent = '—';
+}
+
+// ── init ──────────────────────────────────────────────────────────────────────
+pollStatus();
+fetchStats();
+setInterval(pollStatus,  15000);
+setInterval(fetchStats,  10000);
+</script>
+</body>
+</html>

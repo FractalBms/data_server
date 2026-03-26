@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Evelyn Filter Demo</title>
+<style>
+  :root {
+    --bg:#0d1117; --surface:#161b22; --border:#30363d;
+    --text:#c9d1d9; --muted:#8b949e; --accent:#58a6ff;
+    --green:#3fb950; --yellow:#d29922; --red:#f85149;
+    --orange:#e3b341; --purple:#bc8cff; --code-bg:#21262d;
+    --green-bg:#0d4429; --yellow-bg:#2d2000;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text);
+         font-family:'Segoe UI',system-ui,sans-serif; padding:14px; }
+  .nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .nav a { color:var(--muted); text-decoration:none; font-size:.82rem;
+           padding:3px 8px; border:1px solid var(--border); border-radius:4px; }
+  .nav a:hover { color:var(--accent); border-color:var(--accent); }
+  .nav a.here  { color:var(--accent); border-color:var(--accent); background:#0c2d6b22; }
+  h1 { color:var(--accent); font-size:1.2rem; margin-bottom:4px; }
+  .subtitle { color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+  h2 { color:var(--orange); font-size:.9rem; margin:20px 0 10px;
+       padding-bottom:4px; border-bottom:1px solid var(--border); }
+
+  /* ── live stats bar ── */
+  .stats-bar { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin-bottom:16px; }
+  .scard { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:7px 10px; }
+  .scard-k { font-size:.66rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .scard-v { font-size:1.05rem; font-weight:700; font-family:'Consolas',monospace; }
+  .scard-v.base { color:var(--accent); }
+  .scard-v.filt { color:var(--green); }
+  .scard-v.save { color:var(--yellow); }
+
+  /* ── SVG diagram ── */
+  .diagram-wrap { background:var(--surface); border:1px solid var(--border); border-radius:8px;
+                  padding:16px; margin-bottom:16px; overflow-x:auto; }
+  svg.arch { display:block; margin:0 auto; }
+
+  /* SVG element styles */
+  .box { fill:#21262d; stroke:#30363d; stroke-width:1.5; rx:6; }
+  .box-accent  { fill:#0c2d6b44; stroke:#58a6ff; stroke-width:1.5; }
+  .box-green   { fill:#0d442944; stroke:#3fb950; stroke-width:1.5; }
+  .box-yellow  { fill:#2d200044; stroke:#d29922; stroke-width:1.5; }
+  .box-purple  { fill:#1a0f2e44; stroke:#bc8cff; stroke-width:1.5; }
+  .box-red     { fill:#2d000044; stroke:#f85149; stroke-width:1.5; }
+  .lbl-title   { fill:#c9d1d9; font-size:11px; font-weight:700; font-family:'Consolas',monospace; }
+  .lbl-sub     { fill:#8b949e; font-size:9px;  font-family:'Consolas',monospace; }
+  .lbl-accent  { fill:#58a6ff; font-size:10px; font-family:'Consolas',monospace; font-weight:700; }
+  .lbl-green   { fill:#3fb950; font-size:10px; font-family:'Consolas',monospace; font-weight:700; }
+  .lbl-yellow  { fill:#d29922; font-size:10px; font-family:'Consolas',monospace; font-weight:700; }
+  .arrow { stroke:#30363d; stroke-width:2; fill:none; marker-end:url(#arrowhead); }
+  .arrow-accent { stroke:#58a6ff88; stroke-width:2; fill:none; marker-end:url(#arrowBlue); stroke-dasharray:6,3; }
+  .arrow-green  { stroke:#3fb95088; stroke-width:2; fill:none; marker-end:url(#arrowGreen); stroke-dasharray:6,3; }
+  .badge { font-size:8px; font-family:'Consolas',monospace; }
+
+  /* ── config comparison ── */
+  .cfg-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:900px) { .cfg-grid { grid-template-columns:1fr; } }
+  .cfg-panel { background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .cfg-panel-hdr { padding:8px 14px; font-size:.8rem; font-weight:700; display:flex;
+                   justify-content:space-between; align-items:center; }
+  .cfg-panel-hdr.base { background:#0c2d6b44; border-bottom:2px solid var(--accent); color:var(--accent); }
+  .cfg-panel-hdr.filt { background:#0d442944; border-bottom:2px solid var(--green);  color:var(--green); }
+  .cfg-panel-hdr span { font-size:.72rem; font-weight:400; color:var(--muted); }
+  pre.cfg { font-family:'Consolas',monospace; font-size:.72rem; line-height:1.55;
+            padding:12px 14px; overflow-x:auto; color:var(--text); background:none;
+            max-height:600px; overflow-y:auto; }
+  /* diff highlight classes */
+  .diff-add  { background:#0d442966; border-left:3px solid var(--green);
+               display:block; margin-left:-14px; padding-left:11px; color:#c9d1d9; }
+  .diff-key  { color:var(--orange); }
+  .diff-val  { color:var(--green); }
+  .diff-str  { color:#a5d6ff; }
+  .diff-comment { color:#444c57; }
+  .diff-section { color:var(--purple); }
+  .diff-filter-a { background:#2d200022; border-left:3px solid var(--yellow);
+                   display:block; margin-left:-14px; padding-left:11px; }
+  .diff-filter-b { background:#0d442922; border-left:3px solid var(--green);
+                   display:block; margin-left:-14px; padding-left:11px; }
+
+  /* ── legend ── */
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin-top:10px; font-size:.76rem; }
+  .legend-item { display:flex; align-items:center; gap:6px; }
+  .legend-swatch { width:14px; height:4px; border-radius:2px; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="writer_torture_test.html">Torture Test</a>
+  <a href="mqtt_viewer.html">MQTT Viewer</a>
+  <a href="ems_simulator_control.html">EMS Control</a>
+  <a href="evelyn_live_compare.html">Live Compare</a>
+  <a href="influx_viewer.html">InfluxDB Viewer</a>
+  <a href="demo_compare.html" class="here">Demo Compare</a>
+</div>
+
+<h1>Evelyn Filter Demo — Conservative Scenario</h1>
+<p class="subtitle">Filter A (drop strings) + Filter B (dedup int/bool 60s) — target ~27% row reduction</p>
+
+<!-- Live stats -->
+<div class="stats-bar">
+  <div class="scard"><div class="scard-k">Baseline rows/s</div><div class="scard-v base" id="s-base-rps">—</div></div>
+  <div class="scard"><div class="scard-k">Filtered rows/s</div><div class="scard-v filt" id="s-filt-rps">—</div></div>
+  <div class="scard"><div class="scard-k">Row reduction</div><div class="scard-v save" id="s-reduction">—</div></div>
+  <div class="scard"><div class="scard-k">Base total</div><div class="scard-v base" id="s-base-total">—</div></div>
+  <div class="scard"><div class="scard-k">Filt total</div><div class="scard-v filt" id="s-filt-total">—</div></div>
+  <div class="scard"><div class="scard-k">Last update</div><div class="scard-v" id="s-ts" style="font-size:.72rem;color:var(--muted)">—</div></div>
+</div>
+
+<!-- Architecture diagram -->
+<h2>System Layout</h2>
+<div class="diagram-wrap">
+<svg class="arch" width="780" height="280" viewBox="0 0 780 280">
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#30363d"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#58a6ff88"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#3fb95088"/>
+    </marker>
+  </defs>
+
+  <!-- Generator -->
+  <rect x="10" y="105" width="130" height="70" rx="6" class="box-purple"/>
+  <text x="75" y="128" text-anchor="middle" class="lbl-title">Generator</text>
+  <text x="75" y="144" text-anchor="middle" class="lbl-sub">stress_real_pub</text>
+  <text x="75" y="158" text-anchor="middle" class="lbl-sub">175 msg/s · 1 unit</text>
+  <text x="75" y="170" text-anchor="middle" class="lbl-sub">ems/site/{id}/unit/...</text>
+
+  <!-- FlashMQ -->
+  <rect x="185" y="90" width="130" height="100" rx="6" class="box-accent"/>
+  <text x="250" y="116" text-anchor="middle" class="lbl-title">FlashMQ</text>
+  <text x="250" y="131" text-anchor="middle" class="lbl-sub">MQTT broker</text>
+  <text x="250" y="146" text-anchor="middle" class="lbl-accent">:1883</text>
+  <text x="250" y="161" text-anchor="middle" class="lbl-sub">systemd service</text>
+  <text x="250" y="175" text-anchor="middle" class="lbl-sub">sub: ems/#</text>
+
+  <!-- Telegraf Baseline -->
+  <rect x="365" y="30" width="150" height="90" rx="6" class="box-accent"/>
+  <text x="440" y="52"  text-anchor="middle" class="lbl-title">Telegraf Baseline</text>
+  <text x="440" y="67"  text-anchor="middle" class="lbl-sub">json_v2 · pivot</text>
+  <text x="440" y="82"  text-anchor="middle" class="lbl-sub">all signals pass through</text>
+  <text x="440" y="97"  text-anchor="middle" class="lbl-sub">client: telegraf-46-base</text>
+  <text x="440" y="112" text-anchor="middle" class="lbl-accent">→ :8096</text>
+
+  <!-- Telegraf Filtered -->
+  <rect x="365" y="155" width="150" height="95" rx="6" class="box-green"/>
+  <text x="440" y="177" text-anchor="middle" class="lbl-title">Telegraf Filtered</text>
+  <text x="440" y="192" text-anchor="middle" class="lbl-sub">json_v2 · dedup · pivot</text>
+  <text x="440" y="207" text-anchor="middle" class="lbl-yellow">Filter A: drop strings</text>
+  <text x="440" y="221" text-anchor="middle" class="lbl-yellow">Filter B: dedup 60s</text>
+  <text x="440" y="236" text-anchor="middle" class="lbl-sub">client: telegraf-46-filt</text>
+  <text x="440" y="250" text-anchor="middle" class="lbl-green">→ :8097</text>
+
+  <!-- InfluxDB Baseline -->
+  <rect x="565" y="30" width="130" height="90" rx="6" class="box-accent"/>
+  <text x="630" y="52"  text-anchor="middle" class="lbl-title">InfluxDB Baseline</text>
+  <text x="630" y="67"  text-anchor="middle" class="lbl-accent">:8096</text>
+  <text x="630" y="82"  text-anchor="middle" class="lbl-sub">bucket: ems-baseline</text>
+  <text x="630" y="97"  text-anchor="middle" class="lbl-sub">fields: float / integer</text>
+  <text x="630" y="112" text-anchor="middle" class="lbl-sub">boolean_integer / string</text>
+
+  <!-- InfluxDB Filtered -->
+  <rect x="565" y="155" width="130" height="95" rx="6" class="box-green"/>
+  <text x="630" y="177" text-anchor="middle" class="lbl-title">InfluxDB Filtered</text>
+  <text x="630" y="192" text-anchor="middle" class="lbl-green">:8097</text>
+  <text x="630" y="207" text-anchor="middle" class="lbl-sub">bucket: ems-filtered</text>
+  <text x="630" y="222" text-anchor="middle" class="lbl-sub">no string rows</text>
+  <text x="630" y="237" text-anchor="middle" class="lbl-sub">int/bool deduped 60s</text>
+  <text x="630" y="252" text-anchor="middle" class="lbl-yellow">~27% fewer rows</text>
+
+  <!-- Arrows: Generator → FlashMQ -->
+  <line x1="140" y1="140" x2="183" y2="140" class="arrow"/>
+
+  <!-- FlashMQ → Telegraf Base -->
+  <path d="M315,120 C340,120 345,75 363,75" class="arrow-accent"/>
+
+  <!-- FlashMQ → Telegraf Filt -->
+  <path d="M315,160 C340,160 345,202 363,202" class="arrow-green"/>
+
+  <!-- Telegraf Base → InfluxDB Base -->
+  <line x1="515" y1="75" x2="563" y2="75" class="arrow-accent"/>
+
+  <!-- Telegraf Filt → InfluxDB Filt -->
+  <line x1="515" y1="202" x2="563" y2="202" class="arrow-green"/>
+
+  <!-- Row count live labels -->
+  <text x="630" y="138" text-anchor="middle" class="lbl-accent" id="svg-base-rps">— rows/s</text>
+  <text x="630" y="262" text-anchor="middle" class="lbl-green"  id="svg-filt-rps">— rows/s</text>
+</svg>
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch" style="background:var(--accent)"></div><span>Baseline path (all signals)</span></div>
+  <div class="legend-item"><div class="legend-swatch" style="background:var(--green)"></div><span>Filtered path (Filter A+B)</span></div>
+  <div class="legend-item"><div class="legend-swatch" style="background:var(--yellow)"></div><span>Filter effect</span></div>
+</div>
+</div>
+
+<!-- Config comparison -->
+<h2>Telegraf Config — Baseline vs Filtered</h2>
+<div class="cfg-grid">
+
+  <!-- Baseline config -->
+  <div class="cfg-panel">
+    <div class="cfg-panel-hdr base">Baseline <span>/tmp/telegraf-46-base.conf</span></div>
+    <pre class="cfg"><span class="diff-comment"># All signals — no filtering</span>
+
+<span class="diff-section">[agent]</span>
+  <span class="diff-key">interval</span>          = <span class="diff-str">"1s"</span>
+  <span class="diff-key">precision</span>         = <span class="diff-str">"1ms"</span>
+  <span class="diff-key">flush_interval</span>    = <span class="diff-str">"5s"</span>
+  <span class="diff-key">omit_hostname</span>     = <span class="diff-val">true</span>
+
+<span class="diff-section">[[inputs.mqtt_consumer]]</span>
+  <span class="diff-key">servers</span>    = [<span class="diff-str">"tcp://localhost:1883"</span>]
+  <span class="diff-key">topics</span>     = [<span class="diff-str">"ems/#"</span>]
+  <span class="diff-key">client_id</span>  = <span class="diff-str">"telegraf-46-base"</span>
+  <span class="diff-key">data_format</span> = <span class="diff-str">"json_v2"</span>
+
+  <span class="diff-comment">  # no tagdrop here — strings pass through</span>
+
+  <span class="diff-section">[[inputs.mqtt_consumer.json_v2]]</span>
+    <span class="diff-key">timestamp_path</span>   = <span class="diff-str">"ts"</span>
+    <span class="diff-key">timestamp_format</span> = <span class="diff-str">"2006-01-02T15:04:05.000Z"</span>
+
+    <span class="diff-section">[[inputs.mqtt_consumer.json_v2.field]]</span>
+      <span class="diff-key">path</span> = <span class="diff-str">"value"</span>
+
+    <span class="diff-comment">    # 9-seg topic parsing</span>
+    <span class="diff-section">[[inputs.mqtt_consumer.topic_parsing]]</span>
+      <span class="diff-key">topic</span> = <span class="diff-str">"ems/site/+/unit/+/+/+/+/+"</span>
+      <span class="diff-key">tags</span>  = <span class="diff-str">"_/_/site_id/_/unit_id/device/instance/point_name/data_type"</span>
+      <span class="diff-key">measurement</span> = <span class="diff-str">"_/_/_/measurement/_/_/_/_/_"</span>
+
+<span class="diff-section">[[processors.pivot]]</span>
+  <span class="diff-key">order</span>     = <span class="diff-val">1</span>
+  <span class="diff-key">tag_key</span>   = <span class="diff-str">"data_type"</span>
+  <span class="diff-key">value_key</span> = <span class="diff-str">"value"</span>
+
+<span class="diff-section">[[outputs.influxdb_v2]]</span>
+  <span class="diff-key">urls</span>         = [<span class="diff-str">"http://localhost:8096"</span>]
+  <span class="diff-key">bucket</span>       = <span class="diff-str">"ems-baseline"</span>
+  <span class="diff-key">namedrop</span>     = [<span class="diff-str">"internal_*"</span>]</pre>
+  </div>
+
+  <!-- Filtered config -->
+  <div class="cfg-panel">
+    <div class="cfg-panel-hdr filt">Filtered <span>/tmp/telegraf-46-filt.conf</span></div>
+    <pre class="cfg"><span class="diff-comment"># Filter A + Filter B + pivot</span>
+
+<span class="diff-section">[agent]</span>
+  <span class="diff-key">interval</span>          = <span class="diff-str">"1s"</span>
+  <span class="diff-key">precision</span>         = <span class="diff-str">"1ms"</span>
+  <span class="diff-key">flush_interval</span>    = <span class="diff-str">"5s"</span>
+  <span class="diff-key">omit_hostname</span>     = <span class="diff-val">true</span>
+
+<span class="diff-section">[[inputs.mqtt_consumer]]</span>
+  <span class="diff-key">servers</span>    = [<span class="diff-str">"tcp://localhost:1883"</span>]
+  <span class="diff-key">topics</span>     = [<span class="diff-str">"ems/#"</span>]
+  <span class="diff-key">client_id</span>  = <span class="diff-str">"telegraf-46-filt"</span>
+  <span class="diff-key">data_format</span> = <span class="diff-str">"json_v2"</span>
+<span class="diff-filter-a">
+  <span class="diff-comment">  # ── Filter A: drop string dtype at input ──────────</span>
+  <span class="diff-section">  [inputs.mqtt_consumer.tagdrop]</span>
+    <span class="diff-key">data_type</span> = [<span class="diff-str">"string"</span>]
+  <span class="diff-comment">  # ──────────────────────────────────────────────────</span>
+</span>
+  <span class="diff-section">[[inputs.mqtt_consumer.json_v2]]</span>
+    <span class="diff-key">timestamp_path</span>   = <span class="diff-str">"ts"</span>
+    <span class="diff-key">timestamp_format</span> = <span class="diff-str">"2006-01-02T15:04:05.000Z"</span>
+
+    <span class="diff-section">[[inputs.mqtt_consumer.json_v2.field]]</span>
+      <span class="diff-key">path</span> = <span class="diff-str">"value"</span>
+
+    <span class="diff-comment">    # 9-seg topic parsing</span>
+    <span class="diff-section">[[inputs.mqtt_consumer.topic_parsing]]</span>
+      <span class="diff-key">topic</span> = <span class="diff-str">"ems/site/+/unit/+/+/+/+/+"</span>
+      <span class="diff-key">tags</span>  = <span class="diff-str">"_/_/site_id/_/unit_id/device/instance/point_name/data_type"</span>
+      <span class="diff-key">measurement</span> = <span class="diff-str">"_/_/_/measurement/_/_/_/_/_"</span>
+<span class="diff-filter-b">
+  <span class="diff-comment">  # ── Filter B: dedup integer+boolean, order=0 ──────</span>
+  <span class="diff-section">[[processors.dedup]]</span>
+    <span class="diff-key">order</span>          = <span class="diff-val">0</span>
+    <span class="diff-key">dedup_interval</span> = <span class="diff-str">"60s"</span>
+    <span class="diff-section">[processors.dedup.tagpass]</span>
+      <span class="diff-key">data_type</span> = [<span class="diff-str">"integer"</span>, <span class="diff-str">"boolean_integer"</span>]
+  <span class="diff-comment">  # ──────────────────────────────────────────────────</span>
+</span>
+<span class="diff-section">[[processors.pivot]]</span>
+  <span class="diff-key">order</span>     = <span class="diff-val">1</span>
+  <span class="diff-key">tag_key</span>   = <span class="diff-str">"data_type"</span>
+  <span class="diff-key">value_key</span> = <span class="diff-str">"value"</span>
+
+<span class="diff-section">[[outputs.influxdb_v2]]</span>
+  <span class="diff-key">urls</span>         = [<span class="diff-str">"http://localhost:8097"</span>]
+  <span class="diff-key">bucket</span>       = <span class="diff-str">"ems-filtered"</span>
+  <span class="diff-key">namedrop</span>     = [<span class="diff-str">"internal_*"</span>]</pre>
+  </div>
+
+</div><!-- cfg-grid -->
+
+<!-- Filter legend -->
+<div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;font-size:.78rem;">
+  <div style="display:flex;align-items:center;gap:8px">
+    <div style="width:12px;height:12px;border-radius:2px;background:#2d200044;border:1px solid var(--yellow)"></div>
+    <span><strong style="color:var(--yellow)">Filter A</strong> — drop <code>data_type=string</code> rows at input (~4% reduction)</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div style="width:12px;height:12px;border-radius:2px;background:#0d442922;border:1px solid var(--green)"></div>
+    <span><strong style="color:var(--green)">Filter B</strong> — dedup integer/boolean_integer 60s window (~23% reduction)</span>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const BASE_URL   = 'http://192.168.86.46:8096';
+const FILT_URL   = 'http://192.168.86.46:8097';
+const TOKEN      = 'ems-token-secret';
+const ORG        = 'ems-org';
+const WINDOW_S   = 60;
+
+async function fluxQuery(baseUrl, query) {
+  const resp = await fetch(`${baseUrl}/api/v2/query?org=${encodeURIComponent(ORG)}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Token ${TOKEN}`,
+      'Content-Type':  'application/vnd.flux',
+      'Accept':        'application/csv',
+    },
+    body: query,
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const csv = await resp.text();
+  const lines = csv.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+  if (lines.length < 2) return null;
+  const headers = lines[0].split(',').map(h => h.trim());
+  const vals    = lines[1].split(',').map(v => v.trim());
+  const obj = {};
+  headers.forEach((h,i) => obj[h] = vals[i]);
+  return obj;
+}
+
+async function fetchStats() {
+  const q = `from(bucket:"BUCKET")
+  |> range(start:-${WINDOW_S}s)
+  |> filter(fn:(r)=>r._measurement=="unit")
+  |> group()
+  |> count()`;
+
+  try {
+    const [baseRow, filtRow] = await Promise.all([
+      fluxQuery(BASE_URL, q.replace('BUCKET','ems-baseline')),
+      fluxQuery(FILT_URL, q.replace('BUCKET','ems-filtered')),
+    ]);
+
+    const baseN = baseRow ? parseInt(baseRow._value||0) : null;
+    const filtN = filtRow ? parseInt(filtRow._value||0) : null;
+
+    const baseRps = baseN !== null ? (baseN / WINDOW_S).toFixed(1) : '—';
+    const filtRps = filtN !== null ? (filtN / WINDOW_S).toFixed(1) : '—';
+
+    document.getElementById('s-base-rps').textContent   = baseRps === '—' ? '—' : baseRps + '/s';
+    document.getElementById('s-filt-rps').textContent   = filtRps === '—' ? '—' : filtRps + '/s';
+    document.getElementById('s-base-total').textContent = baseN !== null ? baseN.toLocaleString() : '—';
+    document.getElementById('s-filt-total').textContent = filtN !== null ? filtN.toLocaleString() : '—';
+    document.getElementById('svg-base-rps').textContent = baseRps !== '—' ? baseRps + ' rows/s' : '—';
+    document.getElementById('svg-filt-rps').textContent = filtRps !== '—' ? filtRps + ' rows/s' : '—';
+
+    if (baseN && filtN && baseN > 0) {
+      const pct = ((1 - filtN / baseN) * 100).toFixed(1);
+      document.getElementById('s-reduction').textContent = pct + '%';
+    } else {
+      document.getElementById('s-reduction').textContent = '—';
+    }
+
+    document.getElementById('s-ts').textContent = new Date().toLocaleTimeString();
+  } catch(e) {
+    console.warn('stats fetch failed', e.message);
+  }
+}
+
+fetchStats();
+setInterval(fetchStats, 10000);
+</script>
+</body>
+</html>

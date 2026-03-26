@@ -100,20 +100,47 @@ cat > /tmp/telegraf-native-base.conf <<'EOF'
   omit_hostname         = true
 
 [[inputs.mqtt_consumer]]
-  name_override      = "ems"
   servers            = ["tcp://localhost:11888"]
-  topics             = ["unit/#"]
+  topics             = ["ems/#"]
   qos                = 0
   client_id          = "telegraf-compare-base"
   connection_timeout = "30s"
-  data_format        = "json"
+  data_format        = "json_v2"
 
-  [[inputs.mqtt_consumer.topic_parsing]]
-    topic = "unit/+/+/+/+/+"
-    tags  = "_/unit_id/device/instance/point_name/dtype"
+  [[inputs.mqtt_consumer.json_v2]]
+    timestamp_path     = "ts"
+    timestamp_format   = "2006-01-02T15:04:05.000Z"
+    timestamp_timezone = "UTC"
+
+    [[inputs.mqtt_consumer.json_v2.field]]
+      path = "value"
+
+    # 9-seg: ems/site/{site}/unit/{uid}/{device}/{instance}/{point}/{dtype}
+    [[inputs.mqtt_consumer.topic_parsing]]
+      topic       = "ems/site/+/unit/+/+/+/+/+"
+      tags        = "_/_/site_id/_/unit_id/device/instance/point_name/data_type"
+      measurement = "_/_/_/measurement/_/_/_/_/_"
+
+    # 7-seg: ems/site/{site}/{meas}/{dev}/{point}/{dtype}  (meter/rtac)
+    [[inputs.mqtt_consumer.topic_parsing]]
+      topic       = "ems/site/+/+/+/+/+"
+      tags        = "_/_/site_id/_/device/point_name/data_type"
+      measurement = "_/_/_/measurement/_/_/_"
+
+    # 6-seg: ems/site/{site}/root/{point}/{dtype}
+    [[inputs.mqtt_consumer.topic_parsing]]
+      topic       = "ems/site/+/root/+/+"
+      tags        = "_/_/site_id/_/point_name/data_type"
+      measurement = "_/measurement/_/_/_/_"
 
 [[inputs.internal]]
   collect_memstats = false
+
+# Pivot data_type tag → typed fields (float, integer, boolean_integer, string)
+[[processors.pivot]]
+  order     = 1
+  tag_key   = "data_type"
+  value_key = "value"
 
 [[outputs.influxdb_v2]]
   urls         = ["http://localhost:8096"]
@@ -121,12 +148,14 @@ cat > /tmp/telegraf-native-base.conf <<'EOF'
   organization = "ems-org"
   bucket       = "ems-baseline"
   timeout      = "10s"
+  namedrop     = ["internal_*"]
 EOF
 
 cat > /tmp/telegraf-native-filt.conf <<'EOF'
-# Filter A: drop string dtype rows (tagdrop on output — ~4% reduction)
-# Filter B: dedup integer/boolean_integer for 60s  (~23% reduction)
+# Filter A: drop string data_type at input (~4% reduction)
+# Filter B: dedup integer/boolean_integer for 60s (~23% reduction)
 # Combined: ~26.8% Conservative scenario
+# Schema aligned with Longbow production telegraf-conf-v2-cloud.conf
 
 [agent]
   interval              = "1s"
@@ -139,35 +168,66 @@ cat > /tmp/telegraf-native-filt.conf <<'EOF'
   omit_hostname         = true
 
 [[inputs.mqtt_consumer]]
-  name_override      = "ems"
   servers            = ["tcp://localhost:11889"]
-  topics             = ["unit/#"]
+  topics             = ["ems/#"]
   qos                = 0
   client_id          = "telegraf-compare-filt"
   connection_timeout = "30s"
-  data_format        = "json"
+  data_format        = "json_v2"
 
-  [[inputs.mqtt_consumer.topic_parsing]]
-    topic = "unit/+/+/+/+/+"
-    tags  = "_/unit_id/device/instance/point_name/dtype"
+  # Filter A: drop string dtype before any processing
+  [inputs.mqtt_consumer.tagdrop]
+    data_type = ["string"]
 
-# Filter B: dedup integer + boolean signals only
-[[processors.dedup]]
-  dedup_interval = "60s"
-  [processors.dedup.tagpass]
-    dtype = ["integer", "boolean_integer"]
+  [[inputs.mqtt_consumer.json_v2]]
+    timestamp_path     = "ts"
+    timestamp_format   = "2006-01-02T15:04:05.000Z"
+    timestamp_timezone = "UTC"
+
+    [[inputs.mqtt_consumer.json_v2.field]]
+      path = "value"
+
+    # 9-seg: ems/site/{site}/unit/{uid}/{device}/{instance}/{point}/{dtype}
+    [[inputs.mqtt_consumer.topic_parsing]]
+      topic       = "ems/site/+/unit/+/+/+/+/+"
+      tags        = "_/_/site_id/_/unit_id/device/instance/point_name/data_type"
+      measurement = "_/_/_/measurement/_/_/_/_/_"
+
+    # 7-seg: ems/site/{site}/{meas}/{dev}/{point}/{dtype}  (meter/rtac)
+    [[inputs.mqtt_consumer.topic_parsing]]
+      topic       = "ems/site/+/+/+/+/+"
+      tags        = "_/_/site_id/_/device/point_name/data_type"
+      measurement = "_/_/_/measurement/_/_/_"
+
+    # 6-seg: ems/site/{site}/root/{point}/{dtype}
+    [[inputs.mqtt_consumer.topic_parsing]]
+      topic       = "ems/site/+/root/+/+"
+      tags        = "_/_/site_id/_/point_name/data_type"
+      measurement = "_/measurement/_/_/_/_"
 
 [[inputs.internal]]
   collect_memstats = false
 
-# Filter A: drop string dtype at output
+# Filter B: dedup integer + boolean signals (pass-through others unmodified)
+[[processors.dedup]]
+  order          = 0
+  dedup_interval = "60s"
+  [processors.dedup.tagpass]
+    data_type = ["integer", "boolean_integer"]
+
+# Pivot data_type tag → typed fields — runs after dedup
+[[processors.pivot]]
+  order     = 1
+  tag_key   = "data_type"
+  value_key = "value"
+
 [[outputs.influxdb_v2]]
   urls         = ["http://localhost:8097"]
   token        = "ems-token-secret"
   organization = "ems-org"
   bucket       = "ems-filtered"
   timeout      = "10s"
-  tagdrop      = {dtype = ["string"]}
+  namedrop     = ["internal_*"]
 EOF
 
 echo "Config files written to /tmp."
