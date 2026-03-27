@@ -83,20 +83,19 @@
   .data-row { display:grid; gap:4px; padding:2px 0;
               border-bottom:1px solid #1c2128; align-items:baseline; cursor:pointer; }
 
-  /* ── filter highlighting ── */
-  /* baseline: show what each filter targets */
-  .hl-string  { background:#f8514918; border-left:2px solid var(--red);
-                padding-left:2px; }           /* Filter A target — dropped in filtered */
-  .hl-intbool { background:#d2992218; border-left:2px solid var(--yellow);
-                padding-left:2px; }           /* Filter B target — deduped in filtered */
-  /* filtered: survivors of dedup (change-on-value events) */
-  .hl-survivor{ background:#3fb95018; border-left:2px solid var(--green);
-                padding-left:2px; }
+  /* ── float_dedup type highlighting ── */
+  /* All field types are subject to float_dedup — colour shows dedup method */
+  .hl-float   { background:#d2992214; border-left:2px solid var(--yellow); padding-left:2px; }
+  .hl-intbool { background:#bc8cff14; border-left:2px solid var(--purple); padding-left:2px; }
+  .hl-string  { background:#58a6ff14; border-left:2px solid var(--accent);  padding-left:2px; }
+  /* simulate-drops overlay — applied on top of type colour */
+  .hl-drop    { opacity:.3; }
+  .hl-keep    { outline:1px solid var(--green); outline-offset:-1px; }
 
   /* ── legend ── */
-  .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:.7rem;
+  .legend { display:flex; gap:10px; flex-wrap:wrap; font-size:.68rem;
             padding:4px 8px; background:var(--code-bg); border-radius:4px; }
-  .legend-item { display:flex; align-items:center; gap:5px; }
+  .legend-item { display:flex; align-items:center; gap:4px; }
   .legend-swatch { width:10px; height:10px; border-radius:2px; flex-shrink:0; }
   .data-row:hover { background:#1c2128; }
   .data-row:last-child { border:none; }
@@ -216,10 +215,14 @@
               <input type="text" id="field-filter-base" value="" style="width:90px" placeholder="all">
             </label>
           </div>
-          <div class="legend" style="margin-bottom:5px">
-            <span class="legend-item"><span class="legend-swatch" style="background:#f8514988;border:1px solid var(--red)"></span><span style="color:var(--red)">string</span> — dropped by Filter A</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#d2992288;border:1px solid var(--yellow)"></span><span style="color:var(--yellow)">integer / boolean</span> — deduplicated by Filter B</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#30363d;border:1px solid var(--border)"></span><span style="color:var(--muted)">float</span> — pass-through</span>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap">
+            <div class="legend" style="flex:1">
+              <span class="legend-item"><span class="legend-swatch" style="background:#d2992288;border:1px solid var(--yellow)"></span><span style="color:var(--yellow)">float</span> — ε-threshold dedup</span>
+              <span class="legend-item"><span class="legend-swatch" style="background:#bc8cff88;border:1px solid var(--purple)"></span><span style="color:var(--purple)">int / bool</span> — exact-match dedup</span>
+              <span class="legend-item"><span class="legend-swatch" style="background:#58a6ff88;border:1px solid var(--accent)"></span><span style="color:var(--accent)">string</span> — exact-match dedup</span>
+            </div>
+            <button class="btn btn-sm" id="sim-drops-btn" onclick="toggleSimDrops()"
+                    title="Simulate float_dedup — dim rows that would be suppressed (default ε=0.5)">Simulate drops</button>
           </div>
           <div class="feed" id="feed-base"><span style="color:var(--muted)">no data yet</span></div>
         </div>
@@ -256,8 +259,11 @@
             </label>
           </div>
           <div class="legend" style="margin-bottom:5px">
-            <span class="legend-item"><span class="legend-swatch" style="background:#3fb95088;border:1px solid var(--green)"></span><span style="color:var(--green)">integer / boolean</span> — change-on-value survivor (Filter B)</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#30363d;border:1px solid var(--border)"></span><span style="color:var(--muted)">float</span> — pass-through (no dedup)</span>
+            <span style="color:var(--muted);font-size:.68rem">float_dedup execd — every row here is a change event (ε or value change exceeded)</span>
+            &nbsp;
+            <span class="legend-item"><span class="legend-swatch" style="background:#d2992288;border:1px solid var(--yellow)"></span><span style="color:var(--yellow)">float</span></span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#bc8cff88;border:1px solid var(--purple)"></span><span style="color:var(--purple)">int / bool</span></span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#58a6ff88;border:1px solid var(--accent)"></span><span style="color:var(--accent)">string</span></span>
           </div>
           <div class="feed" id="feed-filt"><span style="color:var(--muted)">no data yet</span></div>
         </div>
@@ -469,14 +475,11 @@ async function fetchData(side) {
     const colWidths = sampleKeys.map(k => k === 'point_name' ? '180px' : '1fr');
     const cols = `120px 60px ${colWidths.join(' ')} 110px 80px`;
 
-    // Determine highlight class per row
-    function rowHlClass(field, side) {
-      if (side === 'base') {
-        if (field === 'string')                              return 'hl-string';
-        if (field === 'integer' || field === 'boolean_integer') return 'hl-intbool';
-      } else {
-        if (field === 'integer' || field === 'boolean_integer') return 'hl-survivor';
-      }
+    // Highlight by dedup method (same for both sides — float_dedup handles all types)
+    function rowHlClass(field) {
+      if (field === 'float')                                  return 'hl-float';
+      if (field === 'integer' || field === 'boolean_integer') return 'hl-intbool';
+      if (field === 'string')                                 return 'hl-string';
       return '';
     }
 
@@ -491,13 +494,14 @@ async function fetchData(side) {
       const meas  = r._measurement || '';
       const field = r._field || '';
       const val   = r._value || '';
-      const hlCls = rowHlClass(field, side);
+      const hlCls = rowHlClass(field);
       const tagCells = sampleKeys.map(k =>
         `<span class="c-tags" title="${r[k]||''}">${r[k]||''}</span>`).join('');
       const idx = rowMeta.length;
       const tags = {};
       sampleKeys.forEach(k => { if (r[k]) tags[k] = r[k]; });
-      rowMeta.push({ meas, field, tags, side });
+      rowMeta.push({ meas, field, tags, side, val });
+      if (side === 'base') baseRowMeta[idx] = { meas, field, tags, val };
       html += `<div class="data-row ${hlCls}" style="grid-template-columns:${cols}" data-idx="${idx}">` +
         `<span class="c-ts">${ts}</span>` +
         `<span class="c-meas">${meas}</span>` +
@@ -513,12 +517,85 @@ async function fetchData(side) {
         if (meta) showHistory(meta);
       });
     });
+    if (side === 'base' && simDropsActive) simulateDrops();
   } catch(e) {
     feed.innerHTML = `<span class="err">${e.message}</span>`;
   }
 }
 
 function fetchBoth() { fetchData('base'); fetchData('filt'); }
+
+// ── simulate float_dedup drops on baseline ────────────────────────────────
+// Rows come from InfluxDB sorted desc (newest first). We process oldest-first
+// to simulate the dedup state machine, then mark each row keep/drop.
+// Default epsilon 0.5 (matches float_dedup.toml default_epsilon).
+// Int/bool/string: exact-match change-on-value.
+
+const DEFAULT_EPSILON = 0.5;
+let simDropsActive = false;
+// Store row metadata for re-use after toggle without re-fetch
+const baseRowMeta = [];   // populated in fetchData('base')
+
+function seriesKey(r, sampleKeys) {
+  // meas + sorted tag values + field
+  const tagPart = sampleKeys.filter(k => k !== 'point_name' && r[k])
+                            .sort().map(k => `${k}=${r[k]}`).join(',');
+  return `${r._measurement||''}|${tagPart}|${r._field||''}`;
+}
+
+function simulateDrops() {
+  const feed = document.getElementById('feed-base');
+  const rows = feed.querySelectorAll('.data-row');
+  if (!rows.length) return;
+
+  // Build ordered list oldest→newest (rows are displayed newest-first)
+  const items = Array.from(rows).reverse();
+  const lastSeen = {};   // series key → last value
+
+  items.forEach(el => {
+    const idx  = parseInt(el.dataset.idx);
+    const meta = baseRowMeta[idx];
+    if (!meta) return;
+    const key   = `${meta.meas}|${JSON.stringify(meta.tags)}|${meta.field}`;
+    const val   = parseFloat(meta.val);
+    const prev  = lastSeen[key];
+
+    let drops = false;
+    if (prev !== undefined) {
+      if (meta.field === 'float') {
+        drops = !isNaN(val) && !isNaN(prev) && Math.abs(val - prev) < DEFAULT_EPSILON;
+      } else {
+        // int, bool, string: exact-match
+        drops = (meta.val === prev);
+      }
+    }
+    lastSeen[key] = meta.val;
+
+    el.classList.remove('hl-drop', 'hl-keep');
+    if (drops) el.classList.add('hl-drop');
+    else        el.classList.add('hl-keep');
+  });
+}
+
+function clearSimDrops() {
+  document.getElementById('feed-base').querySelectorAll('.data-row').forEach(el => {
+    el.classList.remove('hl-drop', 'hl-keep');
+  });
+}
+
+function toggleSimDrops() {
+  simDropsActive = !simDropsActive;
+  const btn = document.getElementById('sim-drops-btn');
+  if (simDropsActive) {
+    btn.textContent = 'Drops ON';
+    btn.classList.add('active');
+    simulateDrops();
+  } else {
+    btn.textContent = 'Simulate drops';
+    btn.classList.remove('active');
+    clearSimDrops();
+  }
+}
 
 // ── auto-refresh ───────────────────────────────────────────────────────────
 
