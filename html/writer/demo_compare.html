@@ -394,11 +394,9 @@
 <span style="color:#8b949e">MiB Mem: 63748 total  52079 free  3367 used  9123 buff/cache</span>
 
 <span style="color:#444c57">    PID  COMMAND        %CPU  %MEM    RES    TIME+    role</span>
-<span style="color:#c9d1d9"> 990591  <span style="color:#58a6ff">flashmq</span>         1.0   0.0   32MB  2:44.70  broker :11889 (filt)</span>
-<span style="color:#c9d1d9"> 990590  <span style="color:#58a6ff">flashmq</span>         0.5   0.0   32MB  2:42.23  broker :11888 (base)</span>
-<span style="color:#c9d1d9"> 990759  <span style="color:#bc8cff">stress_real_pub</span> 0.5   0.0  <span id="top-sim-rss-filt"> 8MB</span>  0:52.75  generator → :11889  <span id="top-sim-mps">175</span> msg/s</span>
+<span style="color:#c9d1d9"> 990590  <span style="color:#58a6ff">flashmq</span>         0.5   0.0   32MB  2:42.23  broker :11888 (base + filt)</span>
+<span style="color:#c9d1d9"> 990759  <span style="color:#bc8cff">stress_real_pub</span> 0.5   0.0  <span id="top-sim-rss-filt"> 8MB</span>  0:52.75  generator → :11888  <span id="top-sim-mps">175</span> msg/s</span>
 <span style="color:#c9d1d9"> 991189  <span style="color:#3fb950">telegraf</span>         0.5   0.3  179MB  2:01.91  telegraf filt (float_dedup path)</span>
-<span style="color:#c9d1d9"> 990758  <span style="color:#bc8cff">stress_real_pub</span> 0.0   0.0  <span id="top-sim-rss-base"> 8MB</span>  0:50.27  generator → :11888 (base)</span>
 <span style="color:#c9d1d9"> 990708  <span style="color:#58a6ff">telegraf</span>         0.0   0.3  177MB  1:25.77  telegraf base (no filter)</span>
 <span style="color:#c9d1d9"> 990641  <span style="color:#d29922">influxd</span>          0.0   0.3  182MB  0:58.91  influxd :8096 (baseline)</span>
 <span style="color:#c9d1d9"> 990642  <span style="color:#d29922">influxd</span>          0.0   0.3  217MB  0:27.28  influxd :8097 (filtered)</span>
@@ -1107,7 +1105,6 @@ function updateCpuProof() {
       document.getElementById('top-time').textContent        = now;
       document.getElementById('top-load').textContent        = load;
       document.getElementById('top-sim-rss-filt').textContent = ' ' + rssStr;
-      document.getElementById('top-sim-rss-base').textContent = ' ' + rssStr;
       document.getElementById('top-sim-mps').textContent     = msg.mps.toLocaleString();
 
       // Update live bar
