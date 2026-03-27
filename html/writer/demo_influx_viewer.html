@@ -33,9 +33,8 @@
   .btn.active { background:var(--green); border-color:var(--green); color:#0d1117; font-weight:700; }
   .btn-sm { padding:2px 8px; font-size:.75rem; }
 
-  /* ── dual column layout ── */
-  .dual-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px; }
-  @media(max-width:1000px) { .dual-grid { grid-template-columns:1fr; } }
+  /* ── stacked layout ── */
+  .dual-grid { display:flex; flex-direction:column; gap:12px; margin-bottom:14px; }
 
   .side-wrap { display:flex; flex-direction:column; gap:8px; }
   .side-hdr  { display:flex; align-items:center; gap:8px; padding:6px 12px;
@@ -77,12 +76,28 @@
   .feed-head { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:5px; }
   .feed { background:#0a0d11; border:1px solid var(--border); border-radius:5px;
           padding:5px 8px; font-family:'Consolas',monospace; font-size:.7rem;
-          height:280px; overflow-y:auto; }
+          height:320px; overflow-y:auto; }
   .row-hdr  { display:grid; gap:4px; padding:2px 0 3px;
               border-bottom:2px solid var(--border); color:var(--muted); font-size:.65rem;
               text-transform:uppercase; letter-spacing:.04em; }
   .data-row { display:grid; gap:4px; padding:2px 0;
               border-bottom:1px solid #1c2128; align-items:baseline; cursor:pointer; }
+
+  /* ── filter highlighting ── */
+  /* baseline: show what each filter targets */
+  .hl-string  { background:#f8514918; border-left:2px solid var(--red);
+                padding-left:2px; }           /* Filter A target — dropped in filtered */
+  .hl-intbool { background:#d2992218; border-left:2px solid var(--yellow);
+                padding-left:2px; }           /* Filter B target — deduped in filtered */
+  /* filtered: survivors of dedup (change-on-value events) */
+  .hl-survivor{ background:#3fb95018; border-left:2px solid var(--green);
+                padding-left:2px; }
+
+  /* ── legend ── */
+  .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:.7rem;
+            padding:4px 8px; background:var(--code-bg); border-radius:4px; }
+  .legend-item { display:flex; align-items:center; gap:5px; }
+  .legend-swatch { width:10px; height:10px; border-radius:2px; flex-shrink:0; }
   .data-row:hover { background:#1c2128; }
   .data-row:last-child { border:none; }
   .c-ts    { color:#444c57; font-size:.65rem; white-space:nowrap; }
@@ -201,6 +216,11 @@
               <input type="text" id="field-filter-base" value="" style="width:90px" placeholder="all">
             </label>
           </div>
+          <div class="legend" style="margin-bottom:5px">
+            <span class="legend-item"><span class="legend-swatch" style="background:#f8514988;border:1px solid var(--red)"></span><span style="color:var(--red)">string</span> — dropped by Filter A</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#d2992288;border:1px solid var(--yellow)"></span><span style="color:var(--yellow)">integer / boolean</span> — deduplicated by Filter B</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#30363d;border:1px solid var(--border)"></span><span style="color:var(--muted)">float</span> — pass-through</span>
+          </div>
           <div class="feed" id="feed-base"><span style="color:var(--muted)">no data yet</span></div>
         </div>
       </div>
@@ -234,6 +254,10 @@
             <label style="font-size:.72rem">Field
               <input type="text" id="field-filter-filt" value="" style="width:90px" placeholder="all">
             </label>
+          </div>
+          <div class="legend" style="margin-bottom:5px">
+            <span class="legend-item"><span class="legend-swatch" style="background:#3fb95088;border:1px solid var(--green)"></span><span style="color:var(--green)">integer / boolean</span> — change-on-value survivor (Filter B)</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#30363d;border:1px solid var(--border)"></span><span style="color:var(--muted)">float</span> — pass-through (no dedup)</span>
           </div>
           <div class="feed" id="feed-filt"><span style="color:var(--muted)">no data yet</span></div>
         </div>
@@ -441,7 +465,20 @@ async function fetchData(side) {
     document.getElementById(`s-rps-${side}`).textContent    =
       (rows.length / parseInt(c.range)).toFixed(1);
 
-    const cols = `120px 60px repeat(${sampleKeys.length},1fr) 90px 80px`;
+    // Give point_name column more room since it carries the signal name
+    const colWidths = sampleKeys.map(k => k === 'point_name' ? '180px' : '1fr');
+    const cols = `120px 60px ${colWidths.join(' ')} 110px 80px`;
+
+    // Determine highlight class per row
+    function rowHlClass(field, side) {
+      if (side === 'base') {
+        if (field === 'string')                              return 'hl-string';
+        if (field === 'integer' || field === 'boolean_integer') return 'hl-intbool';
+      } else {
+        if (field === 'integer' || field === 'boolean_integer') return 'hl-survivor';
+      }
+      return '';
+    }
 
     const rowMeta = [];
     let html = `<div class="row-hdr" style="grid-template-columns:${cols}">` +
@@ -454,13 +491,14 @@ async function fetchData(side) {
       const meas  = r._measurement || '';
       const field = r._field || '';
       const val   = r._value || '';
+      const hlCls = rowHlClass(field, side);
       const tagCells = sampleKeys.map(k =>
-        `<span class="c-tags" title="${r[k]||''}">${(r[k]||'').slice(-12)}</span>`).join('');
+        `<span class="c-tags" title="${r[k]||''}">${r[k]||''}</span>`).join('');
       const idx = rowMeta.length;
       const tags = {};
       sampleKeys.forEach(k => { if (r[k]) tags[k] = r[k]; });
       rowMeta.push({ meas, field, tags, side });
-      html += `<div class="data-row" style="grid-template-columns:${cols}" data-idx="${idx}">` +
+      html += `<div class="data-row ${hlCls}" style="grid-template-columns:${cols}" data-idx="${idx}">` +
         `<span class="c-ts">${ts}</span>` +
         `<span class="c-meas">${meas}</span>` +
         tagCells +
