@@ -168,8 +168,7 @@
   <span id="conn-status">disconnected</span>
   <input id="ws-host" type="text" value="localhost" placeholder="host" style="width:130px">
   <input id="ws-port" type="text" value="8769" placeholder="port" style="width:70px">
-  <button class="btn primary" onclick="connect()">Connect</button>
-  <button class="btn danger" onclick="disconnect()" style="margin-left:4px">Disconnect</button>
+  <button class="btn primary" id="conn-btn" onclick="toggleConnect()">Connect</button>
 </div>
 
 <!-- Fleet overview -->
@@ -410,8 +409,11 @@ let selectedUnits = new Set(); // empty = ALL
 
 // ── connection ──────────────────────────────────────────────────────────────
 
-function connect() {
-  if (ws) { ws.close(); ws = null; }
+function toggleConnect() {
+  if (ws) {
+    ws.close(); ws = null;
+    return;
+  }
   const host = document.getElementById('ws-host').value.trim() || 'localhost';
   const port = document.getElementById('ws-port').value.trim() || '8769';
   localStorage.setItem('ems_ws_host', host);
@@ -429,14 +431,13 @@ function connect() {
   };
 }
 
-function disconnect() {
-  if (ws) { ws.close(); ws = null; }
-}
-
 function setConn(ok) {
   const dot = document.getElementById('conn-dot');
   dot.className = `dot ${ok ? 'ok' : 'err'}`;
   document.getElementById('conn-status').textContent = ok ? 'connected' : 'disconnected';
+  const btn = document.getElementById('conn-btn');
+  btn.textContent = ok ? 'Disconnect' : 'Connect';
+  btn.className   = ok ? 'btn danger'  : 'btn primary';
 }
 
 // ── message handling ────────────────────────────────────────────────────────
@@ -829,7 +830,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (p.get('host')) {
     document.getElementById('ws-host').value = p.get('host');
     if (p.get('port')) document.getElementById('ws-port').value = p.get('port');
-    connect();
+    toggleConnect();
   }
 });
 </script>
