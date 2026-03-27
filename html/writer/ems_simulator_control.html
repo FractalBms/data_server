@@ -149,8 +149,9 @@
   <a href="writer_duck_diff_detector.html">DuckDB Diff</a>
   <a href="writer_real_data.html">Real Data</a>
   <a href="stress_real_pub.html">stress_real_pub</a>
-  <a href="ems_simulator_control.html" class="here">EMS Control</a>
   <a href="demo_compare.html">Demo Compare</a>
+  <a href="ems_simulator_control.html" class="here">Sim Control</a>
+  <a href="influx_viewer.html">InfluxDB Viewer</a>
 </div>
 
 <div style="background:#0a0d11;border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-family:'Consolas',monospace;font-size:0.78rem;color:var(--muted);line-height:1.8">
@@ -194,6 +195,11 @@
     <span class="ctrl-label">Target rate:</span>
     <input type="number" id="rate-val" value="81420" min="0" max="2000000" step="1000">
     <button class="btn" onclick="sendSetRate()">Set Rate</button>
+    <div class="ctrl-sep"></div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--muted);cursor:pointer">
+      <input type="checkbox" id="smooth-burst-chk" checked onchange="sendSmoothBurst()">
+      Smooth slow signals (1 s)
+    </label>
     <div class="ctrl-sep"></div>
     <span class="ctrl-label" style="min-width:80px">Current (A):</span>
     <input type="number" id="current-val" value="150" min="0" max="900" step="10">
@@ -422,7 +428,11 @@ function toggleConnect() {
   const url  = `ws://${host}:${port}`;
   logEv('info', `Connecting to ${url}…`);
   ws = new WebSocket(url);
-  ws.onopen    = () => { setConn(true);  logEv('ok',   'Connected'); send({type:'get_status'}); };
+  ws.onopen    = () => {
+    setConn(true); logEv('ok', 'Connected');
+    send({type:'get_status'});
+    send({type:'set_smooth_burst', enabled: document.getElementById('smooth-burst-chk').checked});
+  };
   ws.onclose   = () => { setConn(false); logEv('info', 'Disconnected'); ws = null; };
   ws.onerror   = () => { setConn(false); logEv('fault','WebSocket error'); };
   ws.onmessage = (ev) => {
@@ -471,6 +481,10 @@ function updateFleet(msg) {
   setText('f-total',    total >= 1e6 ? (total/1e6).toFixed(2)+'M' : total.toLocaleString());
   setText('f-charging', charging);
   setText('f-faults',   faults);
+
+  if (msg.smooth_burst !== undefined) {
+    document.getElementById('smooth-burst-chk').checked = msg.smooth_burst;
+  }
 
 
   // Update target dropdown if unit list changed
@@ -575,9 +589,11 @@ function send(obj) {
 
 function sendMode(mode) {
   const current_a = parseFloat(document.getElementById('current-val').value) || 0;
-  const cmd = { type:'set_mode', units: getTargetArray(), mode, current_a };
+  const targets = getTargetArray();
+  const cmd = { type:'set_mode', units: targets, mode, current_a };
   logEv('sent', `set_mode → ${mode} @ ${current_a}A  target: ${cmd.units.join(',')}`);
   send(cmd);
+  patchUnitCurrent(targets, current_a);
 }
 
 function sendContactor(closed) {
@@ -592,11 +608,28 @@ function sendSetRate() {
   send({ type:'set_rate', rate });
 }
 
+function sendSmoothBurst() {
+  const enabled = document.getElementById('smooth-burst-chk').checked;
+  logEv('sent', `set_smooth_burst → ${enabled ? 'smooth (1 s)' : 'burst (20 s)'}`);
+  send({ type:'set_smooth_burst', enabled });
+}
+
+function patchUnitCurrent(targets, current_a) {
+  if (!lastStats) return;
+  const all = targets.includes('ALL');
+  for (const u of lastStats.units || []) {
+    if (all || targets.includes(u.id)) u.current_a = current_a;
+  }
+  updateUnitGrid(lastStats.units);
+}
+
 function sendSetCurrent() {
   const current_a = parseFloat(document.getElementById('current-val').value) || 0;
-  const cmd = { type:'set_current', units: getTargetArray(), current_a };
+  const targets = getTargetArray();
+  const cmd = { type:'set_current', units: targets, current_a };
   logEv('sent', `set_current → ${current_a}A  target: ${cmd.units.join(',')}`);
   send(cmd);
+  patchUnitCurrent(targets, current_a);
 }
 
 function injectFault(fault, value) {

@@ -91,10 +91,10 @@
 <div class="nav">
   <a href="writer_torture_test.html">Torture Test</a>
   <a href="mqtt_viewer.html">MQTT Viewer</a>
-  <a href="ems_simulator_control.html">EMS Control</a>
   <a href="evelyn_live_compare.html">Live Compare</a>
-  <a href="influx_viewer.html">InfluxDB Viewer</a>
   <a href="demo_compare.html" class="here">Demo Compare</a>
+  <a href="ems_simulator_control.html">Sim Control</a>
+  <a href="influx_viewer.html">InfluxDB Viewer</a>
 </div>
 
 <h1>Evelyn Filter Demo — Filter Comparison</h1>
@@ -121,7 +121,7 @@
   <div class="scard"><div class="scard-k">Row reduction</div><div class="scard-v save" id="s-reduction">—</div></div>
   <div class="scard"><div class="scard-k">Base total</div><div class="scard-v base" id="s-base-total">—</div></div>
   <div class="scard"><div class="scard-k">Filt total</div><div class="scard-v filt" id="s-filt-total">—</div></div>
-  <div class="scard"><div class="scard-k">Last update</div><div class="scard-v" id="s-ts" style="font-size:.72rem;color:var(--muted)">—</div></div>
+  <div class="scard"><div class="scard-k">Last update</div><div class="scard-v" id="s-ts" style="font-size:.95rem;color:var(--muted)">—</div></div>
 </div>
 
 <!-- Architecture diagram -->
@@ -142,7 +142,7 @@
 
   <!-- Generator -->
   <rect x="10" y="105" width="130" height="70" rx="6" class="box-purple"/>
-  <text x="75" y="128" text-anchor="middle" class="lbl-title">Generator</text>
+  <text x="75" y="128" text-anchor="middle" class="lbl-title">Simulator</text>
   <text x="75" y="144" text-anchor="middle" class="lbl-sub">stress_real_pub</text>
   <text x="75" y="158" text-anchor="middle" class="lbl-sub">175 msg/s · 1 unit</text>
   <text x="75" y="170" text-anchor="middle" class="lbl-sub">ems/site/{id}/unit/...</text>
@@ -208,10 +208,6 @@
   <text x="630" y="138" text-anchor="middle" class="lbl-accent" id="svg-base-rps">— rows/s</text>
   <text x="630" y="282" text-anchor="middle" class="lbl-green"  id="svg-filt-rps">— rows/s</text>
 
-  <!-- Note: why rows/s varies -->
-  <text x="390" y="303" text-anchor="middle" style="fill:#cdd9e5;font-size:11px;font-family:'Consolas',monospace;font-style:italic;">
-    * rows/s varies: generator publishes in ~10 s bursts; Telegraf flushes every 5 s — 60 s window smooths but doesn't fully eliminate the jitter
-  </text>
 </svg>
 <div class="legend">
   <div class="legend-item"><div class="legend-swatch" style="background:var(--accent)"></div><span>Baseline path (all signals)</span></div>
@@ -347,23 +343,45 @@
 </div>
 
 <!-- ── CPU proof ─────────────────────────────────────────────────────────── -->
-<h2>CPU Proof — top snapshot (fractal-phil, 2026-03-26)</h2>
+<h2 style="display:flex;align-items:center;gap:12px;">
+  CPU Proof — top snapshot (fractal-phil, 2026-03-26)
+  <button id="cpu-update-btn" onclick="updateCpuProof()"
+          style="font-size:.75rem;padding:3px 10px;background:var(--surface);border:1px solid var(--border);
+                 color:var(--accent);border-radius:4px;cursor:pointer;font-family:'Consolas',monospace;">
+    ⟳ Update
+  </button>
+  <span id="cpu-update-status" style="font-size:.72rem;color:var(--muted);"></span>
+</h2>
+<!-- Live snapshot row — populated by updateCpuProof() -->
+<div id="cpu-live-bar" style="display:none;background:var(--surface);border:1px solid var(--border);
+     border-radius:6px;padding:8px 14px;margin-bottom:10px;font-family:'Consolas',monospace;font-size:.78rem;">
+  <span style="color:var(--muted);">Live · </span>
+  <span style="color:var(--muted);">load avg: </span>
+  <span id="cpu-load" style="color:var(--green);font-weight:700;">—</span>
+  <span style="color:var(--muted);margin-left:16px;">simulator: </span>
+  <span id="cpu-mps"  style="color:var(--accent);font-weight:700;">—</span>
+  <span style="color:var(--muted);"> msg/s</span>
+  <span style="color:var(--muted);margin-left:16px;">RSS: </span>
+  <span id="cpu-rss"  style="color:var(--muted);">—</span>
+  <span style="color:var(--muted);"> MB</span>
+  <span id="cpu-live-ts" style="color:var(--muted);margin-left:16px;font-size:.7rem;"></span>
+</div>
 <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px;">
   Entire pipeline running at 175 msg/s · 1 unit · system 99.8% idle.
   Captured with <code>top -b -n 2 -d 2 -p &lt;pids&gt;</code> on 192.168.86.51 (x86_64, 64 GB RAM).
 </p>
 <pre style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:14px 16px;
             font-family:'Consolas',monospace;font-size:.76rem;line-height:1.6;overflow-x:auto;">
-<span style="color:#8b949e">top - 21:39:19  load: 0.05, 0.16, 0.13</span>
+<span style="color:#8b949e">top - <span id="top-time">21:39:19</span>  load: <span id="top-load">0.05, 0.16, 0.13</span></span>
 <span style="color:#8b949e">Tasks: 9 total  |  %Cpu(s): 0.1 us  0.1 sy  <strong style="color:#3fb950">99.8 id</strong></span>
 <span style="color:#8b949e">MiB Mem: 63748 total  52079 free  3367 used  9123 buff/cache</span>
 
 <span style="color:#444c57">    PID  COMMAND        %CPU  %MEM    RES    TIME+    role</span>
 <span style="color:#c9d1d9"> 990591  <span style="color:#58a6ff">flashmq</span>         1.0   0.0   32MB  2:44.70  broker :11889 (filt)</span>
 <span style="color:#c9d1d9"> 990590  <span style="color:#58a6ff">flashmq</span>         0.5   0.0   32MB  2:42.23  broker :11888 (base)</span>
-<span style="color:#c9d1d9"> 990759  <span style="color:#bc8cff">stress_real_pub</span> 0.5   0.0    8MB  0:52.75  generator → :11889 (filt)</span>
+<span style="color:#c9d1d9"> 990759  <span style="color:#bc8cff">stress_real_pub</span> 0.5   0.0  <span id="top-sim-rss-filt"> 8MB</span>  0:52.75  generator → :11889  <span id="top-sim-mps">175</span> msg/s</span>
 <span style="color:#c9d1d9"> 991189  <span style="color:#3fb950">telegraf</span>         0.5   0.3  179MB  2:01.91  telegraf filt (float_dedup path)</span>
-<span style="color:#c9d1d9"> 990758  <span style="color:#bc8cff">stress_real_pub</span> 0.0   0.0    8MB  0:50.27  generator → :11888 (base)</span>
+<span style="color:#c9d1d9"> 990758  <span style="color:#bc8cff">stress_real_pub</span> 0.0   0.0  <span id="top-sim-rss-base"> 8MB</span>  0:50.27  generator → :11888 (base)</span>
 <span style="color:#c9d1d9"> 990708  <span style="color:#58a6ff">telegraf</span>         0.0   0.3  177MB  1:25.77  telegraf base (no filter)</span>
 <span style="color:#c9d1d9"> 990641  <span style="color:#d29922">influxd</span>          0.0   0.3  182MB  0:58.91  influxd :8096 (baseline)</span>
 <span style="color:#c9d1d9"> 990642  <span style="color:#d29922">influxd</span>          0.0   0.3  217MB  0:27.28  influxd :8097 (filtered)</span>
@@ -886,8 +904,34 @@ let pollTimer  = null;
 const TOKEN    = 'ems-token-secret';
 const ORG      = 'ems-org';
 const WINDOW_S = 60;
+const LS_KEY   = 'demo_compare_stats';
 
 function baseUrl(port) { return `http://${BASE_HOST}:${port}`; }
+
+function saveStats(baseRps, filtRps, baseN, filtN, reduction) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      baseRps, filtRps, baseN, filtN, reduction,
+      ts: new Date().toLocaleTimeString(), host: BASE_HOST
+    }));
+  } catch(_) {}
+}
+
+function restoreStats() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s.baseRps)   document.getElementById('s-base-rps').textContent   = s.baseRps + '/s';
+    if (s.filtRps)   document.getElementById('s-filt-rps').textContent   = s.filtRps + '/s';
+    if (s.baseN)     document.getElementById('s-base-total').textContent = Number(s.baseN).toLocaleString();
+    if (s.filtN)     document.getElementById('s-filt-total').textContent = Number(s.filtN).toLocaleString();
+    if (s.baseRps)   { const el = document.getElementById('svg-base-rps'); if (el) el.textContent = s.baseRps + ' rows/s'; }
+    if (s.filtRps)   { const el = document.getElementById('svg-filt-rps'); if (el) el.textContent = s.filtRps + ' rows/s'; }
+    if (s.reduction) document.getElementById('s-reduction').textContent  = s.reduction;
+    if (s.ts) { const el = document.getElementById('s-ts'); el.textContent = s.ts + ' (cached)'; el.style.color = 'var(--muted)'; el.style.fontSize = '0.95rem'; }
+  } catch(_) {}
+}
 
 function setPortStatus(id, ok) {
   const el = document.getElementById(id);
@@ -978,19 +1022,29 @@ async function fetchStats() {
   const baseRps = baseN !== null ? (baseN / WINDOW_S).toFixed(1) : null;
   const filtRps = filtN !== null ? (filtN / WINDOW_S).toFixed(1) : null;
 
-  document.getElementById('s-base-rps').textContent   = baseRps ? baseRps + '/s' : '—';
-  document.getElementById('s-filt-rps').textContent   = filtRps ? filtRps + '/s' : '—';
-  document.getElementById('s-base-total').textContent = baseN   ? baseN.toLocaleString() : '—';
-  document.getElementById('s-filt-total').textContent = filtN   ? filtN.toLocaleString() : '—';
-  document.getElementById('svg-base-rps').textContent = baseRps ? baseRps + ' rows/s' : '—';
-  document.getElementById('svg-filt-rps').textContent = filtRps ? filtRps + ' rows/s' : '—';
-
-  if (baseN && filtN && baseN > 0) {
-    document.getElementById('s-reduction').textContent = ((1 - filtN / baseN) * 100).toFixed(1) + '%';
-  } else {
-    document.getElementById('s-reduction').textContent = '—';
+  if (baseRps !== null) {
+    document.getElementById('s-base-rps').textContent   = baseRps + '/s';
+    document.getElementById('s-base-total').textContent = baseN.toLocaleString();
+    const el = document.getElementById('svg-base-rps'); if (el) el.textContent = baseRps + ' rows/s';
   }
-  document.getElementById('s-ts').textContent = new Date().toLocaleTimeString();
+  if (filtRps !== null) {
+    document.getElementById('s-filt-rps').textContent   = filtRps + '/s';
+    document.getElementById('s-filt-total').textContent = filtN.toLocaleString();
+    const el = document.getElementById('svg-filt-rps'); if (el) el.textContent = filtRps + ' rows/s';
+  }
+
+  let reduction = null;
+  if (baseN && filtN && baseN > 0) {
+    reduction = ((1 - filtN / baseN) * 100).toFixed(1) + '%';
+    document.getElementById('s-reduction').textContent = reduction;
+  }
+  const tsEl = document.getElementById('s-ts');
+  const gotData = baseRps !== null || filtRps !== null;
+  tsEl.textContent = new Date().toLocaleTimeString();
+  tsEl.style.color = gotData ? 'var(--green)' : 'var(--red)';
+  tsEl.style.fontSize = '0.95rem';
+
+  if (baseRps || filtRps) saveStats(baseRps, filtRps, baseN, filtN, reduction);
 }
 
 // Toggle ▶/▼ on details open/close
@@ -1000,6 +1054,71 @@ document.querySelectorAll('details').forEach(d => {
     s.textContent = s.textContent.replace(d.open ? '▶' : '▼', d.open ? '▼' : '▶');
   });
 });
+
+// ── CPU proof live update ────────────────────────────────────────────────────
+let cpuWs = null;
+
+function updateCpuProof() {
+  const host = document.getElementById('host-input').value.trim() || BASE_HOST;
+  const statusEl = document.getElementById('cpu-update-status');
+  const btn = document.getElementById('cpu-update-btn');
+
+  if (cpuWs) { cpuWs.close(); cpuWs = null; }
+
+  statusEl.textContent = 'connecting…';
+  statusEl.style.color = 'var(--muted)';
+  btn.disabled = true;
+
+  cpuWs = new WebSocket(`ws://${host}:8769`);
+  cpuWs.onopen  = () => cpuWs.send(JSON.stringify({type:'get_sys_stats'}));
+  cpuWs.onerror = () => {
+    statusEl.textContent = 'connect failed';
+    statusEl.style.color = 'var(--red)';
+    btn.disabled = false;
+    cpuWs = null;
+  };
+  cpuWs.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type !== 'sys_stats') return;
+
+      const now = new Date().toLocaleTimeString();
+      const load = `${msg.load_1.toFixed(2)}, ${msg.load_5.toFixed(2)}, ${msg.load_15.toFixed(2)}`;
+      const rssStr = `${msg.rss_mb.toFixed(0)}MB`.padStart(4);
+
+      // Update static snapshot in-place
+      document.getElementById('top-time').textContent        = now;
+      document.getElementById('top-load').textContent        = load;
+      document.getElementById('top-sim-rss-filt').textContent = ' ' + rssStr;
+      document.getElementById('top-sim-rss-base').textContent = ' ' + rssStr;
+      document.getElementById('top-sim-mps').textContent     = msg.mps.toLocaleString();
+
+      // Update live bar
+      document.getElementById('cpu-load').textContent    = load;
+      document.getElementById('cpu-mps').textContent     = msg.mps.toLocaleString();
+      document.getElementById('cpu-rss').textContent     = msg.rss_mb.toFixed(1);
+      document.getElementById('cpu-live-ts').textContent = now;
+      document.getElementById('cpu-live-bar').style.display = 'block';
+
+      statusEl.textContent = 'updated ' + now;
+      statusEl.style.color = 'var(--green)';
+      btn.disabled = false;
+      cpuWs.close(); cpuWs = null;
+    } catch(_) {}
+  };
+  cpuWs.onclose = () => { btn.disabled = false; cpuWs = null; };
+}
+
+// Auto-connect on load — script is at bottom of <body> so DOM is already ready
+try {
+  const saved = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+  if (saved.host) {
+    BASE_HOST = saved.host;
+    document.getElementById('host-input').value = saved.host;
+  }
+} catch(_) {}
+restoreStats();
+toggleConnect();
 </script>
 </body>
 </html>

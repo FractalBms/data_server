@@ -217,6 +217,8 @@ static std::mutex               g_state_mtx;
 static std::atomic<bool>        g_stop{false};
 static std::atomic<uint64_t>    g_published{0};
 static std::atomic<int>         g_rate{0};
+static std::atomic<int>         g_slow_interval_ms{1000}; // 1000=smooth (default), 20000=burst
+static std::atomic<uint64_t>    g_last_mps{0};
 static std::string              g_site_id;         // first site (backward compat)
 static std::vector<std::string> g_site_ids;        // all sites (parsed from --site-id a,b,c)
 static std::string              g_topic_prefix;    // optional prefix; if set, topics are {prefix}/unit/... else ems/site/{site}/unit/...
@@ -750,7 +752,8 @@ static void publish_thread_fn(const std::string& host, int port,
             if (e.slow_interval_ms > 0) {
                 auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count();
-                if (now_ms - e.last_pub_ms < e.slow_interval_ms) continue;
+                int interval = g_slow_interval_ms.load();
+                if (now_ms - e.last_pub_ms < interval) continue;
                 e.last_pub_ms = now_ms;
             }
             double val = gen_value(e);
@@ -863,6 +866,7 @@ static std::string build_status(uint64_t mps) {
     s.reserve(4096);
     s += "{\"type\":\"status\",\"mps\":"; s += std::to_string(mps);
     s += ",\"rate\":"; s += std::to_string(g_rate.load());
+    s += ",\"smooth_burst\":"; s += (g_slow_interval_ms.load() <= 1000 ? "true" : "false");
     s += ",\"site_id\":\""; s += g_site_id; s += "\"";
     s += ",\"units\":[";
 
@@ -907,6 +911,8 @@ static std::string build_status(uint64_t mps) {
 }
 
 // ============================================================================
+static std::string read_sys_stats();  // defined in stats section below
+
 // Command handler
 // ============================================================================
 
@@ -921,6 +927,15 @@ static void handle_command(const std::string& raw) {
 
         if (type == "set_rate") {
             g_rate.store((int)doc["rate"].get_int64());
+            return;
+        }
+        if (type == "set_smooth_burst") {
+            bool enabled = doc["enabled"].get_bool();
+            g_slow_interval_ms.store(enabled ? 1000 : 20000);
+            return;
+        }
+        if (type == "get_sys_stats") {
+            ws_broadcast(read_sys_stats());
             return;
         }
         if (type == "get_status") return;  // status sent on next broadcast
@@ -1094,6 +1109,28 @@ static void ws_server_fn(int port) {
 // Stats broadcaster + stdout logger
 // ============================================================================
 
+static std::string read_sys_stats() {
+    float la1=0, la5=0, la15=0;
+    FILE* f = fopen("/proc/loadavg", "r");
+    if (f) { fscanf(f, "%f %f %f", &la1, &la5, &la15); fclose(f); }
+
+    long rss_kb = 0;
+    FILE* s = fopen("/proc/self/status", "r");
+    if (s) {
+        char line[256];
+        while (fgets(line, sizeof(line), s))
+            if (strncmp(line, "VmRSS:", 6) == 0) { sscanf(line+6, "%ld", &rss_kb); break; }
+        fclose(s);
+    }
+
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+        "{\"type\":\"sys_stats\",\"load_1\":%.2f,\"load_5\":%.2f,\"load_15\":%.2f"
+        ",\"rss_mb\":%.1f,\"mps\":%llu}",
+        la1, la5, la15, rss_kb / 1024.0, (unsigned long long)g_last_mps.load());
+    return buf;
+}
+
 static void stats_fn(int n_topics) {
     uint64_t last = 0;
     auto     t_last = std::chrono::steady_clock::now();
@@ -1103,6 +1140,7 @@ static void stats_fn(int n_topics) {
         uint64_t cur = g_published.load();
         double   dt  = std::chrono::duration<double>(now - t_last).count();
         uint64_t mps = (uint64_t)((cur - last) / dt);
+        g_last_mps.store(mps);
 
         fprintf(stdout, "[ems] %7lu msg/s  topics/sweep=%d  rate=%d  units=%zu\n",
                 (unsigned long)mps, n_topics, g_rate.load(), g_units.size());
