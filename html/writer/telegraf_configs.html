@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Telegraf Config Versions</title>
+<style>
+  :root {
+    --bg:#0d1117; --surface:#161b22; --border:#30363d;
+    --text:#c9d1d9; --muted:#8b949e; --accent:#58a6ff;
+    --green:#3fb950; --yellow:#d29922; --red:#f85149;
+    --orange:#e3b341; --purple:#bc8cff;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text);
+         font-family:'Segoe UI',system-ui,sans-serif; padding:14px; }
+  .nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .nav a { color:var(--muted); text-decoration:none; font-size:.82rem;
+           padding:3px 8px; border:1px solid var(--border); border-radius:4px; }
+  .nav a:hover { color:var(--accent); border-color:var(--accent); }
+  .nav a.here  { color:var(--accent); border-color:var(--accent); background:#0c2d6b22; }
+  h1 { color:var(--accent); font-size:1.2rem; margin-bottom:4px; }
+  .subtitle { color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+  h2 { color:var(--orange); font-size:.9rem; margin:20px 0 10px;
+       padding-bottom:4px; border-bottom:1px solid var(--border); }
+
+  /* ── comparison table ── */
+  .cmp-table { width:100%; border-collapse:collapse; font-size:.78rem; margin-bottom:20px; }
+  .cmp-table th { background:var(--surface); color:var(--accent); padding:7px 10px;
+                  text-align:left; border:1px solid var(--border); font-size:.72rem;
+                  text-transform:uppercase; letter-spacing:.05em; }
+  .cmp-table td { padding:6px 10px; border:1px solid var(--border); vertical-align:top; }
+  .cmp-table tr:nth-child(even) td { background:#0d111788; }
+  .yes  { color:var(--green);  font-weight:700; }
+  .no   { color:var(--muted); }
+  .new  { color:var(--purple); font-weight:700; }
+  .warn { color:var(--yellow); }
+  .fname { font-family:'Consolas',monospace; font-size:.72rem; color:var(--accent); }
+
+  /* ── config panels ── */
+  .cfg-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px; }
+  @media (max-width:1100px) { .cfg-grid { grid-template-columns:1fr; } }
+  details { background:var(--surface); border:1px solid var(--border); border-radius:8px;
+            overflow:hidden; margin-bottom:10px; }
+  summary { cursor:pointer; padding:9px 14px; font-size:.82rem; font-weight:700;
+            color:var(--accent); list-style:none; user-select:none;
+            display:flex; align-items:center; gap:10px; }
+  summary::-webkit-details-marker { display:none; }
+  summary .arr { font-size:.7rem; color:var(--muted); transition:transform .15s; }
+  details[open] summary .arr { transform:rotate(90deg); }
+  summary .tag { font-size:.68rem; padding:2px 6px; border-radius:3px; font-weight:400; }
+  .tag-v2   { background:#0c2d6b44; border:1px solid var(--accent); color:var(--accent); }
+  .tag-v3   { background:#1a0f2e44; border:1px solid var(--purple); color:var(--purple); }
+  .tag-cloud{ background:#0d442944; border:1px solid var(--green);  color:var(--green); }
+  .tag-nc   { background:#2d200044; border:1px solid var(--yellow); color:var(--yellow); }
+  pre.cfg { font-family:'Consolas',monospace; font-size:.72rem; line-height:1.6;
+            padding:12px 14px; overflow-x:auto; color:var(--text); background:none;
+            max-height:500px; overflow-y:auto; margin:0; }
+  /* syntax colours */
+  .s-section { color:var(--purple); }
+  .s-key     { color:var(--orange); }
+  .s-val     { color:var(--green); }
+  .s-str     { color:#a5d6ff; }
+  .s-comment { color:#444c57; }
+  .s-diff    { background:#0d442944; border-left:3px solid var(--green);
+               display:block; margin-left:-14px; padding-left:11px; }
+  .s-diff-y  { background:#2d200044; border-left:3px solid var(--yellow);
+               display:block; margin-left:-14px; padding-left:11px; }
+  .s-diff-p  { background:#1a0f2e44; border-left:3px solid var(--purple);
+               display:block; margin-left:-14px; padding-left:11px; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="writer_torture_test.html">Torture Test</a>
+  <a href="mqtt_viewer.html">MQTT Viewer</a>
+  <a href="evelyn_live_compare.html">Live Compare</a>
+  <a href="demo_compare.html">Demo Compare</a>
+  <a href="ems_simulator_control.html">Sim Control</a>
+  <a href="influx_viewer.html">InfluxDB Viewer</a>
+  <a href="telegraf_configs.html" class="here">Telegraf Configs</a>
+</div>
+
+<h1>Telegraf Config Versions</h1>
+<p class="subtitle">From versions.zip · 5 configs extracted 2026-03-27 · all share the same MQTT input + topic parsing schema</p>
+
+<h2>Version Comparison</h2>
+<table class="cmp-table">
+  <thead>
+    <tr>
+      <th>Config file</th>
+      <th>Label</th>
+      <th>Pipeline</th>
+      <th>InfluxDB outputs</th>
+      <th>concurrent_writes</th>
+      <th>Type casting</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="fname">telegraf-conf-v2.conf</td>
+      <td><strong>v2 baseline</strong></td>
+      <td>v2</td>
+      <td>1 (local)</td>
+      <td class="yes">2</td>
+      <td class="no">pivot only</td>
+      <td>Production baseline</td>
+    </tr>
+    <tr>
+      <td class="fname">telegraf-conf-v2-cloud.conf</td>
+      <td><strong>v2 + cloud</strong></td>
+      <td>v2</td>
+      <td class="yes">2 (local + cloud)</td>
+      <td class="yes">2 on both</td>
+      <td class="no">pivot only</td>
+      <td>Dual-write to cloud InfluxDB</td>
+    </tr>
+    <tr>
+      <td class="fname">telegraf-conf-v2-noconcurrency.conf</td>
+      <td><strong>v2 no-concurrency</strong></td>
+      <td>v2</td>
+      <td>1 (local)</td>
+      <td class="warn">default (1)</td>
+      <td class="no">pivot only</td>
+      <td>Single-threaded writes; pivot order=2</td>
+    </tr>
+    <tr>
+      <td class="fname">telegraf-conf-v2-noconcurrencycloud.conf</td>
+      <td><strong>v2 no-concurrency + cloud</strong></td>
+      <td>v2</td>
+      <td class="yes">2 (local + cloud)</td>
+      <td class="warn">default (1)</td>
+      <td class="no">pivot only</td>
+      <td>Dual-write, no concurrent_writes</td>
+    </tr>
+    <tr>
+      <td class="fname">telegraf-conf-v3.conf</td>
+      <td><strong>v3</strong></td>
+      <td class="new">v3</td>
+      <td>1 (local)</td>
+      <td class="yes">2</td>
+      <td class="new">converter + pivot</td>
+      <td>Explicit type cast before pivot; org="" ; v3 share group</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Key Differences</h2>
+<table class="cmp-table">
+  <thead>
+    <tr><th>Feature</th><th>v2 baseline</th><th>v2-cloud</th><th>v2-noconcurrency</th><th>v2-noconcurrencycloud</th><th>v3</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Share group</td>
+      <td colspan="4" style="color:var(--accent);font-family:'Consolas',monospace">$share/telegrafs-v2/ems/#</td>
+      <td style="color:var(--purple);font-family:'Consolas',monospace">$share/telegrafs-v3/ems/#</td>
+    </tr>
+    <tr>
+      <td>client_id prefix</td>
+      <td colspan="4" style="color:var(--accent);font-family:'Consolas',monospace">telegraf-v2-</td>
+      <td style="color:var(--purple);font-family:'Consolas',monospace">telegraf-v3-</td>
+    </tr>
+    <tr>
+      <td>processors.converter</td>
+      <td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="no">—</td>
+      <td class="new">float / integer / string</td>
+    </tr>
+    <tr>
+      <td>processors.pivot order</td>
+      <td>1</td><td>1</td><td>2</td><td>2</td><td class="new">2 (after converter)</td>
+    </tr>
+    <tr>
+      <td>concurrent_writes</td>
+      <td class="yes">2</td><td class="yes">2</td><td class="no">—</td><td class="no">—</td><td class="yes">2</td>
+    </tr>
+    <tr>
+      <td>Dual InfluxDB output</td>
+      <td class="no">—</td><td class="yes">✓</td><td class="no">—</td><td class="yes">✓</td><td class="no">—</td>
+    </tr>
+    <tr>
+      <td>INFLUX_ORG</td>
+      <td colspan="4" style="font-family:'Consolas',monospace">$INFLUX_ORG</td>
+      <td style="color:var(--yellow);font-family:'Consolas',monospace">""  (empty)</td>
+    </tr>
+    <tr>
+      <td>Prometheus output</td>
+      <td colspan="5" class="yes">✓ all configs — :9273/metrics</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Config Files</h2>
+
+<details open>
+<summary><span class="arr">▶</span> telegraf-conf-v2.conf <span class="tag tag-v2">v2</span> <span style="font-size:.72rem;color:var(--muted);font-weight:400">— baseline · single InfluxDB · concurrent_writes=2</span></summary>
+<pre class="cfg"><span class="s-section">[agent]</span>
+  <span class="s-key">omit_hostname</span> = <span class="s-val">true</span>
+  <span class="s-key">precision</span>     = <span class="s-str">"1ms"</span>
+  <span class="s-key">debug</span>         = <span class="s-str">{{ .Values.telegraf.debug }}</span>
+  <span class="s-key">flush_interval</span>      = <span class="s-str">"5s"</span>
+  <span class="s-key">metric_batch_size</span>   = <span class="s-val">50000</span>
+  <span class="s-key">metric_buffer_limit</span> = <span class="s-val">200000</span>
+
+<span class="s-section">[[inputs.internal]]</span>
+  <span class="s-key">collect_memstats</span> = <span class="s-val">false</span>
+
+<span class="s-section">[[inputs.mqtt_consumer]]</span>
+  <span class="s-key">servers</span>  = [<span class="s-str">"$MQTT_HOST"</span>]
+  <span class="s-key">topics</span>   = [<span class="s-str">"$share/telegrafs-v2/ems/#"</span>]
+  <span class="s-key">client_id</span> = <span class="s-str">"telegraf-v2-${HOSTNAME}"</span>
+  <span class="s-key">qos</span> = <span class="s-val">0</span>
+  <span class="s-key">max_undelivered_messages</span> = <span class="s-val">1000000</span>
+  <span class="s-key">data_format</span> = <span class="s-str">"json_v2"</span>
+
+  <span class="s-section">[[inputs.mqtt_consumer.json_v2]]</span>
+    <span class="s-key">timestamp_path</span>     = <span class="s-str">"ts"</span>
+    <span class="s-key">timestamp_format</span>   = <span class="s-str">"2006-01-02T15:04:05Z"</span>
+    <span class="s-key">timestamp_timezone</span> = <span class="s-str">"UTC"</span>
+    <span class="s-comment">  # 6/7/8/9-segment topic parsing (same in all configs — omitted for brevity)</span>
+
+<span class="s-section">[[processors.pivot]]</span>
+  <span class="s-key">order</span>     = <span class="s-val">1</span>
+  <span class="s-key">tag_key</span>   = <span class="s-str">"data_type"</span>
+  <span class="s-key">value_key</span> = <span class="s-str">"value"</span>
+
+<span class="s-section">[[outputs.prometheus_client]]</span>
+  <span class="s-key">listen</span> = <span class="s-str">":9273"</span>
+  <span class="s-key">path</span>   = <span class="s-str">"/metrics"</span>
+
+<span class="s-section">[[outputs.influxdb_v2]]</span>
+  <span class="s-key">urls</span>         = [<span class="s-str">"$INFLUX_HOST"</span>]
+  <span class="s-key">token</span>        = <span class="s-str">"$INFLUX_TOKEN"</span>
+  <span class="s-key">organization</span> = <span class="s-str">"$INFLUX_ORG"</span>
+  <span class="s-key">bucket</span>       = <span class="s-str">"$INFLUX_BUCKET"</span>
+  <span class="s-key">namedrop</span>         = [<span class="s-str">"internal_*"</span>]
+  <span class="s-key">content_encoding</span> = <span class="s-str">"gzip"</span>
+  <span class="s-key">timeout</span>          = <span class="s-str">"10s"</span>
+<span class="s-diff">  <span class="s-key">concurrent_writes</span> = <span class="s-val">2</span></span></pre>
+</details>
+
+<details>
+<summary><span class="arr">▶</span> telegraf-conf-v2-cloud.conf <span class="tag tag-v2">v2</span> <span class="tag tag-cloud">+cloud</span> <span style="font-size:.72rem;color:var(--muted);font-weight:400">— dual InfluxDB output · concurrent_writes=2 on both</span></summary>
+<pre class="cfg"><span class="s-comment"># Same agent + inputs as v2 baseline.</span>
+<span class="s-comment"># Difference: TWO influxdb_v2 outputs — local and cloud.</span>
+
+<span class="s-section">[[processors.pivot]]</span>
+  <span class="s-key">order</span> = <span class="s-val">1</span>  <span class="s-comment"># unchanged</span>
+
+<span class="s-section">[[outputs.prometheus_client]]</span>
+  <span class="s-key">listen</span> = <span class="s-str">":9273"</span>
+
+<span class="s-section">[[outputs.influxdb_v2]]</span>  <span class="s-comment"># local</span>
+  <span class="s-key">urls</span>         = [<span class="s-str">"$INFLUX_HOST"</span>]
+  <span class="s-key">token</span>        = <span class="s-str">"$INFLUX_TOKEN"</span>
+  <span class="s-key">organization</span> = <span class="s-str">"$INFLUX_ORG"</span>
+  <span class="s-key">bucket</span>       = <span class="s-str">"$INFLUX_BUCKET"</span>
+  <span class="s-key">namedrop</span>         = [<span class="s-str">"internal_*"</span>]
+  <span class="s-key">content_encoding</span> = <span class="s-str">"gzip"</span>
+  <span class="s-key">timeout</span>          = <span class="s-str">"10s"</span>
+<span class="s-diff">  <span class="s-key">concurrent_writes</span> = <span class="s-val">2</span></span>
+
+<span class="s-diff"><span class="s-section">[[outputs.influxdb_v2]]</span>  <span class="s-comment"># cloud — ADDED</span>
+  <span class="s-key">urls</span>         = [<span class="s-str">"$INFLUX_URL_CLOUD"</span>]
+  <span class="s-key">token</span>        = <span class="s-str">"$INFLUX_TOKEN_CLOUD"</span>
+  <span class="s-key">organization</span> = <span class="s-str">"$INFLUX_ORG_CLOUD"</span>
+  <span class="s-key">bucket</span>       = <span class="s-str">"$INFLUX_BUCKET_CLOUD"</span>
+  <span class="s-key">namedrop</span>         = [<span class="s-str">"internal_*"</span>]
+  <span class="s-key">content_encoding</span> = <span class="s-str">"gzip"</span>
+  <span class="s-key">timeout</span>          = <span class="s-str">"10s"</span>
+  <span class="s-key">concurrent_writes</span> = <span class="s-val">2</span></span></pre>
+</details>
+
+<details>
+<summary><span class="arr">▶</span> telegraf-conf-v2-noconcurrency.conf <span class="tag tag-v2">v2</span> <span class="tag tag-nc">no-concurrency</span> <span style="font-size:.72rem;color:var(--muted);font-weight:400">— single InfluxDB · default (1) write thread · pivot order=2</span></summary>
+<pre class="cfg"><span class="s-comment"># Same agent + inputs as v2 baseline.</span>
+<span class="s-comment"># Differences: pivot order=2, no concurrent_writes.</span>
+
+<span class="s-diff-y"><span class="s-section">[[processors.pivot]]</span>
+  <span class="s-key">order</span>     = <span class="s-val">2</span>  <span class="s-comment"># changed from 1</span>
+  <span class="s-key">tag_key</span>   = <span class="s-str">"data_type"</span>
+  <span class="s-key">value_key</span> = <span class="s-str">"value"</span></span>
+
+<span class="s-section">[[outputs.prometheus_client]]</span>
+  <span class="s-key">listen</span> = <span class="s-str">":9273"</span>
+
+<span class="s-section">[[outputs.influxdb_v2]]</span>
+  <span class="s-key">urls</span>         = [<span class="s-str">"$INFLUX_HOST"</span>]
+  <span class="s-key">token</span>        = <span class="s-str">"$INFLUX_TOKEN"</span>
+  <span class="s-key">organization</span> = <span class="s-str">"$INFLUX_ORG"</span>
+  <span class="s-key">bucket</span>       = <span class="s-str">"$INFLUX_BUCKET"</span>
+  <span class="s-key">namedrop</span>         = [<span class="s-str">"internal_*"</span>]
+  <span class="s-key">content_encoding</span> = <span class="s-str">"gzip"</span>
+  <span class="s-key">timeout</span>          = <span class="s-str">"10s"</span>
+<span class="s-diff-y">  <span class="s-comment"># concurrent_writes removed → default single-threaded writes</span></span></pre>
+</details>
+
+<details>
+<summary><span class="arr">▶</span> telegraf-conf-v2-noconcurrencycloud.conf <span class="tag tag-v2">v2</span> <span class="tag tag-cloud">+cloud</span> <span class="tag tag-nc">no-concurrency</span> <span style="font-size:.72rem;color:var(--muted);font-weight:400">— dual InfluxDB · default write thread</span></summary>
+<pre class="cfg"><span class="s-comment"># Same agent + inputs as v2 baseline.</span>
+<span class="s-comment"># Combination of -cloud and -noconcurrency: dual output, no concurrent_writes, pivot order=2.</span>
+
+<span class="s-diff-y"><span class="s-section">[[processors.pivot]]</span>
+  <span class="s-key">order</span> = <span class="s-val">2</span>  <span class="s-comment"># changed from 1</span></span>
+
+<span class="s-section">[[outputs.prometheus_client]]</span>
+  <span class="s-key">listen</span> = <span class="s-str">":9273"</span>
+
+<span class="s-section">[[outputs.influxdb_v2]]</span>  <span class="s-comment"># local — no concurrent_writes</span>
+  <span class="s-key">urls</span>         = [<span class="s-str">"$INFLUX_HOST"</span>]
+  <span class="s-key">token</span>        = <span class="s-str">"$INFLUX_TOKEN"</span>
+  <span class="s-key">organization</span> = <span class="s-str">"$INFLUX_ORG"</span>
+  <span class="s-key">bucket</span>       = <span class="s-str">"$INFLUX_BUCKET"</span>
+  <span class="s-key">namedrop</span>         = [<span class="s-str">"internal_*"</span>]
+  <span class="s-key">content_encoding</span> = <span class="s-str">"gzip"</span>
+  <span class="s-key">timeout</span>          = <span class="s-str">"10s"</span>
+
+<span class="s-diff"><span class="s-section">[[outputs.influxdb_v2]]</span>  <span class="s-comment"># cloud — ADDED, also no concurrent_writes</span>
+  <span class="s-key">urls</span>         = [<span class="s-str">"$INFLUX_URL_CLOUD"</span>]
+  <span class="s-key">token</span>        = <span class="s-str">"$INFLUX_TOKEN_CLOUD"</span>
+  <span class="s-key">organization</span> = <span class="s-str">"$INFLUX_ORG_CLOUD"</span>
+  <span class="s-key">bucket</span>       = <span class="s-str">"$INFLUX_BUCKET_CLOUD"</span>
+  <span class="s-key">namedrop</span>         = [<span class="s-str">"internal_*"</span>]
+  <span class="s-key">content_encoding</span> = <span class="s-str">"gzip"</span>
+  <span class="s-key">timeout</span>          = <span class="s-str">"10s"</span></span></pre>
+</details>
+
+<details>
+<summary><span class="arr">▶</span> telegraf-conf-v3.conf <span class="tag tag-v3">v3</span> <span style="font-size:.72rem;color:var(--muted);font-weight:400">— explicit type casting · converter before pivot · concurrent_writes=2 · org=""</span></summary>
+<pre class="cfg"><span class="s-section">[agent]</span>
+  <span class="s-key">omit_hostname</span> = <span class="s-val">true</span>
+  <span class="s-key">precision</span>     = <span class="s-str">"1ms"</span>
+  <span class="s-key">debug</span>         = <span class="s-str">{{ .Values.telegrafV3.debug | default false }}</span>  <span class="s-comment"># v3 key</span>
+  <span class="s-key">flush_interval</span>      = <span class="s-str">"5s"</span>
+  <span class="s-key">metric_batch_size</span>   = <span class="s-val">50000</span>
+  <span class="s-key">metric_buffer_limit</span> = <span class="s-val">200000</span>
+
+<span class="s-section">[[inputs.mqtt_consumer]]</span>
+  <span class="s-key">servers</span>   = [<span class="s-str">"$MQTT_HOST"</span>]
+<span class="s-diff-p">  <span class="s-key">topics</span>    = [<span class="s-str">"$share/telegrafs-v3/ems/#"</span>]   <span class="s-comment"># v3 share group</span>
+  <span class="s-key">client_id</span> = <span class="s-str">"telegraf-v3-${HOSTNAME}"</span></span>
+  <span class="s-key">qos</span> = <span class="s-val">0</span>
+  <span class="s-key">max_undelivered_messages</span> = <span class="s-val">1000000</span>
+  <span class="s-key">data_format</span> = <span class="s-str">"json_v2"</span>
+  <span class="s-comment">  # topic parsing identical to v2 — omitted for brevity</span>
+
+<span class="s-comment">################################################################################</span>
+<span class="s-comment"># PROCESSORS — v3 adds converters BEFORE pivot</span>
+<span class="s-comment">################################################################################</span>
+
+<span class="s-diff-p"><span class="s-section">[[processors.converter]]</span>  <span class="s-comment"># float cast</span>
+  <span class="s-key">order</span> = <span class="s-val">1</span>
+  [<span class="s-key">processors.converter.tagpass</span>]
+    <span class="s-key">data_type</span> = [<span class="s-str">"float"</span>]
+  [<span class="s-key">processors.converter.fields</span>]
+    <span class="s-key">float</span> = [<span class="s-str">"value"</span>]
+
+<span class="s-section">[[processors.converter]]</span>  <span class="s-comment"># integer + boolean_integer cast</span>
+  <span class="s-key">order</span> = <span class="s-val">1</span>
+  [<span class="s-key">processors.converter.tagpass</span>]
+    <span class="s-key">data_type</span> = [<span class="s-str">"integer"</span>, <span class="s-str">"boolean_integer"</span>]
+  [<span class="s-key">processors.converter.fields</span>]
+    <span class="s-key">integer</span> = [<span class="s-str">"value"</span>]
+
+<span class="s-section">[[processors.converter]]</span>  <span class="s-comment"># string cast</span>
+  <span class="s-key">order</span> = <span class="s-val">1</span>
+  [<span class="s-key">processors.converter.tagpass</span>]
+    <span class="s-key">data_type</span> = [<span class="s-str">"string"</span>]
+  [<span class="s-key">processors.converter.fields</span>]
+    <span class="s-key">string</span> = [<span class="s-str">"value"</span>]</span>
+
+<span class="s-section">[[processors.pivot]]</span>
+  <span class="s-key">order</span>     = <span class="s-val">2</span>  <span class="s-comment"># runs AFTER converters</span>
+  <span class="s-key">tag_key</span>   = <span class="s-str">"data_type"</span>
+  <span class="s-key">value_key</span> = <span class="s-str">"value"</span>
+
+<span class="s-section">[[outputs.prometheus_client]]</span>
+  <span class="s-key">listen</span> = <span class="s-str">":9273"</span>
+  <span class="s-key">path</span>   = <span class="s-str">"/metrics"</span>
+
+<span class="s-section">[[outputs.influxdb_v2]]</span>
+  <span class="s-key">urls</span>         = [<span class="s-str">"$INFLUX_HOST"</span>]
+  <span class="s-key">token</span>        = <span class="s-str">"$INFLUX_TOKEN"</span>
+<span class="s-diff-p">  <span class="s-key">organization</span> = <span class="s-str">""</span>  <span class="s-comment"># empty — IOx / serverless InfluxDB (no org concept)</span></span>
+  <span class="s-key">bucket</span>       = <span class="s-str">"$INFLUX_BUCKET"</span>
+  <span class="s-key">namedrop</span>         = [<span class="s-str">"internal_*"</span>]
+  <span class="s-key">content_encoding</span> = <span class="s-str">"gzip"</span>
+  <span class="s-key">timeout</span>          = <span class="s-str">"10s"</span>
+<span class="s-diff">  <span class="s-key">concurrent_writes</span> = <span class="s-val">2</span></span></pre>
+</details>
+
+<script>
+document.querySelectorAll('details').forEach(d => {
+  d.addEventListener('toggle', () => {
+    const arr = d.querySelector('.arr');
+    if (arr) arr.textContent = d.open ? '▼' : '▶';
+  });
+});
+</script>
+</body>
+</html>
