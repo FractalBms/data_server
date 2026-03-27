@@ -104,9 +104,14 @@
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:.8rem;">
   <span style="color:var(--muted);">Live host:</span>
   <input id="host-input" value="192.168.86.51" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:3px 8px;font-family:'Consolas',monospace;font-size:.8rem;width:160px;">
-  <button onclick="BASE_HOST=document.getElementById('host-input').value;fetchStats();"
+  <button id="conn-btn" onclick="toggleConnect();"
           style="background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:4px;padding:3px 10px;cursor:pointer;font-size:.8rem;">Connect</button>
-  <span style="color:var(--muted);">:8096 = baseline, :8097 = filtered</span>
+  <span style="font-family:'Consolas',monospace;">
+    <span id="port-base" style="color:var(--muted);">:8096</span>
+    <span style="color:var(--muted);"> baseline &nbsp;</span>
+    <span id="port-filt" style="color:var(--muted);">:8097</span>
+    <span style="color:var(--muted);"> filtered</span>
+  </span>
 </div>
 
 <!-- Live stats -->
@@ -871,12 +876,52 @@ echo <span style="color:#a5d6ff">"Data preserved in /data/influx-base/ and /data
 'use strict';
 
 // Default to fractal-phil .51 where the latest tests were run
-let BASE_HOST = '192.168.86.51';
-const TOKEN   = 'ems-token-secret';
-const ORG     = 'ems-org';
+let BASE_HOST  = '192.168.86.51';
+let pollTimer  = null;
+const TOKEN    = 'ems-token-secret';
+const ORG      = 'ems-org';
 const WINDOW_S = 60;
 
 function baseUrl(port) { return `http://${BASE_HOST}:${port}`; }
+
+function setPortStatus(id, ok) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.color      = ok ? 'var(--green)' : 'var(--orange)';
+  el.style.fontWeight = ok ? '700' : '400';
+}
+
+function setConnBtn(connected) {
+  const btn = document.getElementById('conn-btn');
+  if (!btn) return;
+  if (connected) {
+    btn.textContent        = 'Disconnect';
+    btn.style.color        = 'var(--red)';
+    btn.style.borderColor  = 'var(--red)';
+  } else {
+    btn.textContent        = 'Connect';
+    btn.style.color        = 'var(--accent)';
+    btn.style.borderColor  = 'var(--border)';
+    setPortStatus('port-base', false);
+    setPortStatus('port-filt', false);
+  }
+}
+
+function toggleConnect() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+    setConnBtn(false);
+    ['s-base-rps','s-filt-rps','s-reduction','s-base-total','s-filt-total','svg-base-rps','svg-filt-rps']
+      .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '—'; });
+    document.getElementById('s-ts').textContent = '—';
+  } else {
+    BASE_HOST = document.getElementById('host-input').value.trim() || BASE_HOST;
+    setConnBtn(true);
+    fetchStats();
+    pollTimer = setInterval(fetchStats, 10000);
+  }
+}
 
 async function fluxQuery(url, query) {
   const resp = await fetch(`${url}/api/v2/query?org=${encodeURIComponent(ORG)}`, {
@@ -889,10 +934,9 @@ async function fluxQuery(url, query) {
     body: query,
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const csv  = await resp.text();
+  const csv   = await resp.text();
   const lines = csv.split('\n').filter(l => l.trim() && !l.startsWith('#'));
   if (lines.length < 2) return null;
-  const headers = lines[0].split(',').map(h => h.trim());
   let total = 0;
   for (let i = 1; i < lines.length; i++) {
     const vals = lines[i].split(',');
@@ -908,35 +952,41 @@ async function fetchStats() {
   |> count()
   |> sum()`;
 
+  let baseN = null, filtN = null;
+
   try {
-    const [baseN, filtN] = await Promise.all([
-      fluxQuery(baseUrl(8096), q('ems-baseline')),
-      fluxQuery(baseUrl(8097), q('ems-filtered')),
-    ]);
-
-    const baseRps = baseN !== null ? (baseN / WINDOW_S).toFixed(1) : null;
-    const filtRps = filtN !== null ? (filtN / WINDOW_S).toFixed(1) : null;
-
-    document.getElementById('s-base-rps').textContent   = baseRps ? baseRps + '/s' : '—';
-    document.getElementById('s-filt-rps').textContent   = filtRps ? filtRps + '/s' : '—';
-    document.getElementById('s-base-total').textContent = baseN   ? baseN.toLocaleString() : '—';
-    document.getElementById('s-filt-total').textContent = filtN   ? filtN.toLocaleString() : '—';
-    document.getElementById('svg-base-rps').textContent = baseRps ? baseRps + ' rows/s' : '—';
-    document.getElementById('svg-filt-rps').textContent = filtRps ? filtRps + ' rows/s' : '—';
-
-    if (baseN && filtN && baseN > 0) {
-      document.getElementById('s-reduction').textContent = ((1 - filtN / baseN) * 100).toFixed(1) + '%';
-    } else {
-      document.getElementById('s-reduction').textContent = '—';
-    }
-    document.getElementById('s-ts').textContent = new Date().toLocaleTimeString();
+    baseN = await fluxQuery(baseUrl(8096), q('ems-baseline'));
+    setPortStatus('port-base', true);
   } catch(e) {
-    console.warn('stats fetch failed', e.message);
+    setPortStatus('port-base', false);
+    console.warn(':8096 fetch failed', e.message);
   }
-}
 
-fetchStats();
-setInterval(fetchStats, 10000);
+  try {
+    filtN = await fluxQuery(baseUrl(8097), q('ems-filtered'));
+    setPortStatus('port-filt', true);
+  } catch(e) {
+    setPortStatus('port-filt', false);
+    console.warn(':8097 fetch failed', e.message);
+  }
+
+  const baseRps = baseN !== null ? (baseN / WINDOW_S).toFixed(1) : null;
+  const filtRps = filtN !== null ? (filtN / WINDOW_S).toFixed(1) : null;
+
+  document.getElementById('s-base-rps').textContent   = baseRps ? baseRps + '/s' : '—';
+  document.getElementById('s-filt-rps').textContent   = filtRps ? filtRps + '/s' : '—';
+  document.getElementById('s-base-total').textContent = baseN   ? baseN.toLocaleString() : '—';
+  document.getElementById('s-filt-total').textContent = filtN   ? filtN.toLocaleString() : '—';
+  document.getElementById('svg-base-rps').textContent = baseRps ? baseRps + ' rows/s' : '—';
+  document.getElementById('svg-filt-rps').textContent = filtRps ? filtRps + ' rows/s' : '—';
+
+  if (baseN && filtN && baseN > 0) {
+    document.getElementById('s-reduction').textContent = ((1 - filtN / baseN) * 100).toFixed(1) + '%';
+  } else {
+    document.getElementById('s-reduction').textContent = '—';
+  }
+  document.getElementById('s-ts').textContent = new Date().toLocaleTimeString();
+}
 
 // Toggle ▶/▼ on details open/close
 document.querySelectorAll('details').forEach(d => {

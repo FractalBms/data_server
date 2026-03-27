@@ -150,6 +150,7 @@
   <a href="writer_real_data.html">Real Data</a>
   <a href="stress_real_pub.html">stress_real_pub</a>
   <a href="ems_simulator_control.html" class="here">EMS Control</a>
+  <a href="demo_compare.html">Demo Compare</a>
 </div>
 
 <div style="background:#0a0d11;border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-family:'Consolas',monospace;font-size:0.78rem;color:var(--muted);line-height:1.8">
@@ -413,6 +414,8 @@ function connect() {
   if (ws) { ws.close(); ws = null; }
   const host = document.getElementById('ws-host').value.trim() || 'localhost';
   const port = document.getElementById('ws-port').value.trim() || '8769';
+  localStorage.setItem('ems_ws_host', host);
+  localStorage.setItem('ems_ws_port', port);
   const url  = `ws://${host}:${port}`;
   logEv('info', `Connecting to ${url}…`);
   ws = new WebSocket(url);
@@ -815,9 +818,13 @@ function copyQuery(key) {
   document.getElementById(id)?.addEventListener('input', renderDuckQueries);
 });
 
-// Auto-connect if URL has ?host=
+// Restore host/port from localStorage, then auto-connect if URL has ?host=
 window.addEventListener('DOMContentLoaded', () => {
   renderDuckQueries();
+  const saved_host = localStorage.getItem('ems_ws_host');
+  const saved_port = localStorage.getItem('ems_ws_port');
+  if (saved_host) document.getElementById('ws-host').value = saved_host;
+  if (saved_port) document.getElementById('ws-port').value = saved_port;
   const p = new URLSearchParams(window.location.search);
   if (p.get('host')) {
     document.getElementById('ws-host').value = p.get('host');
