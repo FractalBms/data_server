@@ -8,7 +8,7 @@ networks:
 # Evelyn demo stack — single unit, smooth mode
 #   broker: FlashMQ on host:11883
 #   writer: parquet-writer:latest — ems/#, compactor enabled, health :8771
-#   generator: stress_real_pub runs NATIVELY on .34 host (see start-evelyn.sh)
+#   generator: ems_site_simulator runs NATIVELY on .34 host (see start-evelyn.sh)
 
 services:
 

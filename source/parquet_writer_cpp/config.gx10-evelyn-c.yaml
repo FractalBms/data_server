@@ -1,6 +1,6 @@
 # real_writer config — gx10-d94c, Evelyn sim slice C
 #   prefix C, units 24-34 (11 units × 1770 = 19,470 topics/sweep)
-#   Companion: stress_real_pub --topic-prefix C --units 11 --rate 19470 --ws-port 8789
+#   Companion: ems_site_simulator --topic-prefix C --units 11 --rate 19470 --ws-port 8789
 
 mqtt:
   host: localhost

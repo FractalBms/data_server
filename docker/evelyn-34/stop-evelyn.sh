@@ -6,19 +6,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=== Stopping Evelyn demo stack ==="
 
-# Kill stress_real_pub
+# Kill ems_site_simulator
 if [[ -f /tmp/evelyn34_sim.pid ]]; then
   PID=$(cat /tmp/evelyn34_sim.pid)
   if kill -0 "$PID" 2>/dev/null; then
-    echo "  Stopping stress_real_pub (PID $PID)..."
+    echo "  Stopping ems_site_simulator (PID $PID)..."
     kill "$PID"
   else
-    echo "  stress_real_pub not running (PID $PID already gone)"
+    echo "  ems_site_simulator not running (PID $PID already gone)"
   fi
   rm -f /tmp/evelyn34_sim.pid
 else
-  echo "  No PID file — killing any stress_real_pub processes..."
-  pkill -x stress_real_pub 2>/dev/null || true
+  echo "  No PID file — killing any ems_site_simulator processes..."
+  pkill -x ems_site_simulator 2>/dev/null || true
 fi
 
 # Kill bridge_api

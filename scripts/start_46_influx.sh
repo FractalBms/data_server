@@ -22,7 +22,7 @@ mkdir -p "$LOGS"
 INFLUXD_BIN="/usr/bin/influxd"
 INFLUX_BIN="/usr/bin/influx"
 TELEGRAF_BIN="/usr/bin/telegraf"
-STRESS_BIN="$REPO/source/stress_runner/stress_real_pub"
+STRESS_BIN="$REPO/source/stress_runner/ems_site_simulator"
 STRESS_TPL="$REPO/source/stress_runner/ems_topic_template.json"
 
 FILTERED=false
@@ -67,7 +67,7 @@ echo "Stopping any existing 46-influx processes..."
 pkill -f "influxd.*influx-46-base"  2>/dev/null && echo "  stopped influxd-base"  || true
 pkill -f "influxd.*influx-46-filt"  2>/dev/null && echo "  stopped influxd-filt"  || true
 pkill -f "telegraf.*telegraf-46"    2>/dev/null && echo "  stopped telegraf"       || true
-pkill -f "stress_real_pub.*1883"    2>/dev/null && echo "  stopped generator"      || true
+pkill -f "ems_site_simulator.*1883"    2>/dev/null && echo "  stopped generator"      || true
 sleep 1
 
 # ── data dirs ────────────────────────────────────────────────────────────────

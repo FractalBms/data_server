@@ -6,7 +6,7 @@
 #   - /usr/local/bin/telegraf       (extracted from Docker image or installed)
 #   - /usr/local/bin/influxd        (extracted from Docker image or installed)
 #   - /usr/local/bin/influx         (extracted from Docker image or installed)
-#   - stress_real_pub already built (make stress_real_pub)
+#   - ems_site_simulator already built (make ems_site_simulator)
 #
 # Two parallel ingest paths — identical generators, filtering is Telegraf-side:
 #
@@ -33,7 +33,7 @@ FLASHMQ_BIN="/tmp/FlashMQ/build/flashmq"
 TELEGRAF_BIN="/usr/local/bin/telegraf"
 INFLUXD_BIN="/usr/local/bin/influxd"
 INFLUX_BIN="/usr/local/bin/influx"
-STRESS_BIN="$REPO/source/stress_runner/stress_real_pub"
+STRESS_BIN="$REPO/source/stress_runner/ems_site_simulator"
 STRESS_TPL="$REPO/source/stress_runner/ems_topic_template.json"
 
 RATE=175
@@ -62,7 +62,7 @@ pkill -f "telegraf.*telegraf-native-base" 2>/dev/null && echo "  stopped telegra
 pkill -f "telegraf.*telegraf-native-filt" 2>/dev/null && echo "  stopped telegraf-filt" || true
 pkill -f "influxd.*influx-base"        2>/dev/null && echo "  stopped influxd-base"     || true
 pkill -f "influxd.*influx-filt"        2>/dev/null && echo "  stopped influxd-filt"     || true
-pkill -f "stress_real_pub"             2>/dev/null && echo "  stopped generator"        || true
+pkill -f "ems_site_simulator"             2>/dev/null && echo "  stopped generator"        || true
 sleep 1
 
 # ── write config files to /tmp ────────────────────────────────────────────────

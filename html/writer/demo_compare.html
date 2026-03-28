@@ -129,11 +129,11 @@
 <!--
   ARCHITECTURE (fractal-phil 192.168.86.51) — single broker, two filter paths
   ============================================================================
-  ONE stress_real_pub  →  ONE FlashMQ :11888  ─┬─  Telegraf-base (no filter)      →  InfluxDB :8096  bucket=ems-baseline
+  ONE ems_site_simulator  →  ONE FlashMQ :11888  ─┬─  Telegraf-base (no filter)      →  InfluxDB :8096  bucket=ems-baseline
                                                 └─  Telegraf-filt (Filter A+B +     →  InfluxDB :8097  bucket=ems-filtered
                                                       float_dedup execd)
 
-  stress_real_pub : ws-port 8769, rate 175 msg/s, 1 unit (0215F562), site 0215D1D8
+  ems_site_simulator : ws-port 8769, rate 175 msg/s, 1 unit (0215F562), site 0215D1D8
   Telegraf-base   : /tmp/telegraf-native-base.conf   — all signals, no dedup
   Telegraf-filt   : /tmp/tg-filt-floatdedup.conf     — Filter A (drop strings) +
                                                         Filter B (dedup int/bool 60s) +
@@ -162,7 +162,7 @@
   <!-- Generator -->
   <rect x="10" y="105" width="130" height="70" rx="6" class="box-purple"/>
   <text x="75" y="128" text-anchor="middle" class="lbl-title">Simulator</text>
-  <text x="75" y="144" text-anchor="middle" class="lbl-sub">stress_real_pub</text>
+  <text x="75" y="144" text-anchor="middle" class="lbl-sub">ems_site_simulator</text>
   <text x="75" y="158" text-anchor="middle" class="lbl-sub">175 msg/s · 1 unit</text>
   <text x="75" y="170" text-anchor="middle" class="lbl-sub">ems/site/{id}/unit/...</text>
 
@@ -397,7 +397,7 @@
 
 <span style="color:#444c57">    PID  COMMAND        %CPU  %MEM    RES    TIME+    role</span>
 <span style="color:#c9d1d9"> 990590  <span style="color:#58a6ff">flashmq</span>         0.5   0.0   32MB  2:42.23  broker :11888 (base + filt)</span>
-<span style="color:#c9d1d9"> 990759  <span style="color:#bc8cff">stress_real_pub</span> 0.5   0.0  <span id="top-sim-rss-filt"> 8MB</span>  0:52.75  generator → :11888  <span id="top-sim-mps">175</span> msg/s</span>
+<span style="color:#c9d1d9"> 990759  <span style="color:#bc8cff">ems_site_simulator</span> 0.5   0.0  <span id="top-sim-rss-filt"> 8MB</span>  0:52.75  generator → :11888  <span id="top-sim-mps">175</span> msg/s</span>
 <span style="color:#c9d1d9"> 991189  <span style="color:#3fb950">telegraf</span>         0.5   0.3  179MB  2:01.91  telegraf filt (float_dedup path)</span>
 <span style="color:#c9d1d9"> 990708  <span style="color:#58a6ff">telegraf</span>         0.0   0.3  177MB  1:25.77  telegraf base (no filter)</span>
 <span style="color:#c9d1d9"> 990641  <span style="color:#d29922">influxd</span>          0.0   0.3  182MB  0:58.91  influxd :8096 (baseline)</span>
@@ -648,7 +648,7 @@ FLASHMQ_BIN=<span style="color:#a5d6ff">"/tmp/FlashMQ/build/flashmq"</span>
 TELEGRAF_BIN=<span style="color:#a5d6ff">"/usr/local/bin/telegraf"</span>
 INFLUXD_BIN=<span style="color:#a5d6ff">"/usr/local/bin/influxd"</span>
 INFLUX_BIN=<span style="color:#a5d6ff">"/usr/local/bin/influx"</span>
-STRESS_BIN=<span style="color:#a5d6ff">"$REPO/source/stress_runner/stress_real_pub"</span>
+STRESS_BIN=<span style="color:#a5d6ff">"$REPO/source/stress_runner/ems_site_simulator"</span>
 STRESS_TPL=<span style="color:#a5d6ff">"$REPO/source/stress_runner/ems_topic_template.json"</span>
 RATE=<span style="color:#79c0ff">175</span>; UNITS=<span style="color:#79c0ff">1</span>
 
@@ -673,8 +673,8 @@ pkill -f <span style="color:#a5d6ff">"telegraf.*telegraf-native-base"</span>  2>
 pkill -f <span style="color:#a5d6ff">"telegraf.*telegraf-native-filt"</span>  2>/dev/null || true
 pkill -f <span style="color:#a5d6ff">"influxd.*influx-base"</span>            2>/dev/null || true
 pkill -f <span style="color:#a5d6ff">"influxd.*influx-filt"</span>            2>/dev/null || true
-pkill -f <span style="color:#a5d6ff">"stress_real_pub.*11888"</span>          2>/dev/null || true
-pkill -f <span style="color:#a5d6ff">"stress_real_pub.*11889"</span>          2>/dev/null || true
+pkill -f <span style="color:#a5d6ff">"ems_site_simulator.*11888"</span>          2>/dev/null || true
+pkill -f <span style="color:#a5d6ff">"ems_site_simulator.*11889"</span>          2>/dev/null || true
 sleep 1
 
 <span style="color:#444c57"># ── FlashMQ configs ─────────────────────────────────────────────────────────</span>
@@ -767,8 +767,8 @@ stop_proc() {
         || echo <span style="color:#a5d6ff">"$label not running"</span>
 }
 
-stop_proc <span style="color:#a5d6ff">"generator-base"</span>  <span style="color:#a5d6ff">"stress_real_pub.*11888"</span>
-stop_proc <span style="color:#a5d6ff">"generator-filt"</span>  <span style="color:#a5d6ff">"stress_real_pub.*11889"</span>
+stop_proc <span style="color:#a5d6ff">"generator-base"</span>  <span style="color:#a5d6ff">"ems_site_simulator.*11888"</span>
+stop_proc <span style="color:#a5d6ff">"generator-filt"</span>  <span style="color:#a5d6ff">"ems_site_simulator.*11889"</span>
 stop_proc <span style="color:#a5d6ff">"telegraf-base"</span>   <span style="color:#a5d6ff">"telegraf.*telegraf-native-base"</span>
 stop_proc <span style="color:#a5d6ff">"telegraf-filt"</span>   <span style="color:#a5d6ff">"telegraf.*telegraf-native-filt"</span>
 stop_proc <span style="color:#a5d6ff">"flashmq-base"</span>    <span style="color:#a5d6ff">"flashmq.*fmq-base.conf"</span>

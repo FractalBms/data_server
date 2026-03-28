@@ -277,7 +277,7 @@
   <tbody>
     <tr><td class="label">Stop torture stack</td><td>docker stop torture_stress_{a,b,c,d} torture_writer_{a,b,c,d} torture_broker</td></tr>
     <tr><td class="label">Keep image</td><td>parquet-writer:latest (2026-03-22) — binary has compactor, just needs enabling in config</td></tr>
-    <tr><td class="label">New generator</td><td>stress_real_pub native on .34, smooth mode, 1 unit @ 175 msg/s → FlashMQ container :11883</td></tr>
+    <tr><td class="label">New generator</td><td>ems_site_simulator native on .34, smooth mode, 1 unit @ 175 msg/s → FlashMQ container :11883</td></tr>
     <tr><td class="label">New writer configs</td><td>4× configs with compact: enabled: true, interval_seconds: 600, paths /data/parquet-evelyn/{a,b,c,d}/</td></tr>
     <tr><td class="label">Enable compactor</td><td>compact_enabled: true, compact_interval_seconds: 600, compact_min_files: 3</td></tr>
     <tr><td class="label">Health ports</td><td>:8771–8774 (reuse existing)</td></tr>

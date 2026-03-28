@@ -19,7 +19,7 @@ stop_proc() {
 }
 
 stop_proc "flashmq"         "flashmq.*fmq.conf"
-stop_proc "generator"       "stress_real_pub"
+stop_proc "generator"       "ems_site_simulator"
 stop_proc "telegraf-base"   "telegraf.*telegraf-native-base"
 stop_proc "telegraf-filt"   "telegraf.*telegraf-native-filt"
 stop_proc "influxd-base"    "influxd.*influx-base"

@@ -2,7 +2,7 @@
 
 **Stack:** FlashMQ broker · parquet-writer · bridge_api management API · HTML dashboard
 **Purpose:** Ingest EMS MQTT data → Parquet files with live management UI
-**Data source:** real EMS MQTT broker (via FlashMQ bridge) or local `stress_real_pub` for testing
+**Data source:** real EMS MQTT broker (via FlashMQ bridge) or local `ems_site_simulator` for testing
 
 ---
 
@@ -11,7 +11,7 @@
 ```
 [EMS / remote MQTT]──bridge──┐
                               ↓
-[stress_real_pub]──:11883──→ [FlashMQ broker] ──ems/#──→ [parquet-writer] ──→ /parquet/
+[ems_site_simulator]──:11883──→ [FlashMQ broker] ──ems/#──→ [parquet-writer] ──→ /parquet/
                                                                                  (disk)
 [bridge_api :8772] ─── manages broker config, storage path, start/stop
 [Dashboard  :8080] ─── health :8771 · mgmt :8772
@@ -39,7 +39,7 @@ Two deployment modes with identical configs and dashboard:
 - Docker Engine 20+ and `docker compose` v2 plugin
 
 ### Native mode
-- `libmosquitto1` (runtime dep for FlashMQ and stress_real_pub)
+- `libmosquitto1` (runtime dep for FlashMQ and ems_site_simulator)
 - Arrow/Parquet runtime libs — install from `.deb` files in `docker/torture/debs/`
   or copy `libarrow.so.2300` / `libparquet.so.2300` to `/usr/local/lib/`
 - systemd (for service management)
@@ -123,7 +123,7 @@ mkdir -p evelyn-stack-native/{bin,lib,configs,systemd,html}
 
 # Binaries (x86-64 or rebuild for target arch)
 cp source/parquet_writer_cpp/real_writer   evelyn-stack-native/bin/parquet-writer
-cp source/stress_runner/stress_real_pub    evelyn-stack-native/bin/   # optional
+cp source/stress_runner/ems_site_simulator    evelyn-stack-native/bin/   # optional
 cp source/stress_runner/ems_topic_template.json evelyn-stack-native/
 
 # FlashMQ binary (extract from Docker image or build from source)
@@ -267,6 +267,6 @@ docs/
 | Port | Service | Notes |
 |---|---|---|
 | 1883 | FlashMQ (internal / native) | MQTT; Docker exposes as 11883 on host |
-| 11883 | FlashMQ host port | Docker mode only — stress_real_pub connects here |
+| 11883 | FlashMQ host port | Docker mode only — ems_site_simulator connects here |
 | 8771 | parquet-writer health | `GET /health` → JSON metrics |
 | 8772 | bridge_api | stack management HTTP API |

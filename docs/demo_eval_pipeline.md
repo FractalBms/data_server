@@ -10,7 +10,7 @@ This evaluation feeds directly into the Evelyn cost-reduction business case.
 
 ## Item 1 — Generator modes
 
-The EMS simulator (`stress_real_pub`) produces two distinct output patterns
+The EMS simulator (`ems_site_simulator`) produces two distinct output patterns
 controlled via the `set_smooth_burst` WebSocket command (or the checkbox in
 Sim Control):
 
@@ -34,7 +34,7 @@ Three Telegraf configurations subscribe to the same FlashMQ broker (:11888)
 and write to three separate InfluxDB instances.
 
 ```
-stress_real_pub
+ems_site_simulator
       │ MQTT QoS-0
       ▼
 FlashMQ :11888
@@ -90,7 +90,7 @@ Telegraf entirely. The parquet writer is a C++ binary that subscribes directly
 to MQTT and writes Arrow/Parquet files.
 
 ```
-stress_real_pub
+ems_site_simulator
       │ MQTT QoS-0
       ▼
 FlashMQ :11888
@@ -183,7 +183,7 @@ for automated collection. Alternatively, a sidecar stats script can poll
 ## What needs to be built
 
 ### Ready now
-- [x] `stress_real_pub` with smooth/burst toggle
+- [x] `ems_site_simulator` with smooth/burst toggle
 - [x] Telegraf-A config (unfiltered, :8096)
 - [x] float_dedup binary (`source/telegraf_plugins/float_dedup/`)
 - [x] parquet_writer (real_writer binary, gx10)

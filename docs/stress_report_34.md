@@ -92,7 +92,7 @@ Flush files are 60-second / 50k-row chunks. **No compaction** — the binary sup
 
 - Stop torture stack; keep `parquet-writer:latest` image
 - Rebuild image with compactor enabled in config for new Evelyn demo stack
-- New stack: 1× `stress_real_pub` (smooth mode, native on host) → FlashMQ → 4× `parquet_writer` containers
+- New stack: 1× `ems_site_simulator` (smooth mode, native on host) → FlashMQ → 4× `parquet_writer` containers
 - Rate: dinky Evelyn (175 msg/s / 1 unit) → scale to 81,420 msg/s / 46 units
 - Enable `compact: enabled: true` in writer config (10-min chunks)
 

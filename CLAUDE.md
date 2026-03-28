@@ -8,7 +8,7 @@
 | lp3 (LattePanda) | 192.168.86.20 | 192.168.0.20 | Edge host — stress runner, writer.cpp, push agent, FlashMQ :1883 |
 | fractal-phil | 192.168.86.51 | 192.168.0.51 | AWS-sim — FlashMQ :1884, Telegraf, InfluxDB2, subscriber_api (systemd), manager |
 | phil-256g (Supermicro) | 192.168.86.34 | — | Torture test server — 2× Xeon E5-2690 v4 (56T), 256 GB RAM, 1.8 TB, Docker 26 |
-| gx10-d94c | 192.168.86.48 | — | EMS real-data test — 20 cores, 119 GB RAM; 4× stress_real_pub + 4× parquet_writer |
+| gx10-d94c | 192.168.86.48 | — | EMS real-data test — 20 cores, 119 GB RAM; 4× ems_site_simulator + 4× parquet_writer |
 
 > **Note:** Always use wired IPs (192.168.0.x) for bridge and rsync — higher throughput, avoids WiFi contention at ~80k msgs/sec.
 > **Important:** 192.168.0.x is only reachable from lp3. phil-dev (192.168.86.46) is WiFi-only and cannot reach this subnet — bridge/rsync configs using 192.168.0.51 must be run from lp3, not phil-dev.
@@ -112,7 +112,7 @@ Open `http://192.168.86.46:8080/writer/ems_simulator_control.html`
 
 ```bash
 cd source/parquet_writer_cpp && make real_writer
-cd source/stress_runner      && make stress_real_pub
+cd source/stress_runner      && make ems_site_simulator
 ```
 
 ### lp3 (192.168.86.20) — git repo at ~/work/gen-ai/data_server
@@ -178,7 +178,7 @@ python manager/manager.py --config manager/config.fractal.yaml
 | `/srv/data/parquet-aws-sim/` | fractal-phil | rsynced copy (DuckDB source) |
 | `/data/parquet-evelyn/` | gx10 | single-sim real_writer output (external drive) |
 | `/data/parquet-evelyn/{a,b,c,d}/` | gx10 | 4-sim writer outputs, one dir per slice |
-| `/data/logs/YYYY/MM/DD/` | gx10 | real_writer + stress_real_pub logs (dated, external drive) |
+| `/data/logs/YYYY/MM/DD/` | gx10 | real_writer + ems_site_simulator logs (dated, external drive) |
 | `/etc/flashmq/bridge-conf.d/` | phil-dev / lp3 | FlashMQ bridge config (generated) |
 
 ## Python environment

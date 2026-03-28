@@ -17,7 +17,7 @@ LOGS="/data/logs/$(date +%Y/%m/%d)"
 mkdir -p "$LOGS"
 
 WRITER_BIN="$REPO/source/parquet_writer_cpp/real_writer"
-STRESS_BIN="$REPO/source/stress_runner/stress_real_pub"
+STRESS_BIN="$REPO/source/stress_runner/ems_site_simulator"
 STRESS_TPL="$REPO/source/stress_runner/ems_topic_template.json"
 FLASHMQ_BIN="/tmp/FlashMQ/build/flashmq"
 
@@ -33,8 +33,8 @@ done
 
 # ── stop any existing instances ────────────────────────────────────────────
 pkill -f "real_writer.*config.gx10-evelyn"   2>/dev/null && echo "stopped old real_writer(s)"   || true
-pkill -f "stress_real_pub.*topic-prefix"     2>/dev/null && echo "stopped old stress_real_pub(s)" || true
-pkill -f "stress_real_pub.*8769\|stress_real_pub.*8779\|stress_real_pub.*8789\|stress_real_pub.*8799" 2>/dev/null || true
+pkill -f "ems_site_simulator.*topic-prefix"     2>/dev/null && echo "stopped old ems_site_simulator(s)" || true
+pkill -f "ems_site_simulator.*8769\|ems_site_simulator.*8779\|ems_site_simulator.*8789\|ems_site_simulator.*8799" 2>/dev/null || true
 pkill -f "flashmq.*gx10-evelyn"              2>/dev/null && echo "stopped old FlashMQ"            || true
 sleep 1
 

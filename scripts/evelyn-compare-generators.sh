@@ -19,7 +19,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOGS="/data/logs/$(date +%Y/%m/%d)"
 mkdir -p "$LOGS" 2>/dev/null || { mkdir -p "$HOME/logs"; LOGS="$HOME/logs"; }
 
-STRESS_BIN="$REPO/source/stress_runner/stress_real_pub"
+STRESS_BIN="$REPO/source/stress_runner/ems_site_simulator"
 STRESS_TPL="$REPO/source/stress_runner/ems_topic_template.json"
 DOCKER_HOST="localhost"
 
@@ -35,18 +35,18 @@ for arg in "$@"; do
 done
 
 if [[ $STOP == 1 ]]; then
-    pkill -f "stress_real_pub.*11883" 2>/dev/null && echo "stopped generator-baseline" || echo "generator-baseline not running"
-    pkill -f "stress_real_pub.*11884" 2>/dev/null && echo "stopped generator-filtered" || echo "generator-filtered not running"
+    pkill -f "ems_site_simulator.*11883" 2>/dev/null && echo "stopped generator-baseline" || echo "generator-baseline not running"
+    pkill -f "ems_site_simulator.*11884" 2>/dev/null && echo "stopped generator-filtered" || echo "generator-filtered not running"
     exit 0
 fi
 
 # ── sanity checks ───────────────────────────────────────────────────────────
-[[ -f "$STRESS_BIN" ]] || { echo "ERROR: missing $STRESS_BIN — run: cd source/stress_runner && make stress_real_pub"; exit 1; }
+[[ -f "$STRESS_BIN" ]] || { echo "ERROR: missing $STRESS_BIN — run: cd source/stress_runner && make ems_site_simulator"; exit 1; }
 [[ -f "$STRESS_TPL" ]] || { echo "ERROR: missing $STRESS_TPL"; exit 1; }
 
 # Stop any existing compare generators
-pkill -f "stress_real_pub.*11883" 2>/dev/null && echo "stopped old generator-baseline" || true
-pkill -f "stress_real_pub.*11884" 2>/dev/null && echo "stopped old generator-filtered" || true
+pkill -f "ems_site_simulator.*11883" 2>/dev/null && echo "stopped old generator-baseline" || true
+pkill -f "ems_site_simulator.*11884" 2>/dev/null && echo "stopped old generator-filtered" || true
 sleep 1
 
 echo "Target Docker host: $DOCKER_HOST"

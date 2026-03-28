@@ -2,7 +2,7 @@ version: "3.8"
 
 # Evelyn EMS cost-comparison stack
 #
-# Two parallel ingest paths fed by separate stress_real_pub generators:
+# Two parallel ingest paths fed by separate ems_site_simulator generators:
 #
 #   Generator A  →  flashmq-baseline:1883 (host:11883)
 #                       → telegraf-baseline (ALL signals, no filter)

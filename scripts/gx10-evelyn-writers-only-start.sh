@@ -4,7 +4,7 @@
 # Use when real EMS hardware (or an external publisher) is already sending
 # data to the broker on topics A/unit/#, B/unit/#, C/unit/#, D/unit/#.
 #
-# Writers only — no stress_real_pub launched.
+# Writers only — no ems_site_simulator launched.
 #
 # Health ports:  8771 (A)  8772 (B)  8773 (C)  8774 (D)
 # Parquet data:  /data/parquet-evelyn/{a,b,c,d}/

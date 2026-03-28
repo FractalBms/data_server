@@ -148,7 +148,7 @@
   <a href="writer_diff_detector.html">Diff Detector</a>
   <a href="writer_duck_diff_detector.html">DuckDB Diff</a>
   <a href="writer_real_data.html">Real Data</a>
-  <a href="stress_real_pub.html">stress_real_pub</a>
+  <a href="ems_site_simulator.html">ems_site_simulator</a>
   <a href="demo_compare.html">Demo Compare</a>
   <a href="ems_simulator_control.html" class="here">Sim Control</a>
   <a href="demo_influx_viewer.html">Demo InfluxDB</a>
@@ -158,9 +158,9 @@
 <div style="background:#0a0d11;border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-family:'Consolas',monospace;font-size:0.78rem;color:var(--muted);line-height:1.8">
   <span style="color:var(--accent);font-weight:700">Quick start</span> — run on the target machine, then connect below:<br>
   <span style="color:var(--green)">cd</span> ~/work/gen-ai/data_server/source/stress_runner<br>
-  <span style="color:var(--green)">./stress_real_pub</span> <span style="color:var(--yellow)">--units 4 --rate 81420 --soc 50 --ws-port 8769</span>
+  <span style="color:var(--green)">./ems_site_simulator</span> <span style="color:var(--yellow)">--units 4 --rate 81420 --soc 50 --ws-port 8769</span>
   <span style="color:#444c57">&nbsp;&nbsp;# 4 units, 1 s sweep, WebSocket on :8769</span><br>
-  <span style="color:var(--green)">./stress_real_pub</span> <span style="color:var(--yellow)">--units 46 --rate 0 --soc 27</span>
+  <span style="color:var(--green)">./ems_site_simulator</span> <span style="color:var(--yellow)">--units 46 --rate 0 --soc 27</span>
   <span style="color:#444c57">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# full Longbow site, max speed, post-discharge SOC</span>
 </div>
 

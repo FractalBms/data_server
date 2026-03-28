@@ -34,7 +34,7 @@ HOSTS = {
         'stop_cmd':   'bash {repo}/scripts/stop_46_influx.sh',
         'base_port':  8096,
         'filt_port':  8097,
-        'status_pat': ['telegraf-46', 'influx-46', 'stress_real_pub'],
+        'status_pat': ['telegraf-46', 'influx-46', 'ems_site_simulator'],
     },
     'gx10': {
         'local':      False,
@@ -45,7 +45,7 @@ HOSTS = {
         'stop_cmd':   'bash {repo}/scripts/evelyn-compare-native-stop.sh',
         'base_port':  8096,
         'filt_port':  8097,
-        'status_pat': ['telegraf-native', 'influx-base', 'stress_real_pub'],
+        'status_pat': ['telegraf-native', 'influx-base', 'ems_site_simulator'],
     },
     'fractal': {
         'local':      False,
@@ -56,7 +56,7 @@ HOSTS = {
         'stop_cmd':   'bash {repo}/scripts/stop_46_influx.sh',
         'base_port':  8096,
         'filt_port':  8097,
-        'status_pat': ['telegraf-46', 'influx-46', 'stress_real_pub'],
+        'status_pat': ['telegraf-46', 'influx-46', 'ems_site_simulator'],
     },
 }
 

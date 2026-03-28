@@ -281,9 +281,9 @@
 <text x="377" y="259" class="lbl2 cm">853 GB free · ext4</text>
 <text x="377" y="274" class="lbl2 cm">parquet partitions + compacted</text>
 
-<!-- ── stress_real_pub (native) ───────────────────────────────────── -->
+<!-- ── ems_site_simulator (native) ───────────────────────────────────── -->
 <rect x="598" y="38" width="246" height="116" rx="4" fill="#0a1a08" stroke="#3fb950" stroke-width="1.5"/>
-<text x="607" y="56"  class="lbl cg">stress_real_pub</text>
+<text x="607" y="56"  class="lbl cg">ems_site_simulator</text>
 <text x="607" y="70"  class="lbl2 cm">native on host</text>
 <text x="607" y="86"  class="mono cm">1 unit · 175 msg/s</text>
 <text x="607" y="101" class="lbl2 cm">smooth (1s cadence)</text>
@@ -312,7 +312,7 @@
 <!-- Remote → broker  (dashed orange) -->
 <line x1="140" y1="115" x2="168" y2="115" stroke="#d29922" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ao)"/>
 
-<!-- stress_real_pub → broker via :11883 -->
+<!-- ems_site_simulator → broker via :11883 -->
 <line x1="598" y1="100" x2="350" y2="100" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
 <text x="432" y="95"  class="lbl2 cm">:11883</text>
 
@@ -541,7 +541,7 @@
       <span class="cfg-k">image</span>      <span class="cfg-v">parquet-writer:latest</span>
       <span class="cfg-k">topic</span>      <span class="cfg-v">ems/#</span>
       <span class="cfg-k">broker</span>     <span class="cfg-v">evelyn34_broker :11883</span>
-      <span class="cfg-k">generator</span>  <span class="cfg-v">stress_real_pub (native)</span>
+      <span class="cfg-k">generator</span>  <span class="cfg-v">ems_site_simulator (native)</span>
       <span class="cfg-k">units</span>      <span class="cfg-v">1 unit · 175 msg/s</span>
       <span class="cfg-k">mode</span>       <span class="cfg-v">smooth (g_slow_interval_ms=1000)</span>
       <span class="cfg-k">flush</span>      <span class="cfg-v">10 s · 50k rows/part</span>
@@ -667,7 +667,7 @@ function renderBridgeState(b) {
     document.getElementById('br-topic').value = b.topic;
   } else {
     dot.className  = 'dot';
-    stat.textContent = 'no bridge — local only (stress_real_pub → :11883)';
+    stat.textContent = 'no bridge — local only (ems_site_simulator → :11883)';
     stat.className = 'bridge-inactive';
   }
 }

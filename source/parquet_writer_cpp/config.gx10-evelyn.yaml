@@ -7,7 +7,7 @@
 #
 # Companion publisher:
 #   cd source/stress_runner
-#   ./stress_real_pub --host localhost --rate 81420 --ws-port 8769
+#   ./ems_site_simulator --host localhost --rate 81420 --ws-port 8769
 #
 # Start writer:
 #   cd source/parquet_writer_cpp

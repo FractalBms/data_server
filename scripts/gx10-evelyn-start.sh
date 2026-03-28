@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gx10-evelyn-start.sh — start real_writer + stress_real_pub on gx10-d94c (.48)
+# gx10-evelyn-start.sh — start real_writer + ems_site_simulator on gx10-d94c (.48)
 #                         simulating the Evelyn site (81,420 topics, site 0215D1D8)
 #
 # Run from repo root on gx10:
@@ -15,7 +15,7 @@ mkdir -p "$LOGS"
 
 WRITER_BIN="$REPO/source/parquet_writer_cpp/real_writer"
 WRITER_CFG="$REPO/source/parquet_writer_cpp/config.gx10-evelyn.yaml"
-STRESS_BIN="$REPO/source/stress_runner/stress_real_pub"
+STRESS_BIN="$REPO/source/stress_runner/ems_site_simulator"
 STRESS_TPL="$REPO/source/stress_runner/ems_topic_template.json"
 
 # ── sanity checks ─────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ done
 
 # ── stop any existing instances ────────────────────────────────────────────
 pkill -f "real_writer.*config.gx10-evelyn"   2>/dev/null && echo "stopped old real_writer"   || true
-pkill -f "stress_real_pub.*8769"             2>/dev/null && echo "stopped old stress_real_pub" || true
+pkill -f "ems_site_simulator.*8769"             2>/dev/null && echo "stopped old ems_site_simulator" || true
 sleep 1
 
 # ── start real_writer ──────────────────────────────────────────────────────
@@ -34,16 +34,16 @@ nohup "$WRITER_BIN" --config "$WRITER_CFG" \
 WRITER_PID=$!
 echo "real_writer  pid=$WRITER_PID  log=$LOGS/real_writer.log"
 
-# ── start stress_real_pub ──────────────────────────────────────────────────
+# ── start ems_site_simulator ──────────────────────────────────────────────────
 # rate=81420 = 1 full sweep/sec across all 46 Evelyn units
 nohup "$STRESS_BIN" \
     --host localhost \
     --template "$STRESS_TPL" \
     --rate 81420 \
     --ws-port 8769 \
-    > "$LOGS/stress_real_pub.log" 2>&1 &
+    > "$LOGS/ems_site_simulator.log" 2>&1 &
 STRESS_PID=$!
-echo "stress_real_pub  pid=$STRESS_PID  log=$LOGS/stress_real_pub.log"
+echo "ems_site_simulator  pid=$STRESS_PID  log=$LOGS/ems_site_simulator.log"
 
 # ── wait for health endpoint ────────────────────────────────────────────────
 echo -n "waiting for health endpoint"
