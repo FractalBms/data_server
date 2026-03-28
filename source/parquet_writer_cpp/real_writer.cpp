@@ -91,7 +91,18 @@ struct Config {
     TopicParser topic_parser   {TopicParser::POSITIONAL};
     std::map<std::string, std::string> topic_kv_map {};
     // "dtype_hint" is reserved: consumed for type casting, not stored as a column.
+    // "field_name" renames the "value" float to the signal name (wide-sparse schema).
+    // Any other name stores the segment as a string column (long/narrow schema).
     std::vector<std::string> topic_segments {};
+
+    // Multi-depth topic patterns (like Telegraf topic_parsing).
+    // Each pattern: {match, segments}  where match uses + (any segment) and # (remainder).
+    // First matching pattern wins.  Ignored when topic_segments is non-empty.
+    struct TopicPattern {
+        std::vector<std::string> match;   // pre-split on '/'
+        std::vector<std::string> segs;
+    };
+    std::vector<TopicPattern> topic_patterns {};
 
     // Site ID injected into every row from config (not from topic).
     std::string site_id        {""};
@@ -153,6 +164,21 @@ Config load_config(const std::string& path) {
                 cfg.topic_segments.clear();
                 for (const auto& s : ts)
                     cfg.topic_segments.push_back(s.as<std::string>());
+            }
+            if (auto tp = m["topic_patterns"]) {
+                cfg.topic_patterns.clear();
+                for (const auto& entry : tp) {
+                    Config::TopicPattern pat;
+                    std::string match_str = entry["match"].as<std::string>();
+                    std::istringstream ms(match_str);
+                    std::string seg;
+                    while (std::getline(ms, seg, '/')) pat.match.push_back(seg);
+                    if (auto segs = entry["segments"]) {
+                        for (const auto& s : segs)
+                            pat.segs.push_back(s.as<std::string>());
+                    }
+                    cfg.topic_patterns.push_back(std::move(pat));
+                }
             }
             if (m["partition_field"])  cfg.partition_field  = m["partition_field"].as<std::string>();
             if (m["timestamp_field"])  cfg.timestamp_field  = m["timestamp_field"].as<std::string>();
@@ -267,9 +293,37 @@ std::optional<TopicInfo> parse_topic_kv(const std::string& topic) {
     return info;
 }
 
+// Apply a segments mapping to already-split topic parts.
+static void apply_segments(TopicInfo& info,
+                            const std::vector<std::string>& parts,
+                            const std::vector<std::string>& segs) {
+    for (size_t i = 0; i < segs.size() && i < parts.size(); ++i) {
+        const auto& col = segs[i];
+        if (col == "_" || col.empty()) continue;
+        if (col == "dtype_hint")
+            info.dtype_hint = parts[i];
+        else if (col == "field_name")
+            info.field_name = parts[i];   // wide-sparse: renames "value" → signal name
+        else
+            info.strings[col] = parts[i]; // narrow: stored as a named string column
+    }
+}
+
+// Returns true if topic_parts matches pattern_parts (+ = any one segment, # = remainder).
+static bool match_topic_pattern(const std::vector<std::string>& topic_parts,
+                                 const std::vector<std::string>& pattern_parts) {
+    for (size_t i = 0; i < pattern_parts.size(); ++i) {
+        if (pattern_parts[i] == "#") return true;   // matches remainder
+        if (i >= topic_parts.size()) return false;
+        if (pattern_parts[i] != "+" && pattern_parts[i] != topic_parts[i]) return false;
+    }
+    return topic_parts.size() == pattern_parts.size();
+}
+
 std::optional<TopicInfo> parse_topic_positional(
         const std::string& topic,
-        const std::vector<std::string>& segments_map) {
+        const std::vector<std::string>& segments_map,
+        const std::vector<Config::TopicPattern>& patterns = {}) {
     TopicInfo info;
     std::vector<std::string> parts;
     std::istringstream ss(topic);
@@ -280,14 +334,19 @@ std::optional<TopicInfo> parse_topic_positional(
     if (parts.empty()) return std::nullopt;
     info.source_type = parts[0];
 
-    for (size_t i = 0; i < segments_map.size() && i < parts.size(); ++i) {
-        const auto& col = segments_map[i];
-        if (col == "_" || col.empty()) continue;
-        if (col == "dtype_hint")
-            info.dtype_hint = parts[i];
-        else
-            info.strings[col] = parts[i];
+    // Multi-pattern matching (like Telegraf topic_parsing) — first match wins.
+    if (!patterns.empty()) {
+        for (const auto& pat : patterns) {
+            if (match_topic_pattern(parts, pat.match)) {
+                apply_segments(info, parts, pat.segs);
+                return info;
+            }
+        }
+        return info;  // no pattern matched — keep empty TopicInfo (row still written, no tags)
     }
+
+    // Single segments_map fallback
+    apply_segments(info, parts, segments_map);
     return info;
 }
 
@@ -1191,7 +1250,7 @@ static void on_message(struct mosquitto*, void*, const struct mosquitto_message*
 
     std::optional<TopicInfo> info_opt;
     if (g_cfg->topic_parser == TopicParser::POSITIONAL)
-        info_opt = parse_topic_positional(topic, g_cfg->topic_segments);
+        info_opt = parse_topic_positional(topic, g_cfg->topic_segments, g_cfg->topic_patterns);
     else
         info_opt = parse_topic_kv(topic);
     if (!info_opt) return;
@@ -1293,9 +1352,10 @@ static bool validate_config(const Config& cfg) {
         // warn only, don't abort
     }
 
-    // topic_segments must be set in positional mode
-    if (cfg.topic_parser == TopicParser::POSITIONAL && cfg.topic_segments.empty()) {
-        std::cerr << "[startup] WARNING: positional parser with empty topic_segments\n";
+    // topic_segments or topic_patterns must be set in positional mode
+    if (cfg.topic_parser == TopicParser::POSITIONAL &&
+        cfg.topic_segments.empty() && cfg.topic_patterns.empty()) {
+        std::cerr << "[startup] WARNING: positional parser with no topic_segments or topic_patterns\n";
     }
 
     return true;

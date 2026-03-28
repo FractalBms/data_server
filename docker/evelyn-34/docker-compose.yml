@@ -38,6 +38,8 @@ services:
     volumes:
       - ${PARQUET_PATH:-/mnt/tort-sdf/evelyn}:/data/parquet
       - ./configs/writer-evelyn.yaml:/etc/writer/config.yaml:ro
+      - ../../source/parquet_writer_cpp/real_writer:/usr/local/bin/real_writer:ro
+    entrypoint: ["/usr/local/bin/real_writer", "--config", "/etc/writer/config.yaml"]
     ports:
       - "8771:8771"
     restart: unless-stopped
