@@ -16,7 +16,7 @@ POST /bridge/clear    remove bridge, restart broker
 Runs on port 8772 (native on .34 host).
 """
 import asyncio, json, os, re, subprocess, sys, time, glob
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, parse_qs
 
 # ── duckdb (optional) ─────────────────────────────────────────────────────────
@@ -78,34 +78,60 @@ def handle_query_files():
         "path": path,
     }, None, 200
 
+def _schema_info(con, flist):
+    """Return (cols set, is_narrow bool) for the given file list."""
+    schema = con.execute(
+        f"DESCRIBE SELECT * FROM read_parquet([{flist}], union_by_name=true) LIMIT 0"
+    ).fetchall()
+    cols = {r[0] for r in schema}
+    return cols, "point_name" in cols
+
+def _val_expr(cols):
+    """SQL expression that coalesces float/int value columns to DOUBLE."""
+    if "value_f" in cols and "value_i" in cols:
+        return "COALESCE(value_f, CAST(value_i AS DOUBLE))"
+    if "value_f" in cols:
+        return "value_f"
+    if "value_i" in cols:
+        return "CAST(value_i AS DOUBLE)"
+    return "CAST(value AS DOUBLE)"
+
 def handle_query_signals():
     if not _DUCKDB_OK:
         return None, "duckdb not available", 503
     path = current_path()
     files = _get_file_list(path)
     recent = files[:20]
-    SKIP = {"project_id", "project", "site"}
-    signals = set()
+    if not recent:
+        return {"signals": [], "from_files": 0}, None, 200
+    flist = ", ".join(f"'{f['path']}'" for f in recent)
     con = _duckdb.connect()
-    for f in recent:
-        try:
-            rows = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{f['path']}') LIMIT 0").fetchall()
-            for row in rows:
-                col = row[0]
-                if col not in SKIP:
-                    signals.add(col)
-        except Exception:
-            pass
-    con.close()
-    return {"signals": sorted(signals), "from_files": len(recent)}, None, 200
+    try:
+        cols, is_narrow = _schema_info(con, flist)
+        if is_narrow:
+            rows = con.execute(
+                f"SELECT DISTINCT point_name FROM read_parquet([{flist}], union_by_name=true) "
+                f"WHERE point_name IS NOT NULL ORDER BY point_name"
+            ).fetchall()
+            signals = [r[0] for r in rows if r[0]]
+        else:
+            # wide-sparse fallback: column names are signal names
+            SKIP = {"project_id", "project", "site", "ts"}
+            signals = sorted(c for c in cols if c not in SKIP)
+        con.close()
+        return {"signals": signals, "from_files": len(recent), "schema": "narrow" if is_narrow else "wide"}, None, 200
+    except Exception as e:
+        con.close()
+        return None, f"query error: {e}", 500
 
 def handle_query_data(params):
     if not _DUCKDB_OK:
         return None, "duckdb not available", 503
-    signal = params.get("signal", [""])[0].strip()
-    from_s = params.get("from", [""])[0].strip()
-    to_s   = params.get("to",   [""])[0].strip()
-    limit  = int(params.get("limit", ["500"])[0])
+    signal  = params.get("signal",  [""])[0].strip()
+    from_s  = params.get("from",    [""])[0].strip()
+    to_s    = params.get("to",      [""])[0].strip()
+    unit_id = params.get("unit_id", [""])[0].strip()
+    limit   = int(params.get("limit", ["2000"])[0])
     if not signal:
         return None, "signal parameter required", 400
     if not from_s or not to_s:
@@ -122,23 +148,59 @@ def handle_query_data(params):
 
     path = current_path()
     files = _get_file_list(path)
-    in_range = [f for f in files if from_dt <= f["ts"] <= to_dt]
-    in_range.sort(key=lambda x: x["ts"])  # ascending for chart
+    # include a 120s buffer so flush-boundary rows aren't missed
+    buf = timedelta(seconds=120)
+    in_range = [f for f in files if (from_dt - buf) <= f["ts"] <= (to_dt + buf)]
+    in_range.sort(key=lambda x: x["ts"])
+
+    if not in_range:
+        return {"signal": signal, "from": from_s, "to": to_s, "points": [], "count": 0}, None, 200
+
+    flist = ", ".join(f"'{f['path']}'" for f in in_range)
+    from_epoch = from_dt.timestamp()
+    to_epoch   = to_dt.timestamp()
 
     con = _duckdb.connect()
     points = []
-    for f in in_range:
-        if len(points) >= limit:
-            break
-        try:
+    try:
+        cols, is_narrow = _schema_info(con, flist)
+        if is_narrow:
+            val_expr = _val_expr(cols)
+            uid_clause = " AND unit_id = ?" if unit_id else ""
+            args = [signal, from_epoch, to_epoch]
+            if unit_id:
+                args.append(unit_id)
+            args.append(limit)
             rows = con.execute(
-                f'SELECT "{signal}" FROM read_parquet(\'{f["path"]}\') '
-                f'WHERE "{signal}" IS NOT NULL LIMIT 1'
+                f"SELECT ts, {val_expr} as v "
+                f"FROM read_parquet([{flist}], union_by_name=true) "
+                f"WHERE point_name = ? AND ts >= ? AND ts <= ?{uid_clause} "
+                f"  AND {val_expr} IS NOT NULL "
+                f"ORDER BY ts LIMIT ?",
+                args
             ).fetchall()
-            if rows:
-                points.append({"ts": f["ts_iso"], "value": rows[0][0]})
-        except Exception:
-            pass  # column not found or other error — skip file
+            for r in rows:
+                if r[0] is not None and r[1] is not None:
+                    ts_iso = datetime.fromtimestamp(r[0], tz=timezone.utc).isoformat()
+                    points.append({"ts": ts_iso, "value": r[1]})
+        else:
+            # wide-sparse fallback: one sample per file
+            for f in in_range:
+                if len(points) >= limit:
+                    break
+                try:
+                    rows = con.execute(
+                        f'SELECT "{signal}" FROM read_parquet(\'{f["path"]}\') '
+                        f'WHERE "{signal}" IS NOT NULL LIMIT 1'
+                    ).fetchall()
+                    if rows:
+                        points.append({"ts": f["ts_iso"], "value": rows[0][0]})
+                except Exception:
+                    pass
+    except Exception as e:
+        con.close()
+        return None, f"query error: {e}", 500
+
     con.close()
     return {
         "signal": signal,
@@ -169,29 +231,41 @@ def handle_query_snapshot(params):
     # find nearest file by ts
     nearest = min(files, key=lambda f: abs((f["ts"] - ts_dt).total_seconds()))
 
-    SKIP = {"project_id", "project", "site"}
     con = _duckdb.connect()
     signals = []
     try:
-        rows = con.execute(
-            f"DESCRIBE SELECT * FROM read_parquet('{nearest['path']}') LIMIT 0"
-        ).fetchall()
-        col_names = [r[0] for r in rows if r[0] not in SKIP]
-        for col in col_names:
-            try:
-                vrows = con.execute(
-                    f'SELECT "{col}" FROM read_parquet(\'{nearest["path"]}\') '
-                    f'WHERE "{col}" IS NOT NULL LIMIT 1'
-                ).fetchall()
-                if vrows:
-                    signals.append({"name": col, "value": vrows[0][0]})
-            except Exception:
-                pass
+        fpath = nearest["path"]
+        schema = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{fpath}') LIMIT 0").fetchall()
+        cols = {r[0] for r in schema}
+        if "point_name" in cols:
+            val_expr = _val_expr(cols)
+            rows = con.execute(
+                f"SELECT point_name, {val_expr} as v "
+                f"FROM read_parquet('{fpath}') "
+                f"WHERE {val_expr} IS NOT NULL "
+                f"QUALIFY ROW_NUMBER() OVER (PARTITION BY point_name ORDER BY ts DESC) = 1 "
+                f"ORDER BY point_name"
+            ).fetchall()
+            signals = [{"name": r[0], "value": r[1]} for r in rows if r[0] is not None]
+        else:
+            # wide-sparse fallback
+            SKIP = {"project_id", "project", "site", "ts"}
+            col_names = [r[0] for r in schema if r[0] not in SKIP]
+            for col in col_names:
+                try:
+                    vrows = con.execute(
+                        f'SELECT "{col}" FROM read_parquet(\'{fpath}\') '
+                        f'WHERE "{col}" IS NOT NULL LIMIT 1'
+                    ).fetchall()
+                    if vrows:
+                        signals.append({"name": col, "value": vrows[0][0]})
+                except Exception:
+                    pass
+            signals.sort(key=lambda x: x["name"])
     except Exception as e:
         con.close()
         return None, f"error reading file: {e}", 500
     con.close()
-    signals.sort(key=lambda x: x["name"])
     return {
         "file_ts": nearest["ts_iso"],
         "file": nearest["name"],

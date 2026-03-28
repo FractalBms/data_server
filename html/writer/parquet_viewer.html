@@ -122,7 +122,7 @@
 </nav>
 
 <h1>Parquet Viewer</h1>
-<p class="subtitle">Query EMS parquet files via DuckDB — wide-sparse format, one signal per query</p>
+<p class="subtitle">Query EMS parquet files via DuckDB — narrow schema, all readings per point_name</p>
 
 <!-- Host bar -->
 <div class="host-bar">
@@ -139,9 +139,12 @@
 
 <!-- Query bar -->
 <div class="query-bar">
-  <label>Signal</label>
-  <input id="sig-input" type="text" list="sig-list" placeholder="signal name (empty = snapshot)">
+  <label>Point</label>
+  <input id="sig-input" type="text" list="sig-list" placeholder="point_name (empty = snapshot)">
   <datalist id="sig-list"></datalist>
+
+  <label>Unit ID</label>
+  <input id="unit-input" type="text" placeholder="all" style="width:70px">
 
   <label>Range</label>
   <button class="btn-range" onclick="setRange(5)">5m</button>
@@ -233,7 +236,8 @@ async function doConnect() {
     const sigsData  = await sigsResp.json();
 
     connected = true;
-    setConnStatus(true, `connected — ${filesData.total} files`);
+    const schema = sigsData.schema || 'unknown';
+    setConnStatus(true, `connected — ${filesData.total} files (${schema})`);
     document.getElementById('btn-connect').textContent = 'Disconnect';
     document.getElementById('btn-connect').className = 'disconnecting';
     clearStatus();
@@ -346,7 +350,9 @@ async function runQuery() {
     if (signal) {
       // Mode A: time series
       if (!fromIso || !toIso) { showError('from and to required for signal query'); return; }
-      const url = apiUrl(`/query/data?signal=${encodeURIComponent(signal)}&from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}&limit=500`);
+      const unitId = document.getElementById('unit-input').value.trim();
+      let url = apiUrl(`/query/data?signal=${encodeURIComponent(signal)}&from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}&limit=2000`);
+      if (unitId) url += `&unit_id=${encodeURIComponent(unitId)}`;
       const resp = await fetch(url);
       const data = await resp.json();
       if (!resp.ok) { showError(data.error || `HTTP ${resp.status}`); return; }
