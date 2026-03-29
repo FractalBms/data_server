@@ -171,8 +171,20 @@ def handle_query_data(params):
             if unit_id:
                 args.append(unit_id)
             args.append(limit)
+
+            # extra topic-structure columns present in the schema
+            extra_cols = [c for c in ["site_id", "unit_id", "device", "instance"] if c in cols]
+            # dtype: infer from which value column was populated
+            if "value_i" in cols and "value_f" in cols:
+                dtype_expr = "CASE WHEN value_i IS NOT NULL THEN 'integer' ELSE 'float' END as _dtype"
+            elif "value_i" in cols:
+                dtype_expr = "'integer' as _dtype"
+            else:
+                dtype_expr = "'float' as _dtype"
+            extra_select = (", " + ", ".join(extra_cols) + ", " + dtype_expr) if extra_cols else (", " + dtype_expr)
+
             rows = con.execute(
-                f"SELECT ts, {val_expr} as v "
+                f"SELECT ts, {val_expr} as v{extra_select} "
                 f"FROM read_parquet([{flist}], union_by_name=true) "
                 f"WHERE point_name = ? AND ts >= ? AND ts <= ?{uid_clause} "
                 f"  AND {val_expr} IS NOT NULL "
@@ -182,7 +194,11 @@ def handle_query_data(params):
             for r in rows:
                 if r[0] is not None and r[1] is not None:
                     ts_iso = datetime.fromtimestamp(r[0], tz=timezone.utc).isoformat()
-                    points.append({"ts": ts_iso, "value": r[1]})
+                    pt = {"ts": ts_iso, "value": r[1]}
+                    for i, c in enumerate(extra_cols):
+                        pt[c] = r[2 + i]
+                    pt["dtype"] = r[2 + len(extra_cols)]
+                    points.append(pt)
         else:
             # wide-sparse fallback: one sample per file
             for f in in_range:
@@ -534,7 +550,7 @@ def handle_clear_bridge():
 # ── main loop ─────────────────────────────────────────────────────────────────
 async def handle(reader, writer):
     try:
-        raw = await asyncio.wait_for(reader.read(8192), timeout=5)
+        raw = await asyncio.wait_for(reader.read(65536), timeout=5)
     except asyncio.TimeoutError:
         writer.close(); return
 

@@ -1158,8 +1158,8 @@ static void health_thread_fn() {
         int client_fd = ::accept(server_fd, nullptr, nullptr);
         if (client_fd < 0) continue;
 
-        // Read request (we don't inspect it — any GET returns health JSON)
-        char rbuf[256];
+        // Drain request fully so browser doesn't see TCP RST on close
+        char rbuf[4096];
         ::recv(client_fd, rbuf, sizeof(rbuf) - 1, 0);
 
         double disk_gb = g_disk_free_gb_x10.load() / 10.0;

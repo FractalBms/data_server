@@ -67,6 +67,12 @@
   .btn-export { background:transparent; color:var(--green); border:1px solid var(--green);
                 border-radius:4px; padding:5px 12px; font-size:.8rem; cursor:pointer; }
   .btn-export:hover { background:#3fb95022; }
+  .btn-mqtt { background:transparent; color:var(--purple); border:1px solid var(--purple);
+              border-radius:4px; padding:5px 12px; font-size:.8rem; cursor:pointer; }
+  .btn-mqtt:hover { background:#bc8cff22; }
+  .topic-cell { font-size:.7rem; color:var(--muted); max-width:340px;
+                overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .topic-cell:hover { color:var(--accent); cursor:default; }
 
   /* storage info */
   .storage-info { font-size:.75rem; color:var(--muted); font-family:'Consolas',monospace;
@@ -128,6 +134,8 @@
 <div class="host-bar">
   <label>Host</label>
   <input id="host-input" type="text" value="192.168.86.34" placeholder="host IP">
+  <label>Port</label>
+  <input id="port-input" type="text" value="8772" placeholder="port" style="width:60px">
   <button id="btn-connect" class="connecting" onclick="toggleConnect()">Connect</button>
   <span id="conn-status"><span class="dot" id="conn-dot"></span>disconnected</span>
 </div>
@@ -161,6 +169,7 @@
   <button class="btn-query" onclick="runQuery()">Query</button>
   <button class="btn-clear" onclick="clearResults()">Clear</button>
   <button class="btn-export" id="btn-export" onclick="exportCsv()" disabled>Export CSV</button>
+  <button class="btn-mqtt" id="btn-mqtt" onclick="exportMqttJson()" disabled>MQTT JSON</button>
 </div>
 
 <div id="status-line" class="status-msg hidden"></div>
@@ -202,7 +211,8 @@ let latestFileTsMs = null; // epoch ms of most recent file
 
 function apiUrl(path) {
   const host = document.getElementById('host-input').value.trim() || '192.168.86.34';
-  return `http://${host}:8772${path}`;
+  const port = document.getElementById('port-input').value.trim() || '8772';
+  return `http://${host}:${port}${path}`;
 }
 
 // ── connect / disconnect ───────────────────────────────────────────────────────
@@ -379,15 +389,36 @@ function clearResults() {
   document.getElementById('table-wrap').classList.add('hidden');
   document.getElementById('snapshot-note').classList.add('hidden');
   document.getElementById('btn-export').disabled = true;
+  document.getElementById('btn-mqtt').disabled = true;
   currentData = null;
   clearStatus();
   document.getElementById('error-line').classList.add('hidden');
 }
 
 // ── mode A: time series ───────────────────────────────────────────────────────
+function mqttTopic(pt, signal) {
+  const dtype = pt.dtype || 'float';
+  // full EMS unit schema: unit/{unit_id}/{device}/{instance}/{point_name}/{dtype}
+  if (pt.unit_id !== undefined) {
+    return ['unit', pt.unit_id, pt.device || '', pt.instance || '', signal, dtype].join('/');
+  }
+  // site+device schema: ems/site/{site_id}/{device}/{point_name}/{dtype}
+  if (pt.site_id !== undefined && pt.device !== undefined) {
+    return ['ems', 'site', pt.site_id, pt.device, signal, dtype].join('/');
+  }
+  // site only: ems/site/{site_id}/root/{point_name}/{dtype}
+  if (pt.site_id !== undefined) {
+    return ['ems', 'site', pt.site_id, 'root', signal, dtype].join('/');
+  }
+  return signal;
+}
+
 function renderTimeSeries(data) {
   currentData = { mode: 'timeseries', data };
   document.getElementById('btn-export').disabled = false;
+  const hasTopicCols = data.points.length > 0 &&
+    (data.points[0].unit_id !== undefined || data.points[0].site_id !== undefined);
+  document.getElementById('btn-mqtt').disabled = !hasTopicCols;
 
   const pts = data.points;
   if (pts.length === 0) {
@@ -422,12 +453,20 @@ function renderTimeSeries(data) {
   const shown = pts.slice(0, MAX_ROWS);
   document.getElementById('table-note').textContent =
     pts.length > MAX_ROWS ? `Showing ${MAX_ROWS} of ${pts.length} points` : `${pts.length} points`;
-  document.getElementById('results-thead').innerHTML = '<tr><th>Timestamp</th><th>Value</th></tr>';
+  document.getElementById('results-thead').innerHTML = hasTopicCols
+    ? '<tr><th>Timestamp</th><th>Value</th><th>Topic</th></tr>'
+    : '<tr><th>Timestamp</th><th>Value</th></tr>';
   const tbody = document.getElementById('results-tbody');
   tbody.innerHTML = '';
   for (const p of shown) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${fmtTs(p.ts)}</td><td>${p.value}</td>`;
+    if (hasTopicCols) {
+      const topic = mqttTopic(p, data.signal);
+      tr.innerHTML = `<td>${fmtTs(p.ts)}</td><td>${p.value}</td>`
+        + `<td class="topic-cell" title="${topic}">${topic}</td>`;
+    } else {
+      tr.innerHTML = `<td>${fmtTs(p.ts)}</td><td>${p.value}</td>`;
+    }
     tbody.appendChild(tr);
   }
   document.getElementById('table-wrap').classList.remove('hidden');
@@ -623,17 +662,40 @@ function exportCsv() {
   if (currentData.mode === 'timeseries') {
     const d = currentData.data;
     filename = `${d.signal.replace(/[^a-zA-Z0-9_]/g,'_')}_${d.from.replace(/[:.]/g,'-')}.csv`;
-    csv = 'ts,value\n' + d.points.map(p => `"${p.ts}",${p.value}`).join('\n');
+    const hasTopicCols = d.points.length > 0 && d.points[0].unit_id !== undefined;
+    if (hasTopicCols) {
+      csv = 'ts,value,topic\n' + d.points.map(p =>
+        `"${p.ts}",${p.value},"${mqttTopic(p, d.signal)}"`).join('\n');
+    } else {
+      csv = 'ts,value\n' + d.points.map(p => `"${p.ts}",${p.value}`).join('\n');
+    }
   } else {
     const d = currentData.data;
     filename = `snapshot_${d.file_ts.replace(/[:.]/g,'-')}.csv`;
     csv = 'signal,value\n' + d.signals.map(s => `"${s.name}",${s.value}`).join('\n');
   }
-  const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
+}
+
+function exportMqttJson() {
+  if (!currentData || currentData.mode !== 'timeseries') return;
+  const d = currentData.data;
+  const msgs = d.points.map(p => ({
+    topic:   mqttTopic(p, d.signal),
+    payload: { ts: p.ts, value: p.value },
+  }));
+  const filename = `mqtt_${d.signal.replace(/[^a-zA-Z0-9_]/g,'_')}.json`;
+  const a = document.createElement('a');
+  a.href = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(JSON.stringify(msgs, null, 2));
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 </script>
 </body>
