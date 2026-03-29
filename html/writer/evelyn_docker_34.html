@@ -39,14 +39,18 @@
   .host-bar button { border:none; border-radius:4px; padding:5px 14px;
                      font-size:.8rem; cursor:pointer; font-weight:600; }
   .host-bar button:hover { opacity:.85; }
-  #btn-connect.connecting { background:var(--accent); color:#000; }
-  #btn-connect.disconnecting { background:transparent; color:var(--red);
-                                border:1px solid var(--red); }
-  #conn-status { font-size:.8rem; font-family:'Consolas',monospace; }
+  #btn-connect.connecting,
+  #btn-bridge-connect.connecting { background:var(--accent); color:#000; }
+  #btn-connect.disconnecting,
+  #btn-bridge-connect.disconnecting { background:transparent; color:var(--red);
+                                       border:1px solid var(--red); }
+  #conn-status, #bridge-conn-status { font-size:.8rem; font-family:'Consolas',monospace; }
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
          margin-right:5px; background:var(--muted); }
   .dot.ok  { background:var(--green); }
   .dot.err { background:var(--red); }
+  .host-bar-title { color:var(--orange); font-size:.78rem; font-weight:700;
+                    white-space:nowrap; min-width:90px; }
 
   /* ── summary cards ── */
   .summary-bar { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-bottom:16px; }
@@ -122,6 +126,63 @@
 
   .poll-ts { color:var(--muted); font-size:.7rem; margin-top:4px; }
 
+  /* ── tabs ── */
+  .tab-bar { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid var(--border);
+             padding-bottom:0; }
+  .tab-btn { background:none; border:none; border-bottom:2px solid transparent;
+             color:var(--muted); font-size:.85rem; padding:6px 14px 8px;
+             cursor:pointer; font-family:inherit; }
+  .tab-btn:hover { color:var(--text); }
+  .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .tab-pane { display:none; }
+  .tab-pane.active { display:block; }
+
+  /* ── mqtt viewer tab ── */
+  .qbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+          background:var(--surface); border:1px solid var(--border);
+          border-radius:8px; padding:8px 12px; margin-bottom:10px; }
+  .qbar label { color:var(--muted); font-size:.78rem; white-space:nowrap; }
+  .qbar input[type=text] { background:var(--code-bg); border:1px solid var(--border);
+                           color:var(--text); border-radius:4px; padding:4px 8px;
+                           font-family:'Consolas',monospace; font-size:.82rem; }
+  .qbar input[type=datetime-local] { background:var(--code-bg); border:1px solid var(--border);
+                                     color:var(--text); border-radius:4px; padding:4px 8px;
+                                     font-family:'Consolas',monospace; font-size:.78rem; }
+  .btn-range { background:var(--code-bg); color:var(--muted); border:1px solid var(--border);
+               border-radius:4px; padding:4px 8px; font-size:.75rem; cursor:pointer; }
+  .btn-range:hover { color:var(--accent); border-color:var(--accent); }
+  .btn-qrun  { background:var(--accent); color:#000; border:none; border-radius:4px;
+               padding:5px 14px; font-size:.8rem; cursor:pointer; font-weight:600; }
+  .btn-qrun:hover { opacity:.85; }
+  .btn-qcsv  { background:transparent; color:var(--green); border:1px solid var(--green);
+               border-radius:4px; padding:5px 12px; font-size:.8rem; cursor:pointer; }
+  .btn-qcsv:hover { background:#3fb95022; }
+  .btn-qmqtt { background:transparent; color:var(--purple); border:1px solid var(--purple);
+               border-radius:4px; padding:5px 12px; font-size:.8rem; cursor:pointer; }
+  .btn-qmqtt:hover { background:#bc8cff22; }
+  .q-status { font-size:.78rem; color:var(--yellow); font-family:'Consolas',monospace;
+              margin-bottom:6px; }
+  .q-error  { font-size:.78rem; color:var(--red); font-family:'Consolas',monospace;
+              margin-bottom:6px; }
+  .qtable-wrap { background:var(--surface); border:1px solid var(--border);
+                 border-radius:8px; padding:10px 12px; overflow-x:auto; }
+  .qtable-note { font-size:.72rem; color:var(--muted); margin-bottom:6px; }
+  .qtable-wrap table { width:100%; border-collapse:collapse; font-size:.75rem; }
+  .qtable-wrap th { color:var(--muted); text-align:left; padding:4px 10px; font-weight:600;
+                    font-size:.68rem; border-bottom:1px solid var(--border); }
+  .qtable-wrap td { padding:3px 10px; border-bottom:1px solid var(--border);
+                    font-family:'Consolas',monospace; }
+  .qtable-wrap tr:last-child td { border-bottom:none; }
+  .qtable-wrap tr:hover td { background:#ffffff08; }
+  .topic-cell { font-size:.68rem; color:var(--muted); max-width:320px;
+                overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .qsummary { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  .qscard { background:var(--surface); border:1px solid var(--border);
+            border-radius:6px; padding:6px 10px; }
+  .qscard-k { font-size:.6rem; color:var(--muted); text-transform:uppercase; margin-bottom:1px; }
+  .qscard-v { font-size:.9rem; font-weight:700; font-family:'Consolas',monospace;
+              color:var(--accent); }
+
   /* ── stack control panel ── */
   .stack-panel { background:var(--surface); border:1px solid var(--border);
                  border-radius:8px; padding:12px 14px; margin-bottom:12px; }
@@ -182,19 +243,22 @@
 <body>
 
 <div class="nav">
+  <a href="projects.html">← Projects</a>
   <a href="demo_compare.html">Demo Compare</a>
   <a href="demo2_compare.html">Demo2 Compare</a>
   <a href="demo_eval.html">Pipeline Eval</a>
   <a href="stress_report_34.html">Stress Report .34</a>
   <a href="evelyn_docker_34.html" class="here">Evelyn .34 Live</a>
   <a href="parquet_viewer.html">Parquet Viewer</a>
+  <a href="mqtt_viewer.html">MQTT Viewer</a>
 </div>
 
 <h1>Evelyn Demo — phil-256g (.34)</h1>
 <p class="subtitle">1 unit · 175 msg/s · smooth mode · parquet-writer:latest · compactor enabled (10 min)</p>
 
-<!-- Host / connect bar -->
+<!-- Parquet Writer health bar -->
 <div class="host-bar">
+  <span class="host-bar-title">Parquet Writer</span>
   <label>Host</label>
   <input id="host" type="text" value="192.168.86.34">
   <label>Port</label>
@@ -203,12 +267,29 @@
   <span id="conn-status"><span class="dot" id="dot"></span><span id="conn-text">disconnected</span></span>
   <span class="poll-ts" id="poll-ts"></span>
 </div>
+<!-- Bridge API bar -->
+<div class="host-bar">
+  <span class="host-bar-title">Bridge API</span>
+  <label>Host</label>
+  <input id="bridge-host" type="text" value="192.168.86.34">
+  <label>Port</label>
+  <input type="text" value="8772" style="width:70px" readonly>
+  <button id="btn-bridge-connect" class="connecting" onclick="toggleBridgeConnect()">Connect</button>
+  <span id="bridge-conn-status"><span class="dot" id="bridge-dot"></span><span id="bridge-conn-text">disconnected</span></span>
+</div>
 
+<!-- Tab bar -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="showTab('stack',this)">Stack</button>
+  <button class="tab-btn"        onclick="showTab('mqtt',this)">MQTT Viewer</button>
+</div>
+
+<div id="tab-stack" class="tab-pane active">
 <!-- System layout diagram -->
 <details open style="margin-bottom:12px;">
 <summary style="color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;user-select:none;padding:8px 0;">System Layout</summary>
 <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;overflow-x:auto;">
-<svg viewBox="0 0 860 375" xmlns="http://www.w3.org/2000/svg" style="width:100%;min-width:640px;display:block;">
+<svg viewBox="0 0 900 420" xmlns="http://www.w3.org/2000/svg" style="width:100%;min-width:640px;display:block;">
 <defs>
   <marker id="am" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
     <path d="M0,0 L7,3.5 L0,7 Z" fill="#8b949e"/>
@@ -238,102 +319,97 @@
   </style>
 </defs>
 
-<!-- ── HOST box ─────────────────────────────────────────────────────── -->
-<rect x="148" y="8"  width="704" height="308" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
-<text x="163" y="26" class="lbl cm">HOST: phil-256g (.34)  —  192.168.86.34</text>
+<!-- ── MANAGEMENT COLUMN: Dashboard stacked above bridge_api ─────── -->
 
-<!-- ── REMOTE box (outside host) ──────────────────────────────────── -->
-<rect x="4"  y="52" width="136" height="124" rx="5" fill="#d2992210" stroke="#d29922" stroke-width="1.5" stroke-dasharray="5,3"/>
-<text x="11" y="70"  class="lbl2 co">REMOTE (optional)</text>
-<rect x="12" y="78"  width="120" height="84" rx="4" fill="#21262d" stroke="#d29922" stroke-width="1"/>
-<text x="20" y="97"  class="lbl co">EMS / gx10</text>
-<text x="20" y="111" class="lbl2 cm">any MQTT broker</text>
-<text x="20" y="126" class="mono cm">:1883</text>
-<text x="20" y="144" class="lbl2 co">→ FlashMQ bridge</text>
+<!-- Dashboard — topmost item -->
+<rect x="156" y="4" width="736" height="52" rx="5" fill="#21262d" stroke="#30363d" stroke-width="1.5"/>
+<text x="166" y="20" class="lbl cm">Dashboard</text>
+<text x="166" y="34" class="lbl2 cm">browser  ·  phil-dev :8080 / writer / evelyn_docker_34.html</text>
+<text x="166" y="48" class="mono cm">health :8771  ·  mgmt :8772</text>
 
-<!-- ── Docker network box ─────────────────────────────────────────── -->
-<rect x="158" y="38" width="428" height="264" rx="5" fill="#58a6ff0a" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="6,3"/>
-<text x="168" y="55"  class="lbl2 ca">Docker  —  evelyn34_net (bridge)</text>
+<!-- bridge_api — directly below Dashboard -->
+<rect x="156" y="64" width="736" height="52" rx="4" fill="#140c28" stroke="#bc8cff" stroke-width="1.5"/>
+<text x="166" y="80" class="lbl cp">bridge_api[_native].py</text>
+<text x="166" y="94" class="lbl2 cm">native on host  ·  :8772</text>
+<text x="166" y="109" class="mono cm">GET /status  POST /start /stop  GET|POST /storage /bridge /bridge/clear</text>
 
-<!-- ── evelyn34_broker ────────────────────────────────────────────── -->
-<rect x="168" y="63" width="182" height="116" rx="4" fill="#0c1f40" stroke="#58a6ff" stroke-width="1.5"/>
-<text x="177" y="81"  class="lbl ca">evelyn34_broker</text>
-<text x="177" y="95"  class="lbl2 cm">FlashMQ 1.26</text>
-<text x="177" y="111" class="mono cm">:1883  (internal)</text>
-<text x="177" y="126" class="mono cm">:11883 (host port)</text>
-<text x="177" y="141" class="lbl2 cm">fan-out: ems/#</text>
-<text x="177" y="155" class="lbl2 cm">bridge config: flashmq.conf</text>
+<!-- ── HOST box — below management band ──────────────────────────── -->
+<rect x="156" y="124" width="736" height="292" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+<text x="892" y="140" class="lbl cm" text-anchor="end">HOST: phil-256g (.34)  —  192.168.86.34</text>
+
+<!-- ── LHS: REMOTE — aligned with HOST top ───────────────────────── -->
+<rect x="4" y="124" width="144" height="118" rx="5" fill="#d2992210" stroke="#d29922" stroke-width="1.5" stroke-dasharray="5,3"/>
+<text x="11" y="141" class="lbl2 co">REMOTE (optional)</text>
+<rect x="10" y="148" width="132" height="88" rx="4" fill="#21262d" stroke="#d29922" stroke-width="1"/>
+<text x="18" y="165" class="lbl co">EMS / gx10</text>
+<text x="18" y="179" class="lbl2 cm">any MQTT broker</text>
+<text x="18" y="195" class="mono cm">:1883</text>
+<text x="18" y="210" class="lbl2 co">→ FlashMQ bridge</text>
+
+<!-- ── LHS: ems_site_simulator — below REMOTE ───────────────────── -->
+<rect x="4" y="252" width="144" height="162" rx="4" fill="#0a1a08" stroke="#3fb950" stroke-width="1.5"/>
+<text x="13" y="269" class="lbl cg">ems_site_simulator</text>
+<text x="13" y="283" class="lbl2 cm">native on host</text>
+<text x="13" y="298" class="mono cm">1 unit · 175 msg/s</text>
+<text x="13" y="312" class="lbl2 cm">smooth (1s cadence)</text>
+<text x="13" y="327" class="mono cm">→ localhost:11883</text>
+<text x="13" y="342" class="lbl2 cm">pid: /tmp/evelyn34_sim.pid</text>
+<text x="13" y="357" class="lbl2 cm">log: /data/logs/YYYY/MM/DD/</text>
+
+<!-- ── Docker network box — wider to fit broker + writer + volume ── -->
+<rect x="166" y="148" width="716" height="194" rx="5" fill="#58a6ff0a" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="6,3"/>
+<text x="176" y="163" class="lbl2 ca">Docker  —  evelyn34_net (bridge)</text>
+
+<!-- ── evelyn34_broker — taller, bridge entry at top, ems/# at lower right ── -->
+<rect x="176" y="168" width="185" height="162" rx="4" fill="#0c1f40" stroke="#58a6ff" stroke-width="1.5"/>
+<text x="185" y="184" class="lbl ca">evelyn34_broker</text>
+<text x="185" y="198" class="lbl2 cm">FlashMQ 1.26</text>
+<text x="185" y="213" class="mono cm">:1883  (internal)</text>
+<text x="185" y="228" class="mono cm">:11883 (host port)</text>
+<text x="185" y="243" class="lbl2 cm">fan-out: ems/#</text>
+<text x="185" y="258" class="lbl2 cm">bridge: flashmq.conf</text>
 
 <!-- ── evelyn34_writer ────────────────────────────────────────────── -->
-<rect x="368" y="63" width="205" height="116" rx="4" fill="#0a1c0e" stroke="#3fb950" stroke-width="1.5"/>
-<text x="377" y="81"  class="lbl cg">evelyn34_writer</text>
-<text x="377" y="95"  class="lbl2 cm">parquet-writer:latest</text>
-<text x="377" y="111" class="mono cm">health :8771</text>
-<text x="377" y="126" class="lbl2 cm">sub: ems/#  qos 0</text>
-<text x="377" y="141" class="lbl2 cm">snappy · flush 10s</text>
-<text x="377" y="155" class="lbl2 cm">compact 600s · min_files 3</text>
+<rect x="371" y="168" width="210" height="162" rx="4" fill="#0a1c0e" stroke="#3fb950" stroke-width="1.5"/>
+<text x="381" y="184" class="lbl cg">evelyn34_writer</text>
+<text x="381" y="198" class="lbl2 cm">parquet-writer:latest</text>
+<text x="381" y="213" class="mono cm">health :8771</text>
+<text x="381" y="228" class="lbl2 cm">sub: ems/#  qos 0</text>
+<text x="381" y="243" class="lbl2 cm">snappy · flush 10s</text>
+<text x="381" y="258" class="lbl2 cm">compact 600s · min_files 3</text>
 
-<!-- ── volume mount (inside docker) ──────────────────────────────── -->
-<rect x="368" y="193" width="205" height="94" rx="4" fill="#1c1c1c" stroke="#30363d" stroke-width="1" stroke-dasharray="4,2"/>
-<text x="377" y="211" class="lbl2 cm">volume: /data/parquet</text>
-<text x="377" y="227" class="mono ct">= ${PARQUET_PATH}</text>
-<text x="377" y="243" class="mono cm">  /mnt/tort-sdf/evelyn/</text>
-<text x="377" y="259" class="lbl2 cm">853 GB free · ext4</text>
-<text x="377" y="274" class="lbl2 cm">parquet partitions + compacted</text>
-
-<!-- ── ems_site_simulator (native) ───────────────────────────────────── -->
-<rect x="598" y="38" width="246" height="116" rx="4" fill="#0a1a08" stroke="#3fb950" stroke-width="1.5"/>
-<text x="607" y="56"  class="lbl cg">ems_site_simulator</text>
-<text x="607" y="70"  class="lbl2 cm">native on host</text>
-<text x="607" y="86"  class="mono cm">1 unit · 175 msg/s</text>
-<text x="607" y="101" class="lbl2 cm">smooth (1s cadence)</text>
-<text x="607" y="116" class="mono cm">→ localhost:11883</text>
-<text x="607" y="131" class="lbl2 cm">pid: /tmp/evelyn34_sim.pid</text>
-<text x="607" y="146" class="lbl2 cm">log: /data/logs/YYYY/MM/DD/</text>
-
-<!-- ── bridge_api.py (native) ────────────────────────────────────── -->
-<rect x="598" y="170" width="246" height="132" rx="4" fill="#140c28" stroke="#bc8cff" stroke-width="1.5"/>
-<text x="607" y="188" class="lbl cp">bridge_api[_native].py</text>
-<text x="607" y="202" class="lbl2 cm">native on host  ·  :8772</text>
-<text x="607" y="219" class="mono cm">GET  /status</text>
-<text x="607" y="233" class="mono cm">POST /start  /stop</text>
-<text x="607" y="247" class="mono cm">GET|POST /storage</text>
-<text x="607" y="261" class="mono cm">GET|POST /bridge</text>
-<text x="607" y="275" class="mono cm">POST /bridge/clear</text>
-<text x="607" y="292" class="lbl2 cm">Docker: docker compose/restart</text>
-
-<!-- ── Dashboard ─────────────────────────────────────────────────── -->
-<rect x="272" y="338" width="312" height="32" rx="5" fill="#21262d" stroke="#30363d" stroke-width="1"/>
-<text x="282" y="351" class="lbl cm">Dashboard  (browser · .46:8080)</text>
-<text x="282" y="364" class="mono cm">health :8771    mgmt :8772</text>
+<!-- ── volume mount — to the RIGHT of writer ─────────────────────── -->
+<rect x="591" y="168" width="281" height="162" rx="4" fill="#1c1c1c" stroke="#30363d" stroke-width="1" stroke-dasharray="4,2"/>
+<text x="601" y="184" class="lbl ct">parquet store</text>
+<text x="601" y="198" class="lbl2 cm">volume: /data/parquet</text>
+<text x="601" y="213" class="mono ct">= ${PARQUET_PATH}</text>
+<text x="601" y="228" class="mono cm">  /mnt/tort-sdf/evelyn/</text>
+<text x="601" y="243" class="lbl2 cm">853 GB free · ext4</text>
+<text x="601" y="258" class="lbl2 cm">partitions + compacted</text>
 
 <!-- ── Arrows ────────────────────────────────────────────────────── -->
 
-<!-- Remote → broker  (dashed orange) -->
-<line x1="140" y1="115" x2="168" y2="115" stroke="#d29922" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ao)"/>
+<!-- Dashboard → bridge_api  (vertical purple) -->
+<line x1="524" y1="56" x2="524" y2="64" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#ap)"/>
 
-<!-- ems_site_simulator → broker via :11883 -->
-<line x1="598" y1="100" x2="350" y2="100" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
-<text x="432" y="95"  class="lbl2 cm">:11883</text>
+<!-- bridge_api → broker  (vertical purple: drops from bridge_api bottom into broker TOP)
+     x=268 = broker center (176 + 185/2).  Clearly above the ems/# blue line. -->
+<line x1="268" y1="116" x2="268" y2="168" stroke="#bc8cff" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#ap)"/>
+<text x="274" y="139" class="lbl2 cp">config+restart</text>
 
-<!-- broker → writer  (internal, solid blue) -->
-<line x1="350" y1="121" x2="368" y2="121" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ab)"/>
-<text x="351" y="116" class="lbl2 ca">ems/#</text>
+<!-- REMOTE → broker LEFT  (dashed orange: FlashMQ bridge) -->
+<line x1="142" y1="183" x2="176" y2="183" stroke="#d29922" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ao)"/>
 
-<!-- writer → volume mount -->
-<line x1="470" y1="179" x2="470" y2="193" stroke="#8b949e" stroke-width="1.5" marker-end="url(#am)"/>
+<!-- ems_site_simulator → broker LEFT via :11883  (solid green) -->
+<line x1="148" y1="278" x2="176" y2="278" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
+<text x="149" y="273" class="lbl2 cm">:11883</text>
 
-<!-- bridge_api → broker (dashed purple — config + restart) -->
-<path d="M598,225 L530,225 L530,155 L350,155" stroke="#bc8cff" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#ap)"/>
-<text x="394" y="218" class="lbl2 cp">config + restart</text>
+<!-- broker → writer  (solid blue: ems/# fanout — sits well below bridge entry) -->
+<line x1="361" y1="298" x2="371" y2="298" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="335" y="293" class="lbl2 ca">ems/#</text>
 
-<!-- dashboard → writer health :8771  (dashed muted) -->
-<path d="M360,338 L360,315 L470,315 L470,287" stroke="#8b949e" stroke-width="1" stroke-dasharray="4,3" fill="none" marker-end="url(#am)"/>
-<text x="364" y="311" class="lbl2 cm">:8771</text>
-
-<!-- dashboard → bridge_api :8772  (dashed purple) -->
-<path d="M528,338 L528,315 L720,315 L720,302" stroke="#bc8cff" stroke-width="1" stroke-dasharray="4,3" fill="none" marker-end="url(#ap)"/>
-<text x="640" y="311" class="lbl2 cp">:8772</text>
+<!-- writer → volume  (horizontal right: parquet output) -->
+<line x1="581" y1="249" x2="591" y2="249" stroke="#8b949e" stroke-width="1.5" marker-end="url(#am)"/>
 
 </svg>
 </div>
@@ -552,13 +628,55 @@
   </div>
 </div>
 
+</div><!-- /tab-stack -->
+
+<!-- MQTT Viewer tab -->
+<div id="tab-mqtt" class="tab-pane">
+
+  <div class="qbar">
+    <label>Signal</label>
+    <input id="mqtt-sig" type="text" list="mqtt-sig-list" placeholder="point_name" style="width:220px">
+    <datalist id="mqtt-sig-list"></datalist>
+    <label>Range</label>
+    <button class="btn-range" onclick="mqttSetRange(5)">5m</button>
+    <button class="btn-range" onclick="mqttSetRange(30)">30m</button>
+    <button class="btn-range" onclick="mqttSetRange(60)">1h</button>
+    <button class="btn-range" onclick="mqttSetRange(360)">6h</button>
+    <button class="btn-range" onclick="mqttSetRange(1440)">24h</button>
+    <label>From</label>
+    <input id="mqtt-from" type="datetime-local">
+    <label>To</label>
+    <input id="mqtt-to" type="datetime-local">
+    <button class="btn-qrun" onclick="mqttRunQuery()">Query</button>
+    <button class="btn-qcsv"  id="mqtt-btn-csv"  onclick="mqttExportCsv()"  disabled>CSV</button>
+    <button class="btn-qmqtt" id="mqtt-btn-mqtt" onclick="mqttExportJson()" disabled>MQTT JSON</button>
+  </div>
+
+  <div id="mqtt-status" class="q-status hidden"></div>
+  <div id="mqtt-error"  class="q-error  hidden"></div>
+
+  <div id="mqtt-summary" class="qsummary hidden">
+    <div class="qscard"><div class="qscard-k">Signal</div><div class="qscard-v" id="mqss-signal">—</div></div>
+    <div class="qscard"><div class="qscard-k">Points</div><div class="qscard-v" id="mqss-count">—</div></div>
+    <div class="qscard"><div class="qscard-k">Min</div><div class="qscard-v" id="mqss-min">—</div></div>
+    <div class="qscard"><div class="qscard-k">Max</div><div class="qscard-v" id="mqss-max">—</div></div>
+    <div class="qscard"><div class="qscard-k">Avg</div><div class="qscard-v" id="mqss-avg">—</div></div>
+  </div>
+
+  <div id="mqtt-results" class="qtable-wrap hidden">
+    <div class="qtable-note" id="mqtt-table-note"></div>
+    <table><thead id="mqtt-thead"></thead><tbody id="mqtt-tbody"></tbody></table>
+  </div>
+
+</div><!-- /tab-mqtt -->
+
 <script>
 const POLL_MS = 3000;
 const BRIDGE_API_PORT = 8772;
 
 // ── Stack management API ────────────────────────────────────────────────────
 function apiUrl(path) {
-  const host = document.getElementById('host').value.trim();
+  const host = document.getElementById('bridge-host').value.trim();
   return `http://${host}:${BRIDGE_API_PORT}${path}`;
 }
 
@@ -570,7 +688,11 @@ function dotClass(state) {
 }
 
 function renderStatus(s) {
+  const bridgeDot = document.getElementById('bridge-dot');
+  const bridgeTxt = document.getElementById('bridge-conn-text');
   if (!s) {
+    if (bridgeDot) bridgeDot.className = 'dot err';
+    if (bridgeTxt) bridgeTxt.textContent = 'unreachable';
     ['st-br-dot','st-wr-dot','st-sim-dot'].forEach(id =>
       document.getElementById(id).className = 'dot err');
     document.getElementById('st-br').textContent  = 'broker — unreachable';
@@ -578,6 +700,8 @@ function renderStatus(s) {
     document.getElementById('st-sim').textContent = 'sim — ?';
     return;
   }
+  if (bridgeDot) bridgeDot.className = 'dot ok';
+  if (bridgeTxt) bridgeTxt.textContent = 'connected :8772';
   const b = s.broker, w = s.writer, sim = s.sim;
   document.getElementById('st-br-dot').className = dotClass(b.state);
   document.getElementById('st-br').textContent   =
@@ -707,6 +831,7 @@ async function clearBridge() {
   } catch(e) { msg.textContent = 'error: ' + e.message; }
 }
 let timer = null;
+let bridgeTimer = null;
 let prev = null;
 let prevTime = null;
 let startTime = null;
@@ -874,8 +999,6 @@ async function poll() {
   }
 }
 
-let statusTimer = null;
-
 function setConnected(yes) {
   const btn = document.getElementById('btn-connect');
   if (yes) {
@@ -890,9 +1013,21 @@ function setConnected(yes) {
   }
 }
 
+function setBridgeConnected(yes) {
+  const btn = document.getElementById('btn-bridge-connect');
+  if (yes) {
+    btn.textContent = 'Disconnect';
+    btn.className = 'disconnecting';
+  } else {
+    btn.textContent = 'Connect';
+    btn.className = 'connecting';
+    document.getElementById('bridge-dot').className = 'dot';
+    document.getElementById('bridge-conn-text').textContent = 'disconnected';
+  }
+}
+
 function stopPolling() {
-  if (timer)       { clearInterval(timer);       timer = null; }
-  if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+  if (timer) { clearInterval(timer); timer = null; }
   prev = null; prevTime = null; startTime = null;
   compactStart = null; history = [];
   setConnected(false);
@@ -902,8 +1037,6 @@ function startPolling() {
   stopPolling();
   poll();
   timer = setInterval(poll, POLL_MS);
-  fetchStatus();
-  statusTimer = setInterval(fetchStatus, 10000);
   setConnected(true);
 }
 
@@ -911,12 +1044,187 @@ function toggleConnect() {
   if (timer) stopPolling(); else startPolling();
 }
 
+function stopBridgePolling() {
+  if (bridgeTimer) { clearInterval(bridgeTimer); bridgeTimer = null; }
+  setBridgeConnected(false);
+  renderStatus(null);
+}
+
+function startBridgePolling() {
+  stopBridgePolling();
+  fetchStatus();
+  bridgeTimer = setInterval(fetchStatus, 10000);
+  setBridgeConnected(true);
+}
+
+function toggleBridgeConnect() {
+  if (bridgeTimer) stopBridgePolling(); else startBridgePolling();
+}
+
 // compact progress ticks every second
 setInterval(() => { if (compactStart) updateCompactETA(); }, 1000);
 
-// auto-start
-window.addEventListener('load', startPolling);
+// auto-start both connections
+window.addEventListener('load', () => { startPolling(); startBridgePolling(); });
 window.addEventListener('resize', drawSpark);
+
+// ── tab switching ─────────────────────────────────────────────────────────────
+function showTab(name, btn) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'mqtt' && !mqttSignalsLoaded) loadMqttSignals();
+}
+
+// ── MQTT Viewer tab ───────────────────────────────────────────────────────────
+let mqttSignalsLoaded = false;
+let mqttData = null;
+let mqttLatestMs = null;
+
+function mqttApiUrl(path) {
+  const host = document.getElementById('bridge-host').value.trim() || '192.168.86.34';
+  return `http://${host}:8772${path}`;
+}
+
+async function loadMqttSignals() {
+  try {
+    const [fr, sr] = await Promise.all([
+      fetch(mqttApiUrl('/query/files')),
+      fetch(mqttApiUrl('/query/signals')),
+    ]);
+    if (!fr.ok || !sr.ok) { mqttShowErr('Failed to load signals from bridge_api :8772'); return; }
+    const fd = await fr.json();
+    const sd = await sr.json();
+    mqttSignalsLoaded = true;
+    const dl = document.getElementById('mqtt-sig-list');
+    dl.innerHTML = '';
+    for (const s of sd.signals) {
+      const o = document.createElement('option'); o.value = s; dl.appendChild(o);
+    }
+    if (fd.files.length > 0) {
+      mqttLatestMs = new Date(fd.files[0].ts_iso).getTime();
+      mqttSetRange(30);
+    }
+    mqttShowStatus(`${fd.total} files · ${sd.signals.length} signals (${sd.schema})`);
+  } catch(e) { mqttShowErr('bridge_api :8772 — ' + e.message); }
+}
+
+function mqttSetRange(minutes) {
+  const now = mqttLatestMs || Date.now();
+  const pad = n => String(n).padStart(2,'0');
+  const fmt = ms => { const d=new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  document.getElementById('mqtt-from').value = fmt(now - minutes*60000);
+  document.getElementById('mqtt-to').value   = fmt(now);
+}
+
+function mqttTopic(pt, signal) {
+  const dtype = pt.dtype || 'float';
+  if (pt.unit_id) return ['unit',pt.unit_id,pt.device||'',pt.instance||'',signal,dtype].join('/');
+  if (pt.site_id && pt.device) return ['ems','site',pt.site_id,pt.device,signal,dtype].join('/');
+  if (pt.site_id) return ['ems','site',pt.site_id,'root',signal,dtype].join('/');
+  return signal;
+}
+
+async function mqttRunQuery() {
+  const signal = document.getElementById('mqtt-sig').value.trim();
+  const from   = document.getElementById('mqtt-from').value;
+  const to     = document.getElementById('mqtt-to').value;
+  if (!signal) { mqttShowErr('Enter a signal name'); return; }
+  if (!from || !to) { mqttShowErr('Set from/to range'); return; }
+  mqttShowStatus('querying…');
+  document.getElementById('mqtt-results').classList.add('hidden');
+  document.getElementById('mqtt-summary').classList.add('hidden');
+  document.getElementById('mqtt-btn-csv').disabled  = true;
+  document.getElementById('mqtt-btn-mqtt').disabled = true;
+  try {
+    const url = mqttApiUrl(`/query/data?signal=${encodeURIComponent(signal)}&from=${encodeURIComponent(new Date(from).toISOString())}&to=${encodeURIComponent(new Date(to).toISOString())}&limit=2000`);
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (!resp.ok) { mqttShowErr(data.error || `HTTP ${resp.status}`); return; }
+    mqttData = data;
+    mqttClearStatus();
+    mqttRenderResults(data);
+  } catch(e) { mqttShowErr('Query failed: ' + e.message); }
+}
+
+function mqttRenderResults(data) {
+  const pts = data.points;
+  if (pts.length === 0) { mqttShowStatus(`No data for "${data.signal}" in range`); return; }
+  const hasTopicCols = pts[0].site_id !== undefined || pts[0].unit_id !== undefined;
+
+  // summary
+  const vals = pts.map(p => p.value);
+  const mn = Math.min(...vals), mx = Math.max(...vals);
+  const avg = (vals.reduce((a,b)=>a+b,0)/vals.length).toPrecision(5);
+  document.getElementById('mqss-signal').textContent = data.signal;
+  document.getElementById('mqss-count').textContent  = pts.length;
+  document.getElementById('mqss-min').textContent    = Number.isInteger(mn)?mn:mn.toPrecision(5);
+  document.getElementById('mqss-max').textContent    = Number.isInteger(mx)?mx:mx.toPrecision(5);
+  document.getElementById('mqss-avg').textContent    = avg;
+  document.getElementById('mqtt-summary').classList.remove('hidden');
+
+  // table
+  const MAX = 200;
+  const shown = pts.slice(0, MAX);
+  document.getElementById('mqtt-table-note').textContent =
+    pts.length > MAX ? `Showing ${MAX} of ${pts.length}` : `${pts.length} points`;
+  const thead = document.getElementById('mqtt-thead');
+  thead.innerHTML = hasTopicCols
+    ? '<tr><th>Timestamp</th><th>Value</th><th>Topic</th></tr>'
+    : '<tr><th>Timestamp</th><th>Value</th></tr>';
+  const tbody = document.getElementById('mqtt-tbody');
+  tbody.innerHTML = '';
+  for (const p of shown) {
+    const tr = document.createElement('tr');
+    const ts = new Date(p.ts).toLocaleString();
+    if (hasTopicCols) {
+      const topic = mqttTopic(p, data.signal);
+      tr.innerHTML = `<td>${ts}</td><td>${p.value}</td><td class="topic-cell" title="${topic}">${topic}</td>`;
+    } else {
+      tr.innerHTML = `<td>${ts}</td><td>${p.value}</td>`;
+    }
+    tbody.appendChild(tr);
+  }
+  document.getElementById('mqtt-results').classList.remove('hidden');
+  document.getElementById('mqtt-btn-csv').disabled  = false;
+  document.getElementById('mqtt-btn-mqtt').disabled = !hasTopicCols;
+}
+
+function mqttExportCsv() {
+  if (!mqttData) return;
+  const d = mqttData;
+  const hasTopicCols = d.points.length > 0 && (d.points[0].site_id !== undefined || d.points[0].unit_id !== undefined);
+  let csv = hasTopicCols
+    ? 'ts,value,topic\n' + d.points.map(p=>`"${p.ts}",${p.value},"${mqttTopic(p,d.signal)}"`).join('\n')
+    : 'ts,value\n' + d.points.map(p=>`"${p.ts}",${p.value}`).join('\n');
+  const fname = d.signal.replace(/[^a-zA-Z0-9_]/g,'_') + '.csv';
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = fname; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+function mqttExportJson() {
+  if (!mqttData) return;
+  const d = mqttData;
+  const msgs = d.points.map(p => ({ topic: mqttTopic(p, d.signal), payload: { ts: p.ts, value: p.value } }));
+  const fname = 'mqtt_' + d.signal.replace(/[^a-zA-Z0-9_]/g,'_') + '.json';
+  const a = document.createElement('a');
+  a.href = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(JSON.stringify(msgs, null, 2));
+  a.download = fname; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+function mqttShowStatus(msg) {
+  const el = document.getElementById('mqtt-status');
+  el.textContent = msg; el.classList.remove('hidden');
+  document.getElementById('mqtt-error').classList.add('hidden');
+}
+function mqttClearStatus() { document.getElementById('mqtt-status').classList.add('hidden'); }
+function mqttShowErr(msg) {
+  const el = document.getElementById('mqtt-error');
+  el.textContent = msg; el.classList.remove('hidden');
+  document.getElementById('mqtt-status').classList.add('hidden');
+}
 </script>
 </body>
 </html>

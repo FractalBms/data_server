@@ -122,8 +122,9 @@
 <body>
 
 <nav class="nav">
+  <a href="projects.html">← Projects</a>
   <a href="demo_compare.html">Demo Compare</a>
-  <a href="evelyn_docker_34.html">Evelyn .34 Live</a>
+  <a href="evelyn_docker_34.html">← Evelyn .34 Live</a>
   <a href="parquet_viewer.html" class="here">Parquet Viewer</a>
 </nav>
 
@@ -153,6 +154,14 @@
 
   <label>Unit ID</label>
   <input id="unit-input" type="text" placeholder="all" style="width:70px">
+
+  <label>Split by</label>
+  <select id="split-by" style="background:var(--code-bg);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 8px;font-size:.82rem;">
+    <option value="">none</option>
+    <option value="instance" selected>instance</option>
+    <option value="unit_id">unit</option>
+    <option value="device">device</option>
+  </select>
 
   <label>Range</label>
   <button class="btn-range" onclick="setRange(5)">5m</button>
@@ -189,6 +198,7 @@
 <div class="chart-wrap hidden" id="chart-wrap">
   <canvas id="chart-canvas"></canvas>
   <div id="chart-tooltip"></div>
+  <div id="chart-legend" style="display:flex;flex-wrap:wrap;gap:10px;padding:8px 4px 2px;min-height:4px;"></div>
 </div>
 
 <!-- Results table -->
@@ -444,29 +454,39 @@ function renderTimeSeries(data) {
   document.getElementById('s-span').textContent = span;
   document.getElementById('summary-bar').classList.remove('hidden');
 
-  // chart
+  // chart — group by selected split field
+  const groups = groupData(pts);
   document.getElementById('chart-wrap').classList.remove('hidden');
-  drawChart(pts, data.signal);
+  drawChart(groups, data.signal);
 
   // table (up to 200 rows)
   const MAX_ROWS = 200;
   const shown = pts.slice(0, MAX_ROWS);
   document.getElementById('table-note').textContent =
     pts.length > MAX_ROWS ? `Showing ${MAX_ROWS} of ${pts.length} points` : `${pts.length} points`;
-  document.getElementById('results-thead').innerHTML = hasTopicCols
-    ? '<tr><th>Timestamp</th><th>Value</th><th>Topic</th></tr>'
-    : '<tr><th>Timestamp</th><th>Value</th></tr>';
+
+  const splitBy = document.getElementById('split-by').value;
+  const hasSplit = splitBy && groups.length > 1 && pts[0][splitBy] !== undefined;
+
+  let thead = '<tr><th>Timestamp</th>';
+  if (hasSplit) thead += `<th>${splitBy}</th>`;
+  thead += '<th>Value</th>';
+  if (hasTopicCols) thead += '<th>Topic</th>';
+  thead += '</tr>';
+  document.getElementById('results-thead').innerHTML = thead;
+
   const tbody = document.getElementById('results-tbody');
   tbody.innerHTML = '';
   for (const p of shown) {
     const tr = document.createElement('tr');
+    let row = `<td>${fmtTs(p.ts)}</td>`;
+    if (hasSplit) row += `<td>${p[splitBy] || '?'}</td>`;
+    row += `<td>${p.value}</td>`;
     if (hasTopicCols) {
       const topic = mqttTopic(p, data.signal);
-      tr.innerHTML = `<td>${fmtTs(p.ts)}</td><td>${p.value}</td>`
-        + `<td class="topic-cell" title="${topic}">${topic}</td>`;
-    } else {
-      tr.innerHTML = `<td>${fmtTs(p.ts)}</td><td>${p.value}</td>`;
+      row += `<td class="topic-cell" title="${topic}">${topic}</td>`;
     }
+    tr.innerHTML = row;
     tbody.appendChild(tr);
   }
   document.getElementById('table-wrap').classList.remove('hidden');
@@ -508,12 +528,44 @@ function renderSnapshot(data) {
 }
 
 // ── chart ─────────────────────────────────────────────────────────────────────
-let _chartData = null;
-let _chartSignal = '';
+const SERIES_COLORS = [
+  '#58a6ff','#3fb950','#e3b341','#bc8cff',
+  '#f85149','#79c0ff','#56d364','#ffa657',
+  '#d2a8ff','#ff7b72'
+];
 
-function drawChart(pts, signal) {
-  _chartData = pts;
+let _chartGroups = null;  // [{label, color, pts}]
+let _chartSignal = '';
+let _chartMinT = 0, _chartRangeT = 1;  // shared with tooltip
+
+function groupData(pts) {
+  const splitBy = document.getElementById('split-by').value;
+  if (!splitBy) return [{ label: 'all', color: SERIES_COLORS[0], pts }];
+  const map = new Map();
+  for (const p of pts) {
+    const key = p[splitBy] !== undefined ? String(p[splitBy]) : '?';
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(p);
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([label, gpts], i) => ({ label, color: SERIES_COLORS[i % SERIES_COLORS.length], pts: gpts }));
+}
+
+function drawChart(groups, signal) {
+  _chartGroups = groups;
   _chartSignal = signal;
+  // legend
+  const leg = document.getElementById('chart-legend');
+  leg.innerHTML = '';
+  if (groups.length > 1) {
+    for (const g of groups) {
+      const item = document.createElement('span');
+      item.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:.73rem;font-family:Consolas,monospace;color:var(--text)';
+      item.innerHTML = `<span style="display:inline-block;width:14px;height:3px;background:${g.color};border-radius:2px;flex-shrink:0"></span>${g.label}`;
+      leg.appendChild(item);
+    }
+  }
   requestAnimationFrame(_drawChartFrame);
 }
 
@@ -531,19 +583,23 @@ function _drawChartFrame() {
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
 
-  const pts = _chartData;
-  if (!pts || pts.length === 0) return;
+  const groups = _chartGroups;
+  if (!groups || groups.length === 0) return;
+
+  const allPts = groups.flatMap(g => g.pts);
+  if (allPts.length === 0) return;
 
   const PAD = { top: 20, right: 20, bottom: 50, left: 70 };
   const CW = W - PAD.left - PAD.right;
   const CH = H - PAD.top - PAD.bottom;
 
-  const vals = pts.map(p => p.value);
-  const times = pts.map(p => new Date(p.ts).getTime());
+  const vals  = allPts.map(p => p.value);
+  const times = allPts.map(p => new Date(p.ts).getTime());
   const minV = Math.min(...vals), maxV = Math.max(...vals);
   const minT = Math.min(...times), maxT = Math.max(...times);
   const rangeV = maxV - minV || 1;
   const rangeT = maxT - minT || 1;
+  _chartMinT = minT; _chartRangeT = rangeT;
 
   function xOf(t) { return PAD.left + (t - minT) / rangeT * CW; }
   function yOf(v) { return PAD.top + (1 - (v - minV) / rangeV) * CH; }
@@ -552,12 +608,12 @@ function _drawChartFrame() {
   ctx.fillStyle = '#161b22';
   ctx.fillRect(0, 0, W, H);
 
-  // grid lines
-  ctx.strokeStyle = '#30363d';
+  // grid Y
   ctx.lineWidth = 1;
   const GRID_Y = 5;
   for (let i = 0; i <= GRID_Y; i++) {
     const y = PAD.top + (i / GRID_Y) * CH;
+    ctx.strokeStyle = '#30363d';
     ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left + CW, y); ctx.stroke();
     const v = maxV - (i / GRID_Y) * rangeV;
     ctx.fillStyle = '#8b949e';
@@ -565,7 +621,8 @@ function _drawChartFrame() {
     ctx.textAlign = 'right';
     ctx.fillText(fmt4(v), PAD.left - 5, y + 4);
   }
-  const GRID_X = Math.min(6, pts.length - 1);
+  // grid X
+  const GRID_X = Math.min(6, allPts.length - 1);
   for (let i = 0; i <= GRID_X; i++) {
     const t = minT + (i / GRID_X) * rangeT;
     const x = xOf(t);
@@ -574,8 +631,7 @@ function _drawChartFrame() {
     ctx.fillStyle = '#8b949e';
     ctx.font = '10px Consolas,monospace';
     ctx.textAlign = 'center';
-    const lbl = new Date(t).toLocaleTimeString();
-    ctx.fillText(lbl, x, H - PAD.bottom + 16);
+    ctx.fillText(new Date(t).toLocaleTimeString(), x, H - PAD.bottom + 16);
   }
 
   // axes
@@ -587,58 +643,59 @@ function _drawChartFrame() {
   ctx.lineTo(PAD.left + CW, PAD.top + CH);
   ctx.stroke();
 
-  // line
-  ctx.strokeStyle = '#58a6ff';
-  ctx.lineWidth = 1.5;
-  ctx.lineJoin = 'round';
-  ctx.beginPath();
-  pts.forEach((p, i) => {
-    const x = xOf(new Date(p.ts).getTime());
-    const y = yOf(p.value);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
+  // draw each series
+  for (const g of groups) {
+    if (g.pts.length === 0) continue;
+    const sorted = g.pts.slice().sort((a, b) => new Date(a.ts) - new Date(b.ts));
 
-  // dots
-  ctx.fillStyle = '#58a6ff';
-  for (const p of pts) {
-    const x = xOf(new Date(p.ts).getTime());
-    const y = yOf(p.value);
-    ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 2*Math.PI); ctx.fill();
+    ctx.strokeStyle = g.color;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    sorted.forEach((p, i) => {
+      const x = xOf(new Date(p.ts).getTime());
+      const y = yOf(p.value);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = g.color;
+    for (const p of sorted) {
+      const x = xOf(new Date(p.ts).getTime());
+      const y = yOf(p.value);
+      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 2 * Math.PI); ctx.fill();
+    }
   }
 }
 
 // tooltip
 document.getElementById('chart-canvas').addEventListener('mousemove', function(e) {
-  if (!_chartData || _chartData.length === 0) return;
+  if (!_chartGroups) return;
   const canvas = this;
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
   const W = canvas.clientWidth;
-  const H = canvas.clientHeight;
   const PAD = { top: 20, right: 20, bottom: 50, left: 70 };
   const CW = W - PAD.left - PAD.right;
 
-  const times = _chartData.map(p => new Date(p.ts).getTime());
-  const minT = Math.min(...times), maxT = Math.max(...times);
-  const rangeT = maxT - minT || 1;
-
-  // find nearest point
-  let best = null, bestDx = Infinity;
-  for (const p of _chartData) {
-    const x = PAD.left + (new Date(p.ts).getTime() - minT) / rangeT * CW;
-    const dx = Math.abs(x - mx);
-    if (dx < bestDx) { bestDx = dx; best = p; }
+  let best = null, bestDx = Infinity, bestGroup = null;
+  for (const g of _chartGroups) {
+    for (const p of g.pts) {
+      const x = PAD.left + (new Date(p.ts).getTime() - _chartMinT) / _chartRangeT * CW;
+      const dx = Math.abs(x - mx);
+      if (dx < bestDx) { bestDx = dx; best = p; bestGroup = g; }
+    }
   }
 
   const tip = document.getElementById('chart-tooltip');
   if (best && bestDx < 30) {
     tip.style.display = 'block';
-    tip.innerHTML = `<b>${fmtTs(best.ts)}</b><br>${best.value}`;
+    const labelLine = bestGroup && _chartGroups.length > 1
+      ? `<span style="color:${bestGroup.color}">${bestGroup.label}</span><br>` : '';
+    tip.innerHTML = `${labelLine}<b>${fmtTs(best.ts)}</b><br>${best.value}`;
     let tx = mx + 12, ty = my - 10;
-    if (tx + 180 > W) tx = mx - 180;
+    if (tx + 190 > W) tx = mx - 195;
     if (ty < 0) ty = 0;
     tip.style.left = tx + 'px';
     tip.style.top  = ty + 'px';
@@ -652,7 +709,7 @@ document.getElementById('chart-canvas').addEventListener('mouseleave', function(
 });
 
 window.addEventListener('resize', function() {
-  if (_chartData) requestAnimationFrame(_drawChartFrame);
+  if (_chartGroups) requestAnimationFrame(_drawChartFrame);
 });
 
 // ── export CSV ────────────────────────────────────────────────────────────────

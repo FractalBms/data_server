@@ -1280,6 +1280,7 @@ static void on_message(struct mosquitto*, void*, const struct mosquitto_message*
     Row row = parse_payload(payload, *info_opt, g_cfg->project_id, *g_cfg);
 
     row.strings["mqtt_topic"] = topic;   // preserve original topic for replay
+    row.ints["sample_count"]  = 1;       // placeholder: future COV dedup will increment this
 
     if (!g_cfg->site_id.empty())
         row.strings["site_id"] = g_cfg->site_id;

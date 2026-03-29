@@ -153,18 +153,80 @@
            padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; }
   .nav a:hover { color: var(--accent); border-color: var(--accent); }
   .nav a.here  { color: var(--accent); border-color: var(--accent); background: #0c2d6b22; }
+
+  /* ── tabs ── */
+  .tab-bar { display:flex; gap:4px; margin-bottom:14px;
+             border-bottom:1px solid var(--border); padding-bottom:0; }
+  .tab-btn { background:none; border:none; border-bottom:2px solid transparent;
+             color:var(--muted); font-size:.85rem; padding:6px 14px 8px;
+             cursor:pointer; font-family:inherit; }
+  .tab-btn:hover { color:var(--text); }
+  .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .tab-pane { display:none; }
+  .tab-pane.active { display:block; }
+
+  /* ── parquet/replay tab ── */
+  .qbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+          background:var(--surface); border:1px solid var(--border);
+          border-radius:8px; padding:8px 12px; margin-bottom:10px; }
+  .qbar label { color:var(--muted); font-size:.78rem; white-space:nowrap; }
+  .qbar input[type=text] { background:var(--code-bg); border:1px solid var(--border);
+                           color:var(--text); border-radius:4px; padding:4px 8px;
+                           font-family:'Consolas',monospace; font-size:.82rem; }
+  .qbar input[type=datetime-local] { background:var(--code-bg); border:1px solid var(--border);
+                                     color:var(--text); border-radius:4px; padding:4px 8px;
+                                     font-family:'Consolas',monospace; font-size:.78rem; }
+  .btn-range { background:var(--code-bg); color:var(--muted); border:1px solid var(--border);
+               border-radius:4px; padding:4px 8px; font-size:.75rem; cursor:pointer; }
+  .btn-range:hover { color:var(--accent); border-color:var(--accent); }
+  .btn-qrun  { background:var(--accent); color:#000; border:none; border-radius:4px;
+               padding:5px 14px; font-size:.8rem; cursor:pointer; font-weight:600; }
+  .btn-qrun:hover { opacity:.85; }
+  .btn-qcsv  { background:transparent; color:var(--green); border:1px solid var(--green);
+               border-radius:4px; padding:5px 12px; font-size:.8rem; cursor:pointer; }
+  .btn-qcsv:hover { background:#3fb95022; }
+  .btn-qmqtt { background:transparent; color:var(--purple); border:1px solid var(--purple);
+               border-radius:4px; padding:5px 12px; font-size:.8rem; cursor:pointer; }
+  .btn-qmqtt:hover { background:#bc8cff22; }
+  .q-status { font-size:.78rem; color:var(--yellow); font-family:'Consolas',monospace; margin-bottom:6px; }
+  .q-error  { font-size:.78rem; color:var(--red);    font-family:'Consolas',monospace; margin-bottom:6px; }
+  .qtable-wrap { background:var(--surface); border:1px solid var(--border);
+                 border-radius:8px; padding:10px 12px; overflow-x:auto; }
+  .qtable-note { font-size:.72rem; color:var(--muted); margin-bottom:6px; }
+  .qtable-wrap table { width:100%; border-collapse:collapse; font-size:.75rem; }
+  .qtable-wrap th { color:var(--muted); text-align:left; padding:4px 10px; font-weight:600;
+                    font-size:.68rem; border-bottom:1px solid var(--border); }
+  .qtable-wrap td { padding:3px 10px; border-bottom:1px solid var(--border);
+                    font-family:'Consolas',monospace; }
+  .qtable-wrap tr:last-child td { border-bottom:none; }
+  .qtable-wrap tr:hover td { background:#ffffff08; }
+  .qtopic-cell { font-size:.68rem; color:var(--muted); max-width:320px;
+                 overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .qsummary { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  .qscard { background:var(--surface); border:1px solid var(--border);
+            border-radius:6px; padding:6px 10px; }
+  .qscard-k { font-size:.6rem; color:var(--muted); text-transform:uppercase; margin-bottom:1px; }
+  .qscard-v { font-size:.9rem; font-weight:700; font-family:'Consolas',monospace; color:var(--accent); }
 </style>
 </head>
 <body>
 
 <div class="nav">
+  <a href="projects.html">← Projects</a>
   <a href="writer_torture_test.html">Torture Test</a>
   <a href="writer_real_data.html">Real Data</a>
   <a href="ems_site_simulator.html">ems_site_simulator</a>
   <a href="ems_simulator_control.html">EMS Control</a>
   <a href="mqtt_viewer.html" class="here">MQTT Viewer</a>
+  <a href="evelyn_docker_34.html">← Evelyn .34 Live</a>
 </div>
 
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="showMqttTab('live',this)">MQTT Live</button>
+  <button class="tab-btn"        onclick="showMqttTab('parquet',this)">Parquet / Replay</button>
+</div>
+
+<div id="mqtab-live" class="tab-pane active">
 <div class="topbar">
   <h1>MQTT Live Viewer</h1>
   <span class="dot off" id="conn-dot"></span>
@@ -276,6 +338,50 @@
 
   </div>
 </div>
+
+</div><!-- /mqtab-live -->
+
+<!-- Parquet / Replay tab -->
+<div id="mqtab-parquet" class="tab-pane">
+
+  <div class="qbar">
+    <label>Host</label>
+    <input id="pq-host" type="text" value="192.168.86.34" placeholder="host" style="width:140px">
+    <label>Signal</label>
+    <input id="pq-sig" type="text" list="pq-sig-list" placeholder="point_name" style="width:200px">
+    <datalist id="pq-sig-list"></datalist>
+    <label>Range</label>
+    <button class="btn-range" onclick="pqSetRange(5)">5m</button>
+    <button class="btn-range" onclick="pqSetRange(30)">30m</button>
+    <button class="btn-range" onclick="pqSetRange(60)">1h</button>
+    <button class="btn-range" onclick="pqSetRange(360)">6h</button>
+    <button class="btn-range" onclick="pqSetRange(1440)">24h</button>
+    <label>From</label>
+    <input id="pq-from" type="datetime-local">
+    <label>To</label>
+    <input id="pq-to" type="datetime-local">
+    <button class="btn-qrun"  onclick="pqRunQuery()">Query</button>
+    <button class="btn-qcsv"  id="pq-btn-csv"  onclick="pqExportCsv()"  disabled>CSV</button>
+    <button class="btn-qmqtt" id="pq-btn-mqtt" onclick="pqExportJson()" disabled>MQTT JSON</button>
+  </div>
+
+  <div id="pq-status" class="q-status" style="display:none"></div>
+  <div id="pq-error"  class="q-error"  style="display:none"></div>
+
+  <div id="pq-summary" class="qsummary" style="display:none">
+    <div class="qscard"><div class="qscard-k">Signal</div><div class="qscard-v" id="pqs-signal">—</div></div>
+    <div class="qscard"><div class="qscard-k">Points</div><div class="qscard-v" id="pqs-count">—</div></div>
+    <div class="qscard"><div class="qscard-k">Min</div><div class="qscard-v" id="pqs-min">—</div></div>
+    <div class="qscard"><div class="qscard-k">Max</div><div class="qscard-v" id="pqs-max">—</div></div>
+    <div class="qscard"><div class="qscard-k">Avg</div><div class="qscard-v" id="pqs-avg">—</div></div>
+  </div>
+
+  <div id="pq-results" class="qtable-wrap" style="display:none">
+    <div class="qtable-note" id="pq-table-note"></div>
+    <table><thead id="pq-thead"></thead><tbody id="pq-tbody"></tbody></table>
+  </div>
+
+</div><!-- /mqtab-parquet -->
 
 <script>
 'use strict';
@@ -867,6 +973,162 @@ window.addEventListener('DOMContentLoaded', () => {
     toggleConnect();
   }
 });
+
+// ── tab switching ─────────────────────────────────────────────────────────────
+function showMqttTab(name, btn) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('mqtab-' + name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'parquet' && !pqSignalsLoaded) pqLoadSignals();
+}
+
+// ── Parquet / Replay tab ──────────────────────────────────────────────────────
+let pqSignalsLoaded = false;
+let pqData = null;
+let pqLatestMs = null;
+
+function pqApiUrl(path) {
+  const host = document.getElementById('pq-host').value.trim() || '192.168.86.34';
+  return `http://${host}:8772${path}`;
+}
+
+async function pqLoadSignals() {
+  pqShowStatus('loading signals…');
+  try {
+    const [fr, sr] = await Promise.all([
+      fetch(pqApiUrl('/query/files')),
+      fetch(pqApiUrl('/query/signals')),
+    ]);
+    if (!fr.ok || !sr.ok) { pqShowErr('Failed to reach bridge_api :8772'); return; }
+    const fd = await fr.json();
+    const sd = await sr.json();
+    pqSignalsLoaded = true;
+    const dl = document.getElementById('pq-sig-list');
+    dl.innerHTML = '';
+    for (const s of sd.signals) {
+      const o = document.createElement('option'); o.value = s; dl.appendChild(o);
+    }
+    if (fd.files.length > 0) {
+      pqLatestMs = new Date(fd.files[0].ts_iso).getTime();
+      pqSetRange(30);
+    }
+    pqShowStatus(`${fd.total} files · ${sd.signals.length} signals (${sd.schema})`);
+  } catch(e) { pqShowErr('bridge_api :8772 — ' + e.message); }
+}
+
+function pqSetRange(minutes) {
+  const now = pqLatestMs || Date.now();
+  const pad = n => String(n).padStart(2,'0');
+  const fmt = ms => { const d=new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  document.getElementById('pq-from').value = fmt(now - minutes*60000);
+  document.getElementById('pq-to').value   = fmt(now);
+}
+
+function pqMqttTopic(pt, signal) {
+  const dtype = pt.dtype || 'float';
+  if (pt.unit_id) return ['unit',pt.unit_id,pt.device||'',pt.instance||'',signal,dtype].join('/');
+  if (pt.site_id && pt.device) return ['ems','site',pt.site_id,pt.device,signal,dtype].join('/');
+  if (pt.site_id) return ['ems','site',pt.site_id,'root',signal,dtype].join('/');
+  return signal;
+}
+
+async function pqRunQuery() {
+  const signal = document.getElementById('pq-sig').value.trim();
+  const from   = document.getElementById('pq-from').value;
+  const to     = document.getElementById('pq-to').value;
+  if (!signal) { pqShowErr('Enter a signal name'); return; }
+  if (!from || !to) { pqShowErr('Set from/to range'); return; }
+  pqShowStatus('querying…');
+  document.getElementById('pq-results').style.display  = 'none';
+  document.getElementById('pq-summary').style.display  = 'none';
+  document.getElementById('pq-btn-csv').disabled  = true;
+  document.getElementById('pq-btn-mqtt').disabled = true;
+  try {
+    const url = pqApiUrl(`/query/data?signal=${encodeURIComponent(signal)}&from=${encodeURIComponent(new Date(from).toISOString())}&to=${encodeURIComponent(new Date(to).toISOString())}&limit=2000`);
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (!resp.ok) { pqShowErr(data.error || `HTTP ${resp.status}`); return; }
+    pqData = data;
+    pqClearStatus();
+    pqRenderResults(data);
+  } catch(e) { pqShowErr('Query failed: ' + e.message); }
+}
+
+function pqRenderResults(data) {
+  const pts = data.points;
+  if (pts.length === 0) { pqShowStatus(`No data for "${data.signal}" in range`); return; }
+  const hasTopicCols = pts[0].site_id !== undefined || pts[0].unit_id !== undefined;
+
+  const vals = pts.map(p => p.value);
+  const mn = Math.min(...vals), mx = Math.max(...vals);
+  const avg = (vals.reduce((a,b)=>a+b,0)/vals.length).toPrecision(5);
+  document.getElementById('pqs-signal').textContent = data.signal;
+  document.getElementById('pqs-count').textContent  = pts.length;
+  document.getElementById('pqs-min').textContent    = Number.isInteger(mn)?mn:mn.toPrecision(5);
+  document.getElementById('pqs-max').textContent    = Number.isInteger(mx)?mx:mx.toPrecision(5);
+  document.getElementById('pqs-avg').textContent    = avg;
+  document.getElementById('pq-summary').style.display = 'flex';
+
+  const MAX = 200;
+  const shown = pts.slice(0, MAX);
+  document.getElementById('pq-table-note').textContent =
+    pts.length > MAX ? `Showing ${MAX} of ${pts.length}` : `${pts.length} points`;
+  document.getElementById('pq-thead').innerHTML = hasTopicCols
+    ? '<tr><th>Timestamp</th><th>Value</th><th>Topic</th></tr>'
+    : '<tr><th>Timestamp</th><th>Value</th></tr>';
+  const tbody = document.getElementById('pq-tbody');
+  tbody.innerHTML = '';
+  for (const p of shown) {
+    const tr = document.createElement('tr');
+    const ts = new Date(p.ts).toLocaleString();
+    if (hasTopicCols) {
+      const topic = pqMqttTopic(p, data.signal);
+      tr.innerHTML = `<td>${ts}</td><td>${p.value}</td><td class="qtopic-cell" title="${topic}">${topic}</td>`;
+    } else {
+      tr.innerHTML = `<td>${ts}</td><td>${p.value}</td>`;
+    }
+    tbody.appendChild(tr);
+  }
+  document.getElementById('pq-results').style.display  = 'block';
+  document.getElementById('pq-btn-csv').disabled  = false;
+  document.getElementById('pq-btn-mqtt').disabled = !hasTopicCols;
+}
+
+function pqExportCsv() {
+  if (!pqData) return;
+  const d = pqData;
+  const hasTopicCols = d.points.length > 0 && (d.points[0].site_id !== undefined || d.points[0].unit_id !== undefined);
+  const csv = hasTopicCols
+    ? 'ts,value,topic\n' + d.points.map(p=>`"${p.ts}",${p.value},"${pqMqttTopic(p,d.signal)}"`).join('\n')
+    : 'ts,value\n' + d.points.map(p=>`"${p.ts}",${p.value}`).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = d.signal.replace(/[^a-zA-Z0-9_]/g,'_') + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+function pqExportJson() {
+  if (!pqData) return;
+  const d = pqData;
+  const msgs = d.points.map(p => ({ topic: pqMqttTopic(p, d.signal), payload: { ts: p.ts, value: p.value } }));
+  const a = document.createElement('a');
+  a.href = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(JSON.stringify(msgs, null, 2));
+  a.download = 'mqtt_' + d.signal.replace(/[^a-zA-Z0-9_]/g,'_') + '.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+function pqShowStatus(msg) {
+  const el = document.getElementById('pq-status');
+  el.textContent = msg; el.style.display = 'block';
+  document.getElementById('pq-error').style.display = 'none';
+}
+function pqClearStatus() { document.getElementById('pq-status').style.display = 'none'; }
+function pqShowErr(msg) {
+  const el = document.getElementById('pq-error');
+  el.textContent = msg; el.style.display = 'block';
+  document.getElementById('pq-status').style.display = 'none';
+}
 </script>
 </body>
 </html>

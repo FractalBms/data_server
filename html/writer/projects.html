@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Writer Projects</title>
+<style>
+  :root {
+    --bg:#0d1117; --surface:#161b22; --border:#30363d;
+    --text:#c9d1d9; --muted:#8b949e; --accent:#58a6ff;
+    --green:#3fb950; --yellow:#d29922; --red:#f85149;
+    --orange:#e3b341; --purple:#bc8cff; --code-bg:#21262d;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text);
+         font-family:'Segoe UI',system-ui,sans-serif; padding:14px; }
+
+  .nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .nav a { color:var(--muted); text-decoration:none; font-size:.82rem;
+           padding:3px 8px; border:1px solid var(--border); border-radius:4px; }
+  .nav a:hover { color:var(--accent); border-color:var(--accent); }
+  .nav a.here  { color:var(--accent); border-color:var(--accent); background:#0c2d6b22; }
+
+  h1 { color:var(--accent); font-size:1.2rem; margin-bottom:3px; }
+  .subtitle { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
+  h2 { color:var(--orange); font-size:.9rem; margin:24px 0 10px;
+       padding-bottom:4px; border-bottom:1px solid var(--border); }
+
+  .card-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:6px;
+          padding:14px 16px; text-decoration:none; display:block;
+          transition:border-color .15s; }
+  .card:hover { border-color:var(--accent); }
+  .card-title { color:var(--accent); font-size:.95rem; font-weight:600; margin-bottom:4px; }
+  .card-desc  { color:var(--muted); font-size:.8rem; line-height:1.4; }
+  .card-tag   { display:inline-block; margin-top:8px; font-size:.7rem;
+                padding:1px 6px; border-radius:3px; border:1px solid var(--border);
+                color:var(--muted); }
+  .tag-live   { border-color:var(--green); color:var(--green); }
+  .tag-tool   { border-color:var(--purple); color:var(--purple); }
+  .tag-demo   { border-color:var(--yellow); color:var(--yellow); }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="../projects.html">← All Projects</a>
+  <a href="projects.html" class="here">Writer Projects</a>
+</div>
+
+<h1>Writer Projects</h1>
+<p class="subtitle">EMS ingest, parquet writer, MQTT tools — served from phil-dev :8080</p>
+
+<h2>Live Tools</h2>
+<div class="card-grid">
+
+  <a class="card" href="evelyn_docker_34.html">
+    <div class="card-title">Evelyn .34 Live</div>
+    <div class="card-desc">Evelyn EMS demo on phil-256g (.34) — Docker broker + parquet writer, bridge config, storage stats, compactor countdown.</div>
+    <span class="card-tag tag-live">live</span>
+    <span class="card-tag">bridge_api :8772</span>
+  </a>
+
+  <a class="card" href="mqtt_viewer.html">
+    <div class="card-title">MQTT Viewer</div>
+    <div class="card-desc">Live MQTT subscriber — connect to any broker, browse topics, view payloads. Includes Parquet / Replay tab for querying parquet files.</div>
+    <span class="card-tag tag-live">live</span>
+    <span class="card-tag tag-tool">tool</span>
+  </a>
+
+  <a class="card" href="parquet_viewer.html">
+    <div class="card-title">Parquet Viewer</div>
+    <div class="card-desc">Query EMS parquet files via bridge_api DuckDB. Returns all readings per point_name with MQTT topic reconstruction, JSON export, and data: URI downloads.</div>
+    <span class="card-tag tag-live">live</span>
+    <span class="card-tag tag-tool">tool</span>
+  </a>
+
+  <a class="card" href="ems_simulator_control.html">
+    <div class="card-title">EMS Simulator Control</div>
+    <div class="card-desc">WebSocket control UI for ems_site_simulator — set mode, contactor, faults, noise, and rate per unit.</div>
+    <span class="card-tag tag-live">live</span>
+  </a>
+
+</div>
+
+<h2>Analysis &amp; Reports</h2>
+<div class="card-grid">
+
+  <a class="card" href="evelyn_live_compare.html">
+    <div class="card-title">Evelyn Live Compare</div>
+    <div class="card-desc">Side-by-side baseline vs filtered InfluxDB ingest — measures Filter A+B savings (~27% fewer rows).</div>
+    <span class="card-tag tag-demo">demo</span>
+  </a>
+
+  <a class="card" href="evelyn_cost_analysis.html">
+    <div class="card-title">Evelyn Cost Analysis</div>
+    <div class="card-desc">Static cost reduction analysis for Evelyn EMS fleet — Filter A+B, moderate, and aggressive scenarios.</div>
+    <span class="card-tag tag-demo">demo</span>
+  </a>
+
+  <a class="card" href="demo_compare.html">
+    <div class="card-title">Demo Compare</div>
+    <div class="card-desc">InfluxDB vs DuckDB/parquet query comparison.</div>
+    <span class="card-tag tag-demo">demo</span>
+  </a>
+
+  <a class="card" href="stress_report_34.html">
+    <div class="card-title">Stress Report .34</div>
+    <div class="card-desc">Stress test results from phil-256g torture run.</div>
+    <span class="card-tag">report</span>
+  </a>
+
+  <a class="card" href="mqtt_topic_formats.html">
+    <div class="card-title">MQTT Topic Formats</div>
+    <div class="card-desc">Longbow vs Evelyn MQTT topic formats — Telegraf topic_parsing pipeline, parquet column mapping, and schema alignment gaps.</div>
+    <span class="card-tag">reference</span>
+  </a>
+
+</div>
+
+</body>
+</html>
