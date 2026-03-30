@@ -27,3 +27,7 @@ aws/data_store/minio-data/
 *.swp
 *.swo
 .DS_Store
+
+# Debian packages — downloaded binaries, never commit
+*.deb
+docker/torture/flashmq-repo.gpg

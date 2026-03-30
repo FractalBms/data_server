@@ -150,7 +150,7 @@
   <code>source/parquet_writer_cpp/writer.cpp</code> &nbsp;·&nbsp;
   Branch: <code>03202026_run_with_real_data</code> &nbsp;·&nbsp;
   Audience: BMS Team Members &nbsp;·&nbsp;
-  Updated: 2026-03-23
+  Updated: 2026-03-29
 </div>
 
 <div class="nav">
@@ -164,10 +164,14 @@
   <a href="#performance">Performance</a>
   <a href="#deployment">Deployment</a>
   <a href="#internals">Internals</a>
+  <a href="#compactor">Compactor</a>
   <a href="#ext-ws">Ext: WS/JSON</a>
   <a href="#ext-shm-output">Ext: SHM Buffer</a>
   <a href="#shm-takeover">SHM Takeover</a>
   <a href="#next">Roadmap</a>
+  <a href="#wal-detail">WAL Detail</a>
+  <a href="#flush-dedup">flush_dedup TODO</a>
+  <a href="mqtt_topic_formats.html">MQTT Topic Formats ↗</a>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════ -->
@@ -308,6 +312,12 @@ EMS Devices / BMS Publishers
     </div>
   </div>
 
+  <p style="font-size:0.82rem;color:var(--muted);margin:10px 0 6px">
+    The <code>real_writer</code> adds a fifth thread — the <strong>Compactor</strong> —
+    described fully in §11. It operates entirely on the filesystem and shares no state
+    with the four threads above.
+  </p>
+
   <h3>Synchronisation summary</h3>
   <table>
     <thead><tr><th>Between</th><th>Mechanism</th><th>Contention</th></tr></thead>
@@ -344,6 +354,10 @@ EMS Devices / BMS Publishers
     string follows a <em>key=value</em> segment format:
   </p>
   <pre>batteries/site=0/rack=1/module=2/cell=3/voltage</pre>
+  <p style="font-size:0.82rem">
+    For Longbow / Evelyn EMS topic structures see
+    <a href="mqtt_topic_formats.html" style="color:var(--accent)">mqtt_topic_formats.html</a>.
+  </p>
   <p>
     <code>parse_topic()</code> walks the string with a single pointer pass (no heap allocation,
     no regex), extracting the <strong>source type</strong> (<code>batteries</code>),
@@ -372,6 +386,20 @@ EMS Devices / BMS Publishers
     tree the rows will land (source type + site + date). Memory usage is bounded by
     <code>max_total_buffer_rows</code> (default 2M rows).
   </p>
+  <p>
+    Each <code>Row</code> carries three typed maps: <code>ints</code> (int64 — topic KV fields,
+    project_id), <code>floats</code> (double — sensor values, timestamps), and
+    <code>strings</code> (string — <code>mqtt_topic</code>, <code>site_id</code>, and any
+    topic segments configured as string columns). This three-map design lets the Arrow schema
+    be derived dynamically from the first row of each partition without any schema pre-declaration.
+  </p>
+  <p>
+    <strong>value_i / value_f split:</strong> when a partition accumulates both integer and
+    float readings under the column name <code>"value"</code>, Arrow's type system requires
+    they be split. The flush thread detects this and renames: <code>value</code> (int path)
+    → <code>value_i</code>, <code>value</code> (float path) → <code>value_f</code>. This is
+    transparent to the parse thread — it always writes to <code>"value"</code>.
+  </p>
 
   <h3>Step 5 — Parquet flush</h3>
   <p>
@@ -392,17 +420,29 @@ EMS Devices / BMS Publishers
   </p>
 
   <h3>Output schema</h3>
+  <p style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">
+    Schema is derived from the first row seen per partition. Columns vary by writer variant and config.
+    The real EMS writer (<code>real_writer.cpp</code>) schema is shown here.
+  </p>
   <table>
     <thead><tr><th>Column</th><th>Type</th><th>Source</th></tr></thead>
     <tbody>
-      <tr><td><code>rack_id</code></td><td>int64</td><td>topic kv <code>rack=N</code></td></tr>
-      <tr><td><code>module_id</code></td><td>int64</td><td>topic kv <code>module=N</code></td></tr>
-      <tr><td><code>cell_id</code></td><td>int64</td><td>topic kv <code>cell=N</code></td></tr>
-      <tr><td><code>field</code></td><td>string</td><td>last topic segment (<code>voltage</code>, <code>current</code>, …)</td></tr>
-      <tr><td><code>value</code></td><td>double</td><td>JSON payload value</td></tr>
-      <tr><td><code>ts</code></td><td>double</td><td>payload timestamp (Unix seconds)</td></tr>
+      <tr><td><code>mqtt_topic</code></td><td>string <span class="tag tag-green">NEW</span></td><td>Full original MQTT topic string — stored verbatim for replay. Dictionary-encoded; ~1–2 bytes/row overhead since unique topic count is bounded.</td></tr>
+      <tr><td><code>site_id</code></td><td>string</td><td>Config <code>site_id</code> — which physical site/unit this writer serves</td></tr>
+      <tr><td><code>point_name</code></td><td>string</td><td>Sensor variable name extracted from topic (e.g. <code>Batt1_MBMS_CellVoltage_max</code>)</td></tr>
+      <tr><td><code>dtype</code></td><td>string</td><td>Longbow dtype segment (<code>float</code>, <code>integer</code>, <code>boolean_integer</code>, <code>string</code>)</td></tr>
+      <tr><td><code>value</code> / <code>value_f</code></td><td>double</td><td>JSON payload value (float path). Renamed to <code>value_f</code> when both int and float readings share the same partition.</td></tr>
+      <tr><td><code>value_i</code></td><td>double</td><td>JSON payload value (int path) — only present when <code>value_f</code> split is active.</td></tr>
+      <tr><td><code>ts</code></td><td>double</td><td>Payload timestamp parsed from ISO-8601 <code>"ts"</code> field (Unix seconds, fractional)</td></tr>
+      <tr><td><em>KV int cols</em></td><td>int64</td><td>Topic key=value pairs mapped per config (e.g. <code>rack_id</code>, <code>module_id</code>, <code>cell_id</code>). Config-driven via <code>topic_kv_map</code>.</td></tr>
     </tbody>
   </table>
+  <div class="alert alert-info" style="margin-top:10px">
+    <strong>Full MQTT replay:</strong> with <code>mqtt_topic</code> + <code>ts</code> + <code>value_f</code>/<code>value_i</code>,
+    every original MQTT message can be reconstructed exactly:
+    <code>topic = row.mqtt_topic</code>, <code>payload = {"ts": iso(row.ts), "value": row.value_f}</code>.
+    The parquet_viewer uses this to replay data directly to an MQTT broker.
+  </div>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════ -->
@@ -498,7 +538,14 @@ health:
   port: 8771                                 # ★ must be unique per instance
 
 wal:
-  enabled: false                             # write-ahead log (crash recovery)
+  enabled: true                              # write-ahead log — ON by default in real_writer
+  path:    ""                                # default: {base_path}/.wal/
+
+compact:
+  enabled:          false                    # background file compactor (see §11)
+  interval_seconds: 600                      # how often to scan (default: 10 min)
+  min_files:        3                        # min files in a dir to trigger
+  min_age_seconds:  0                        # 0 = 2 × flush_interval_seconds
 
 guard:
   min_free_gb: 1.0                           # skip flush if disk nearly full</pre>
@@ -632,7 +679,16 @@ guard:
       </tr>
       <tr>
         <td><strong>Write-ahead log (WAL)</strong></td>
-        <td>Optional. Writes rows to an Arrow IPC file before each Parquet flush. On restart after a crash, replays any surviving WAL files before accepting live data. Guarantees no data loss across writer crashes. Currently disabled in the torture test (NVMe is fast enough that flush timing is the bottleneck, not crash recovery).</td>
+        <td>
+          Before each Parquet flush, writes all buffered rows to an Arrow IPC file
+          (<code>{base_path}/.wal/{source}_{pval}_{ts}.wal.arrow</code>). On successful
+          Parquet write the WAL file is deleted. On startup, any surviving WAL files are
+          replayed before live data is accepted — guaranteeing no data loss across writer
+          crashes. WAL write time is reported separately as <code>last_wal_ms</code> in
+          <code>/health</code>; replay row count as <code>wal_replay_rows</code>.<br>
+          <strong>Default: ON</strong> in <code>real_writer</code> (<code>wal_enabled: true</code>).
+          Disabled in the stress-test <code>writer</code> (NVMe flush is the bottleneck there).
+        </td>
         <td><code>wal.enabled</code></td>
       </tr>
       <tr>
@@ -758,17 +814,19 @@ make -C source/parquet_writer_cpp parquet_writer
   <h3>Health endpoint</h3>
   <pre>$ curl http://192.168.86.48:8771/health
 {
-  "msgs_received":    1217551,
-  "buffer_rows":      42318,
-  "overflow_drops":   0,
-  "ring_used":        12,
-  "ring_cap":         262144,
-  "ring_drops":       0,
-  "flush_count":      14,
-  "flush_avg_ms":     68,
-  "flush_max_ms":     151,
-  "topic_truncations": 0,
-  "payload_truncations": 0
+  "msgs_received":      1217551,
+  "buffer_rows":        42318,
+  "overflow_drops":     0,
+  "ring_used":          12,
+  "ring_cap":           262144,
+  "ring_drops":         0,
+  "flush_count":        14,
+  "flush_avg_ms":       68,
+  "flush_max_ms":       151,
+  "last_wal_ms":        12,        ← WAL write portion of last flush
+  "wal_replay_rows":    0,         ← rows replayed from WAL on startup
+  "topic_truncations":  0,
+  "payload_truncations":0
 }</pre>
 </div>
 
@@ -832,15 +890,106 @@ make -C source/parquet_writer_cpp parquet_writer
   <h3>Parquet schema construction</h3>
   <p>
     The Parquet schema is built from the first row seen for each partition.
-    Columns are: one int64 per topic KV field, plus <code>field</code> (string),
-    <code>value</code> (double), <code>ts</code> (double). Arrow builders accumulate
-    rows in memory; at flush time the builders are finalised into an Arrow Table and
-    written via <code>parquet::arrow::WriteTable()</code>.
+    Each <code>Row</code> carries three typed maps — <code>ints</code> (int64),
+    <code>floats</code> (double), <code>strings</code> (string) — and the flush thread
+    iterates all three to construct Arrow builders dynamically. <code>mqtt_topic</code>
+    lands in <code>strings</code> and is written as a Parquet dictionary-encoded string
+    column (Arrow <code>DictionaryArray&lt;int32, StringArray&gt;</code>), making the
+    per-row overhead ~1–2 bytes despite topic strings being 30–136 characters long.
+  </p>
+  <p>
+    At flush time, if any partition has accumulated both integer and floating-point values
+    under the column name <code>"value"</code>, the flush thread renames them
+    <code>value_i</code> and <code>value_f</code> before building the Arrow schema, avoiding
+    a type mismatch. This happens automatically and is invisible to the parse thread.
+  </p>
+  <p>
+    Arrow builders accumulate rows in memory; at flush time the builders are finalised into
+    an Arrow Table and written via <code>parquet::arrow::WriteTable()</code>. The WAL uses
+    the same Arrow IPC format via <code>arrow::ipc::MakeFileWriter()</code> — the same
+    schema, so WAL replay can feed directly into the same flush function.
   </p>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════ -->
-<h2 id="ext-ws">11 · Extension: WS/JSON Stream Input <span class="tag tag-yellow">Under Review</span></h2>
+<h2 id="compactor">11 · Compactor <span class="tag tag-blue">real_writer only</span></h2>
+
+<div class="section">
+  <p>
+    The compactor is a fifth background thread in <code>real_writer</code> that <strong>fully
+    re-parquets</strong> many small flush files into one larger file per directory. It reads each
+    source file into an Arrow Table in RAM, concatenates them, and calls
+    <code>parquet::arrow::WriteTable()</code> to write a brand new Parquet file — not a byte-level
+    merge. It is entirely filesystem-based and shares no state with the four core threads.
+  </p>
+  <p>
+    Because the output is re-encoded from scratch, the compacted file gets: fresh compression using
+    the current config codec (useful if you switch codecs), fresh column statistics and row-group
+    min/max (makes DuckDB predicate pushdown more accurate), unified schema across source files, and
+    a single large row group instead of many small ones.
+  </p>
+
+  <h3>Why compaction is needed</h3>
+  <p>
+    At a 60-second flush interval with <code>topic_partition_segments: 2</code> (one file per unit per
+    flush), a 46-unit fleet produces 46 files every minute — 2,760 files per hour, 66,240 per day.
+    DuckDB can scan many small files, but opening and closing thousands of file handles has overhead.
+    Compacting N small files into one per directory per day removes this overhead without changing
+    the data model.
+  </p>
+
+  <h3>Safety rules</h3>
+  <table>
+    <thead><tr><th>Rule</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr><td>Age gate</td><td>Only touches files older than <code>compact_min_age_seconds</code> (default: 2 × <code>flush_interval_seconds</code>) — never races with the currently-writing flush file.</td></tr>
+      <tr><td>Atomic write</td><td>Writes to <code>compact_{ts}.parquet.tmp</code>, then <code>rename()</code> to <code>compact_{ts}.parquet</code> before deleting source files. Crash at any point leaves data intact.</td></tr>
+      <tr><td>Read-failure bail</td><td>If any source file fails to read, the whole directory is skipped — no partial compactions.</td></tr>
+      <tr><td>Schema unification</td><td>Uses <code>arrow::ConcatenateTablesOptions{.unify_schemas=true}</code> — safe to merge files from different flush intervals that may have slightly different column sets (e.g. a new unit type appeared mid-day).</td></tr>
+      <tr><td>Eligible files only</td><td>Only processes files whose names start with a digit (flush files: <code>YYYYMMDDTHHMMSSZ.parquet</code>) or <code>compact_</code> (previous compact output). Skips <code>*.tmp</code>, <code>current_state.parquet</code>, <code>hot.parquet</code>.</td></tr>
+      <tr><td>Re-compactable</td><td><code>compact_*.parquet</code> files are themselves eligible in the next cycle — each round naturally produces larger files without manual intervention.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Operation</h3>
+<div class="arch-box">compact_thread_fn() loop (every compact_interval_seconds):
+
+  1. Walk base_path recursively
+  2. Group eligible files (age > cutoff) by parent directory
+  3. For each directory with ≥ compact_min_files files:
+       a. read_parquet_table() each source file → Arrow Table in RAM  (full decode)
+       b. ConcatenateTables(unify_schemas=true) → one merged Arrow Table
+       c. write_parquet_table() → compact_{ts}.parquet.tmp           (full re-encode)
+          uses current cfg.compression; one row-group for the whole table
+       d. rename() → compact_{ts}.parquet
+       e. delete source files
+  4. Log: "N files → compact_{ts}.parquet (M rows)"</div>
+
+  <h3>Configuration</h3>
+  <pre>compact:
+  enabled:          true          # off by default — enable when file count grows large
+  interval_seconds: 600           # scan every 10 minutes
+  min_files:        3             # need at least 3 files in a dir to bother compacting
+  min_age_seconds:  0             # 0 = 2 × flush_interval_seconds (120s at default)</pre>
+
+  <div class="alert alert-warn">
+    <strong>No health metrics yet.</strong> The compactor thread logs to stdout but does not
+    currently expose counters in <code>/health</code>. Adding <code>compact_cycles</code>,
+    <code>compact_files_consumed</code>, and <code>compact_rows_merged</code> atomics would
+    let the monitoring dashboard show compaction activity.
+  </div>
+
+  <div class="alert alert-info">
+    <strong>DuckDB tip:</strong> after compaction, <code>GLOB</code> patterns like
+    <code>read_parquet('/data/parquet-evelyn/a/unit/02281660/2026/03/23/*.parquet')</code>
+    return 1–2 files instead of 60, dramatically reducing query startup time for single-day
+    single-unit queries.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<h2 id="ext-ws">12 · Extension: WS/JSON Stream Input <span class="tag tag-yellow">Under Review</span></h2>
+
 
 <div class="section">
   <p>
@@ -901,7 +1050,7 @@ EMS Devices / BMS Publishers
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════ -->
-<h2 id="ext-shm-output">12 · Extension: SHM Output File Buffer <span class="tag tag-yellow">Under Review</span></h2>
+<h2 id="ext-shm-output">13 · Extension: SHM Output File Buffer <span class="tag tag-yellow">Under Review</span></h2>
 
 <div class="section">
   <p>
@@ -950,7 +1099,7 @@ EMS Devices / BMS Publishers
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════ -->
-<h2 id="shm-takeover">13 · SHM Ownership Takeover on Crash</h2>
+<h2 id="shm-takeover">14 · SHM Ownership Takeover on Crash</h2>
 
 <div class="section">
   <p>
@@ -1003,7 +1152,7 @@ EMS Devices / BMS Publishers
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════ -->
-<h2 id="next">14 · Roadmap</h2>
+<h2 id="next">15 · Roadmap</h2>
 
 <div class="section">
   <table>
@@ -1050,6 +1199,26 @@ EMS Devices / BMS Publishers
         <td class="warn">Pending</td>
       </tr>
       <tr>
+        <td><strong>flush_dedup — float COV dedup</strong></td>
+        <td>
+          Change-on-value deduplication for float signals during flush. Before writing a row to
+          Parquet, compare its value against the last-flushed value for that sensor. If the change
+          is within a configured deadband, skip the row — accumulating a <code>dedup_drops</code>
+          counter and incrementing <code>sample_count</code> on the surviving row instead.
+          See <a href="#flush-dedup" style="color:var(--accent)">flush_dedup design</a> below.
+        </td>
+        <td class="warn">TODO — design complete, not implemented</td>
+      </tr>
+      <tr>
+        <td><strong>Compactor health metrics</strong></td>
+        <td>
+          Add <code>compact_cycles</code>, <code>compact_files_consumed</code>, and
+          <code>compact_rows_merged</code> atomics so the monitoring dashboard can show
+          compaction activity without tailing logs.
+        </td>
+        <td class="warn">Pending</td>
+      </tr>
+      <tr>
         <td><strong>Push agent integration</strong></td>
         <td>
           The push agent (<code>source/rsync_push/push_agent.py</code>) rsyncs the parquet
@@ -1062,10 +1231,479 @@ EMS Devices / BMS Publishers
   </table>
 </div>
 
+<!-- ════════════════════════════════════════════════════════════════ -->
+<h2 id="wal-detail">16 · WAL — Detailed Design</h2>
+
+<div class="section">
+  <p>
+    The write-ahead log guarantees that no rows buffered in RAM are permanently lost across a
+    writer crash. It uses Arrow IPC format — the same in-memory column layout as Arrow Tables,
+    written to a file — so WAL files are compact, schema-preserving, and readable without a
+    full Parquet decode.
+  </p>
+
+  <h3>File layout</h3>
+  <pre>{base_path}/.wal/
+├── unit_02281660_20260329T142001Z.wal.arrow     ← one file per partition per flush cycle
+├── unit_02281661_20260329T142001Z.wal.arrow
+└── unit_02281660_20260329T142001Z.wal.arrow.tmp  ← only exists during write; rename() makes it atomic</pre>
+  <p style="font-size:0.82rem;color:var(--muted)">
+    Naming: <code>{source_type}_{partition_value}_{timestamp}.wal.arrow</code>.
+    The <code>.tmp</code> suffix is used during write; only <code>.wal.arrow</code> files are
+    scanned at replay time so a crash mid-write leaves no partial file in the scan path.
+  </p>
+
+  <h3>Per-flush sequence (normal operation)</h3>
+<div class="arch-box">For each partition in to_flush:
+
+  1. write_wal_ipc(part.rows) → {partition}.wal.arrow.tmp   (Arrow IPC, all columns)
+  2. rename(.tmp → .wal.arrow)                              (atomic — visible or not)
+  3. flush_partition(part.rows) → {date}/{ts}.parquet       (with up to 3 retries)
+     ├── success → fs::remove(.wal.arrow)                  (WAL no longer needed)
+     └── permanent failure → WAL file RETAINED             (logged: "WAL retained for recovery")</div>
+
+  <p>
+    The WAL file for a given partition exists on disk for only the duration of the Parquet write
+    — typically 10–100 ms. At any point in time the <code>.wal/</code> directory should be empty
+    unless a crash or permanent I/O failure has occurred.
+  </p>
+
+  <h3>Crash scenarios</h3>
+  <table>
+    <thead><tr><th>Crash point</th><th>WAL state</th><th>Parquet state</th><th>On restart</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>During <code>write_wal_ipc</code> (step 1)</td>
+        <td><code>.tmp</code> file only — not scanned</td>
+        <td>Not started</td>
+        <td>No WAL found; rows in that buffer interval are lost (same as no-WAL behaviour)</td>
+      </tr>
+      <tr>
+        <td>Between rename and <code>flush_partition</code> (step 2→3)</td>
+        <td><code>.wal.arrow</code> present and complete</td>
+        <td>Not started</td>
+        <td class="ok">WAL replayed → rows recovered in full</td>
+      </tr>
+      <tr>
+        <td>During <code>flush_partition</code> (step 3, mid-write)</td>
+        <td><code>.wal.arrow</code> present</td>
+        <td>Partial <code>.parquet</code> on disk (invalid)</td>
+        <td class="ok">WAL replayed → rows recovered. Partial Parquet is ignored by DuckDB (invalid footer). Compactor skips it (extension ≠ <code>.parquet</code> after truncation — but see note).</td>
+      </tr>
+      <tr>
+        <td>After Parquet written, before <code>fs::remove(wal)</code></td>
+        <td><code>.wal.arrow</code> present</td>
+        <td>Complete valid Parquet</td>
+        <td class="warn">WAL replayed → <strong>duplicate rows</strong> written to a new Parquet file alongside the original. Compactor will merge and deduplicate via schema unification — but there is currently no row-level dedup in the compactor. The duplicates are benign for most queries but inflate row count.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-warn">
+    <strong>Duplicate on last crash point:</strong> the window between Parquet success and WAL
+    delete is ~1 µs (a single <code>fs::remove()</code> call). In practice this is extremely
+    unlikely but not impossible. A future fix is to write a small <em>commit marker</em> file
+    alongside the Parquet output and check for it during WAL replay before re-flushing.
+  </div>
+
+  <h3>Startup replay sequence</h3>
+<div class="arch-box">main() startup order:
+
+  1. validate_config()
+  2. replay_wal_files()                ← BEFORE mosquitto_connect — no live data yet
+     ├── scan {wal_path}/*.wal.arrow
+     ├── for each file:
+     │     a. wal_replay_file() → vector&lt;Row&gt;   (Arrow IPC decode)
+     │     b. group rows by partition_field (site_id / unit_id)
+     │     c. flush_partition() → {date}/{ts}.parquet  (IMMEDIATE — not held in buffer)
+     │     d. success → fs::remove(.wal.arrow)
+     │     e. failure → retain WAL, log warning
+     └── log: "wal_replay_rows" counter (visible in /health after start)
+  3. mosquitto_lib_init() + mosquitto_connect()
+  4. start flush_thread, health_thread, compact_thread
+  5. mosquitto_loop_forever() — live data now accepted</div>
+
+  <h3>The recombine problem — replayed rows as isolated files</h3>
+  <p>
+    The current design flushes replayed rows <strong>immediately</strong> to new Parquet files
+    (step 2c above). This means:
+  </p>
+  <ul style="margin-bottom:12px">
+    <li>If the writer crashed 5 s into a 60 s flush interval, the WAL holds 5 s of data.</li>
+    <li>On restart those 5 s are written as a standalone Parquet file with a new timestamp.</li>
+    <li>The next 60 s of live data lands in a <em>separate</em> flush file.</li>
+    <li>The compactor will eventually merge both into one file — but only after
+        <code>compact_interval_seconds</code> (default 10 min) have elapsed.</li>
+  </ul>
+  <p>
+    For analytical queries this is fine — DuckDB scans both files. For storage efficiency it
+    creates a small orphan file that inflates the file count until the compactor runs.
+  </p>
+
+  <h3>TODO: 5-second recombine flush after restart</h3>
+  <p>
+    Instead of immediately flushing replayed rows to disk, inject them back into
+    <code>g_buffers</code> and trigger a short initial flush interval so they are combined
+    with the first batch of live data into a single Parquet file.
+  </p>
+<div class="arch-box">Proposed restart sequence with recombine:
+
+  replay_wal_files() — modified:
+    ├── decode each .wal.arrow → vector&lt;Row&gt;
+    ├── insert rows directly into g_buffers  (same as live ingest)
+    └── do NOT flush yet
+
+  mosquitto_connect() — live data starts flowing into g_buffers
+
+  flush_thread — first wake uses short interval (e.g. 5 s):
+    ├── to_flush = exchange(g_buffers, {})   ← contains replayed + first 5 s of live rows
+    ├── do_flush() → single Parquet file per partition (replayed + live, combined)
+    └── subsequent wakes revert to flush_interval_seconds (60 s)</div>
+
+  <h4>Implementation sketch</h4>
+  <pre>// In replay_wal_files() — new path
+for (auto& r : rows) {
+    auto& part = g_buffers[key];
+    part.rows.push_back(std::move(r));
+    ++g_total_buffered;
+}
+// Signal flush thread to wake after short delay
+g_initial_flush_seconds = 5;   // new atomic, read by flush_thread_fn
+
+// In flush_thread_fn()
+int interval = g_initial_flush_seconds.exchange(0);
+if (interval == 0) interval = g_cfg->flush_interval_seconds;
+g_flush_cv.wait_for(lock, std::chrono::seconds(interval));</pre>
+
+  <h4>Trade-offs</h4>
+  <table>
+    <thead><tr><th></th><th>Current (immediate flush)</th><th>Proposed (5 s recombine)</th></tr></thead>
+    <tbody>
+      <tr><td>Replay latency</td><td class="ok">Rows on disk before MQTT connects</td><td class="warn">Rows in RAM for 5 s after MQTT connects</td></tr>
+      <tr><td>File count</td><td class="warn">+1 orphan file per partition per crash</td><td class="ok">Replayed rows merged into first live flush file</td></tr>
+      <tr><td>Crash during 5 s window</td><td class="ok">WAL already consumed — data safe</td><td class="warn">WAL consumed but buffer not flushed — rows lost again (need new WAL write at buffer insert time)</td></tr>
+      <tr><td>Complexity</td><td class="ok">Simple — replay is self-contained</td><td class="warn">Requires coordinating replay path with flush_thread startup</td></tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-warn">
+    <strong>Key risk of recombine approach:</strong> once WAL rows are moved into
+    <code>g_buffers</code> and the <code>.wal.arrow</code> file is deleted, a second crash
+    within the 5-second window loses those rows permanently (they are in RAM with no WAL
+    backing). The safe fix is: write a new WAL for the recombined buffer <em>before</em>
+    deleting the original, or simply leave the original WAL file until the first flush succeeds.
+    The simplest implementation is to leave the WAL file in place and only delete it after the
+    combined flush completes — the existing flush-then-delete path already handles this correctly.
+  </div>
+
+  <h3>WAL size and timing</h3>
+  <table>
+    <thead><tr><th>Scenario</th><th>WAL file size</th><th>Replay time</th></tr></thead>
+    <tbody>
+      <tr><td>60 s flush, 46 units, 81k msg/s</td><td>~4–8 MB per partition (Arrow IPC, uncompressed)</td><td>&lt;1 s for all partitions</td></tr>
+      <tr><td>5 s flush (short interval)</td><td>~300–600 KB per partition</td><td>&lt;100 ms</td></tr>
+      <tr><td>Crash at 1 s into 60 s interval</td><td>~80 KB (1 s × 81k/46 ≈ 1760 rows)</td><td>Negligible</td></tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-info">
+    <strong>Why Arrow IPC and not Parquet for WAL?</strong> Writing WAL as Arrow IPC avoids the
+    Parquet encoding overhead (dictionary building, RLE, compression) on the hot flush path.
+    Arrow IPC is a direct memory dump of the column buffers — typically 5–10× faster to write
+    than Parquet for the same data. The WAL is a transient safety net, not a query target, so
+    its larger on-disk size is acceptable.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<h2 id="flush-dedup">17 · TODO: flush_dedup — Float COV Deduplication</h2>
+
+<div class="section">
+  <p>
+    Telegraf's <code>dedup</code> processor already handles integer and boolean signals (Filter B —
+    ~23% row reduction). Float signals are excluded because floating-point equality comparison is
+    unreliable. <strong>flush_dedup</strong> would bring the same change-on-value logic into the
+    writer itself, applied at flush time using a configurable deadband threshold, and would be the
+    primary mechanism for the "Moderate" filter scenario (~40% total reduction).
+  </p>
+
+  <h3>Foundation already in the code</h3>
+  <table>
+    <thead><tr><th>Existing piece</th><th>Role in flush_dedup</th></tr></thead>
+    <tbody>
+      <tr><td><code>g_current_state</code> — <code>map&lt;SensorKey, Row&gt;</code></td><td>Tracks the last row seen per sensor. Already updated on every ingest when <code>current_state_path</code> is set. flush_dedup reads this to get the last <em>flushed</em> value for comparison.</td></tr>
+      <tr><td><code>row.ints["sample_count"] = 1</code></td><td>Placeholder set on every row. flush_dedup would accumulate skipped counts here so the surviving row records how many samples it represents.</td></tr>
+      <tr><td><code>current_state_path</code> config</td><td>Persists <code>g_current_state</code> to disk across restarts so the deadband comparison survives a writer restart without a cold-start burst.</td></tr>
+      <tr><td><code>g_overflow_drops</code> atomic pattern</td><td>Template for the new <code>g_dedup_drops</code> counter — same atomic + health endpoint exposure pattern.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Where to apply dedup</h3>
+  <p>
+    Dedup should run in the <strong>flush thread</strong>, not in the message callback. Doing it
+    in the callback would require holding <code>g_mutex</code> longer (for the
+    <code>g_current_state</code> lookup) and would make the hot path conditional on config.
+    In the flush thread the data is already off the hot path — the buffer has been swapped out
+    under the mutex and the flush thread owns it exclusively.
+  </p>
+  <p>
+    Concretely: after <code>std::exchange(g_buffers, {})</code> gives the flush thread its snapshot,
+    it iterates the rows per partition and filters them before building Arrow columns.
+    <code>g_current_state</code> is read from a snapshot taken at the same swap point (already done
+    for <code>hot.parquet</code> and <code>current_state.parquet</code>), so the comparison is
+    consistent with the buffer contents.
+  </p>
+
+  <h3>Why a single global threshold is insufficient</h3>
+  <p>
+    A single relative deadband (e.g. 0.1%) applied to all float signals fails in both
+    directions across the EMS signal space:
+  </p>
+  <table>
+    <thead><tr><th>Signal</th><th>Typical range</th><th>0.1% of range</th><th>Problem</th></tr></thead>
+    <tbody>
+      <tr><td><code>voltage</code></td><td>3.0–4.2 V</td><td>~3.6 mV</td><td class="ok">Reasonable — cell voltage drifts slowly at rest</td></tr>
+      <tr><td><code>temperature</code></td><td>15–55 °C</td><td>~0.04 °C</td><td class="warn">Too tight — sensor noise alone exceeds this; almost nothing is deduped</td></tr>
+      <tr><td><code>soc</code></td><td>0–100 %</td><td>0.1 %</td><td class="ok">Reasonable for state-of-charge</td></tr>
+      <tr><td><code>current</code></td><td>−500 to +500 A</td><td>~500 mA</td><td class="warn">Too tight during charge/discharge — 0.5 A noise is normal; over-stores. Also: near zero current (idle), relative % is meaningless (divide-by-near-zero)</td></tr>
+      <tr><td><code>power</code></td><td>−200 to +200 kW</td><td>~200 W</td><td class="warn">Similar to current — large absolute noise during operation</td></tr>
+      <tr><td><code>PCS_Grid_Frequency</code></td><td>49.9–50.1 Hz</td><td>~0.05 Hz</td><td class="err">Way too loose — frequency must be recorded at ±0.01 Hz resolution for grid compliance</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Per-point-name deadband lets each signal class carry its own threshold, expressed as either
+    a <strong>relative %</strong> (good for signals with stable baselines) or an
+    <strong>absolute value</strong> (good for near-zero-crossing signals and where physical units
+    dictate the resolution requirement). Specific signals can also be marked
+    <strong>disabled</strong> — always stored regardless of change.
+  </p>
+
+  <h3>Deadband comparison — with per-point lookup</h3>
+  <pre>enum class DeadbandMode { Relative, Absolute, Disabled };
+
+struct PointDeadband {
+    DeadbandMode mode  {DeadbandMode::Relative};
+    double       value {0.001};   // relative: fraction (0.001 = 0.1%)
+                                  // absolute: raw units (0.005 = 5 mV for voltage)
+};
+
+// In Config — built from YAML at startup
+std::unordered_map&lt;std::string, PointDeadband&gt; dedup_per_point;
+PointDeadband                                   dedup_default;   // fallback
+
+// Lookup — O(1) unordered_map, called once per row in flush thread
+const PointDeadband& get_deadband(const std::string& point_name) {
+    auto it = g_cfg-&gt;dedup_per_point.find(point_name);
+    return (it != g_cfg-&gt;dedup_per_point.end()) ? it-&gt;second : g_cfg-&gt;dedup_default;
+}
+
+bool within_deadband(double new_val, double last_val, const PointDeadband& db) {
+    if (db.mode == DeadbandMode::Disabled) return false;
+    double delta = std::abs(new_val - last_val);
+    if (db.mode == DeadbandMode::Absolute)
+        return delta &lt; db.value;
+    // Relative — guard against divide-by-near-zero
+    if (std::abs(last_val) &lt; 1e-9) return delta &lt; 1e-9;
+    return delta / std::abs(last_val) &lt; db.value;
+}</pre>
+  <p>
+    The <code>point_name</code> is already stored in <code>row.strings["point_name"]</code> for
+    every row produced by the real EMS writer, so the lookup key is always available at flush time
+    with no additional parsing.
+  </p>
+
+  <h3>sample_count accumulation</h3>
+  <p>
+    When a row is suppressed by dedup, its value is not lost — it is recorded as "seen but
+    unchanged". The <code>sample_count</code> on the <em>last surviving row</em> for that
+    sensor is incremented. At the end of the flush loop, any sensor whose last row was
+    suppressed all-flush needs its accumulated count written out as a final "sentinel" row
+    so <code>sample_count</code> is not silently dropped.
+  </p>
+<div class="arch-box">Per sensor, within one flush interval:
+
+  msg1  value=3.712  → kept   (first seen)  sample_count=1
+  msg2  value=3.713  → dedup  (Δ=0.027%)    sample_count on msg1 → 2
+  msg3  value=3.714  → dedup  (Δ=0.054%)    sample_count on msg1 → 3
+  msg4  value=3.850  → kept   (Δ=3.8% > db) sample_count=1
+  msg5  value=3.851  → dedup                 sample_count on msg4 → 2
+
+Flushed rows: msg1 (sample_count=3), msg4 (sample_count=2)
+Dedup drops this interval: 3</div>
+
+  <h3>Counting skipped duplicates</h3>
+  <table>
+    <thead><tr><th>Counter</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>g_dedup_drops</code></td><td><code>std::atomic&lt;uint64_t&gt;</code></td><td>Total rows suppressed since process start. Exposed in <code>/health</code> as <code>"dedup_drops"</code>. Monotonically increasing — use the delta between health polls to get a rate.</td></tr>
+      <tr><td><code>g_dedup_drops_last_flush</code></td><td><code>std::atomic&lt;uint64_t&gt;</code></td><td>Drops in the most recent flush cycle only. Exposed as <code>"dedup_drops_last_flush"</code>. Reset at the start of each flush. Gives an instantaneous dedup rate without client-side delta math.</td></tr>
+      <tr><td><code>row.ints["sample_count"]</code></td><td>int64 Parquet column</td><td>How many raw MQTT messages this row represents. 1 = no dedup. &gt;1 = N−1 duplicates were suppressed. Queryable from DuckDB: <code>SUM(sample_count)</code> recovers the original message count.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Configuration — global default + per-point overrides</h3>
+  <pre>dedup:
+  enabled:      false          # off by default
+  integer_enabled: false       # integers already handled by Telegraf Filter B
+
+  # Global fallback — applied to any point_name not listed in per_point
+  default:
+    mode:  relative            # relative | absolute | disabled
+    value: 0.001               # relative: 0.1% of last value
+
+  # Per-point-name overrides — point_name matches row.strings["point_name"]
+  # Supports glob-style prefix matching (e.g. "Batt1_MBMS_*") if implemented
+  per_point:
+    voltage:              {mode: absolute, value: 0.005}   # 5 mV — cell voltage
+    temperature:          {mode: absolute, value: 0.5}     # 0.5 °C — thermal sensor noise floor
+    soc:                  {mode: absolute, value: 0.1}     # 0.1 % SOC
+    current:              {mode: absolute, value: 1.0}     # 1 A — avoids near-zero relative issues
+    power:                {mode: absolute, value: 500.0}   # 500 W — large-scale power signal
+    PCS_Grid_Frequency:   {mode: disabled}                 # always store — grid compliance
+    PCS_Grid_Voltage:     {mode: absolute, value: 0.5}     # 0.5 V AC
+    fan_speed:            {mode: relative, value: 0.02}    # 2% — coarse actuator signal</pre>
+
+  <h3>Config loading sketch</h3>
+  <pre>// Parse dedup.per_point from YAML at startup
+if (auto pp = y["dedup"]["per_point"]) {
+    for (const auto& kv : pp) {
+        std::string name = kv.first.as&lt;std::string&gt;();
+        auto node = kv.second;
+        PointDeadband db;
+        std::string mode = node["mode"].as&lt;std::string&gt;("relative");
+        if      (mode == "absolute") db.mode = DeadbandMode::Absolute;
+        else if (mode == "disabled") db.mode = DeadbandMode::Disabled;
+        else                         db.mode = DeadbandMode::Relative;
+        if (node["value"])           db.value = node["value"].as&lt;double&gt;();
+        cfg.dedup_per_point[name] = db;
+    }
+}
+// Global default
+auto def_node = y["dedup"]["default"];
+cfg.dedup_default.value = def_node["value"].as&lt;double&gt;(0.001);
+std::string def_mode    = def_node["mode"].as&lt;std::string&gt;("relative");
+if (def_mode == "absolute") cfg.dedup_default.mode = DeadbandMode::Absolute;</pre>
+
+  <h3>Relative vs absolute deadband — worked examples</h3>
+
+  <h4>Relative deadband — <code>mode: relative, value: 0.001</code> (0.1%)</h4>
+  <p style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">
+    Suppress if <code>|new − last| / |last| &lt; 0.001</code>.
+    Good for signals with a stable non-zero baseline where proportional drift is meaningful.
+  </p>
+  <table>
+    <thead><tr><th>last</th><th>new</th><th>|Δ|</th><th>|Δ/last|</th><th>Result</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>3.712 V</td><td>3.713 V</td><td>1 mV</td><td>0.027%</td><td class="ok">SUPPRESS</td><td>Tiny drift, well within 0.1%</td></tr>
+      <tr><td>3.712 V</td><td>3.720 V</td><td>8 mV</td><td>0.22%</td><td class="err">KEEP</td><td>Exceeds 0.1% — meaningful change</td></tr>
+      <tr><td>3.712 V</td><td>3.850 V</td><td>138 mV</td><td>3.7%</td><td class="err">KEEP</td><td>Large step — always kept</td></tr>
+      <tr><td>0.0 A</td><td>0.001 A</td><td>1 mA</td><td>—</td><td class="warn">KEEP*</td><td>Near-zero guard: |last| &lt; 1e-9, so always keep</td></tr>
+      <tr><td>480.0 A</td><td>480.4 A</td><td>400 mA</td><td>0.083%</td><td class="ok">SUPPRESS</td><td>0.4 A noise on a 480 A signal — within 0.1%</td></tr>
+      <tr><td>480.0 A</td><td>482.0 A</td><td>2.0 A</td><td>0.42%</td><td class="err">KEEP</td><td>Exceeds 0.1% — real change</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:0.82rem;color:var(--muted);margin-top:6px">
+    * At 0 A the relative formula breaks down — near-zero guard forces KEEP to avoid suppressing a genuine
+    transition from idle to active.
+  </p>
+
+  <h4>Absolute deadband — <code>mode: absolute, value: 0.5</code> (0.5 °C)</h4>
+  <p style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">
+    Suppress if <code>|new − last| &lt; 0.5</code>.
+    Good for signals where the physical resolution (sensor noise, measurement granularity) defines
+    the meaningful change threshold regardless of the current value.
+  </p>
+  <table>
+    <thead><tr><th>last</th><th>new</th><th>|Δ|</th><th>Result</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>25.3 °C</td><td>25.6 °C</td><td>0.3 °C</td><td class="ok">SUPPRESS</td><td>Within sensor noise floor (0.5 °C)</td></tr>
+      <tr><td>25.3 °C</td><td>25.9 °C</td><td>0.6 °C</td><td class="err">KEEP</td><td>Exceeds 0.5 °C — real thermal change</td></tr>
+      <tr><td>45.0 °C</td><td>45.4 °C</td><td>0.4 °C</td><td class="ok">SUPPRESS</td><td>Still within 0.5 °C even at high temp — relative would give 0.4/45 = 0.9%, also suppressed but for different reason</td></tr>
+      <tr><td>0.1 °C</td><td>0.5 °C</td><td>0.4 °C</td><td class="ok">SUPPRESS</td><td>Near-zero is safe with absolute — no divide-by-zero risk</td></tr>
+      <tr><td>0.1 °C</td><td>0.7 °C</td><td>0.6 °C</td><td class="err">KEEP</td><td>Exceeds 0.5 °C absolute threshold</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Side-by-side: why mode matters for the same signal</h4>
+  <table>
+    <thead><tr><th>Signal</th><th>Values</th><th>Relative 0.1%</th><th>Absolute 0.5 °C</th><th>Best choice</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Temperature at rest (25 °C, sensor noise ±0.3 °C)</td>
+        <td>25.1 → 25.3 → 25.2 → 25.4</td>
+        <td class="warn">KEEP all (0.2 °C = 0.8% &gt; 0.1%)</td>
+        <td class="ok">SUPPRESS most (all within 0.5 °C)</td>
+        <td>Absolute 0.5 °C</td>
+      </tr>
+      <tr>
+        <td>Cell voltage charging (3.7 → 4.2 V ramp)</td>
+        <td>3.700 → 3.704 → 3.708 → 3.750</td>
+        <td class="ok">SUPPRESS 4 mV steps (0.1%), KEEP 50 mV jump</td>
+        <td class="warn">SUPPRESS all (all &lt; 0.5 °C — wrong units but illustrates: 50 mV &lt;&lt; 0.5)</td>
+        <td>Relative 0.1% or Absolute 5 mV</td>
+      </tr>
+      <tr>
+        <td>Grid frequency (50.0 Hz, must record ±0.01 Hz)</td>
+        <td>50.00 → 50.01 → 49.99 → 50.02</td>
+        <td class="err">SUPPRESS all (0.01 Hz = 0.02% &lt; 0.1%) — misses compliance events</td>
+        <td class="err">SUPPRESS all (0.02 Hz &lt; 0.5)</td>
+        <td>Disabled — always store</td>
+      </tr>
+      <tr>
+        <td>Pack current idle → charge (0 → 480 A)</td>
+        <td>0.00 → 0.05 → 0.10 → 480.0</td>
+        <td class="warn">Near-zero guard forces KEEP of small steps; 480 A always kept</td>
+        <td class="ok">Absolute 1 A: SUPPRESS 0.05 A noise at idle, KEEP 480 A step</td>
+        <td>Absolute 1 A</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Lookup cost</h3>
+  <p>
+    <code>std::unordered_map&lt;std::string, PointDeadband&gt;</code> lookup is O(1) average.
+    With 1,770 distinct point names (Longbow fleet) and a 60-second flush interval at 81k msg/s,
+    the flush thread calls <code>get_deadband()</code> ~4.9 M times per flush — each call is a
+    single hash + string compare, well under 1 µs. Total overhead is negligible relative to the
+    Arrow column building that follows.
+  </p>
+  <p>
+    If glob-style prefix matching is needed (e.g. suppress all <code>Batt1_MBMS_*</code> fault
+    flags the same way), a two-stage lookup — exact match first, then linear scan of prefix
+    patterns — is acceptable at flush time since it is not on the hot MQTT ingest path.
+  </p>
+
+  <div class="alert alert-warn">
+    <strong>Interaction with WAL replay:</strong> if the writer crashes mid-flush, the WAL replay
+    on restart re-inserts the pre-dedup rows into <code>g_buffers</code>. The
+    <code>g_current_state</code> snapshot at that point may be stale (it was not persisted atomically
+    with the WAL). The first flush after replay should therefore skip dedup for WAL-sourced rows
+    (they are already marked with their original <code>sample_count</code>) to avoid double-suppression.
+    Tag WAL-replayed rows with a flag (e.g. <code>row.ints["_wal_replay"] = 1</code>) so the flush
+    thread can bypass the per-point deadband lookup for them.
+  </div>
+  <div class="alert alert-info">
+    <strong>Per-point config and <code>current_state_path</code>:</strong> the per-point deadband
+    comparison uses the last <em>flushed</em> value from <code>g_current_state</code>. If the writer
+    restarts cleanly (SIGTERM, not crash), <code>current_state_path</code> persists this map to disk
+    so the first post-restart flush applies the correct per-point deadband rather than treating every
+    signal as "first seen" and storing all values unconditionally. Without this persistence, a restart
+    causes a one-interval burst of un-deduped rows — acceptable but worth noting.
+  </div>
+
+  <div class="alert alert-info">
+    <strong>Expected reduction:</strong> based on the Telegraf dedup experiment, float COV at 0.1%
+    deadband is projected to suppress ~17–23% of float rows on top of Filter B's integer dedup,
+    bringing the combined reduction to the "Moderate" scenario (~40% total). The actual rate depends
+    heavily on signal volatility — a cell voltage that dithers ±0.001 V at rest will dedup heavily;
+    a current signal during active charge/discharge will not.
+  </div>
+</div>
+
 <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--border);font-size:0.78rem;color:var(--muted)">
-  Document generated 2026-03-23 &nbsp;·&nbsp; Branch: <code>03202026_run_with_real_data</code>
-  &nbsp;·&nbsp; Source: <code>source/parquet_writer_cpp/writer.cpp</code>,
-  <code>mqtt_ring.h</code>, <code>writer_config.yaml</code>
+  Document updated 2026-03-29 &nbsp;·&nbsp; Branch: <code>03202026_run_with_real_data</code>
+  &nbsp;·&nbsp; Source: <code>source/parquet_writer_cpp/real_writer.cpp</code> (EMS path),
+  <code>writer.cpp</code> (stress path), <code>mqtt_ring.h</code>, <code>writer_config.yaml</code>
 </div>
 
 </body>
