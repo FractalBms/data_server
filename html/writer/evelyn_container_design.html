@@ -67,7 +67,7 @@
 </div>
 
 <h1>Container Design — Option C</h1>
-<p style="padding:0 40px;color:var(--muted);font-size:14px">Single self-contained Docker container: FlashMQ + real_writer + bridge_api + nginx under supervisord.</p>
+<p style="padding:0 40px;color:var(--muted);font-size:14px">Single self-contained Docker container: FlashMQ + parquet_writer + bridge_api + nginx under supervisord.</p>
 
 <div class="toc">
   <h2>Contents</h2>
@@ -98,7 +98,7 @@
 <table>
   <tr><th>Component</th><th>Role</th><th>Managed by</th></tr>
   <tr><td>FlashMQ</td><td>MQTT broker — accepts EMS hardware connections + bridge</td><td>supervisord</td></tr>
-  <tr><td>real_writer</td><td>MQTT subscriber → Parquet writer</td><td>supervisord</td></tr>
+  <tr><td>parquet_writer</td><td>MQTT subscriber → Parquet writer</td><td>supervisord</td></tr>
   <tr><td>bridge_api_container.py</td><td>REST management API — config, storage, bridge, /query/current</td><td>supervisord</td></tr>
   <tr><td>nginx</td><td>Serves baked-in HTML dashboard pages</td><td>supervisord</td></tr>
 </table>
@@ -119,12 +119,12 @@
   │    │                                                                │
   │    ├── flashmq  :1883 (MQTT)  :9001 (MQTT/WebSocket)               │
   │    │       │                                                        │
-  │    ├── real_writer  ←── subscribes to flashmq :1883                │
+  │    ├── parquet_writer  ←── subscribes to flashmq :1883                │
   │    │       │                                                        │
   │    │       └──→ /data/parquet/  ← external volume                  │
   │    │                                                                │
   │    ├── bridge_api_container.py  :8772                               │
-  │    │       │  supervisorctl restart flashmq / real_writer           │
+  │    │       │  supervisorctl restart flashmq / parquet_writer           │
   │    │       └──→ DuckDB reads /data/parquet/current_state.parquet    │
   │    │                                                                │
   │    └── nginx  :8080                                                 │
@@ -145,7 +145,7 @@
 
 <!-- 3 -->
 <h2 id="dockerfile">3. Dockerfile</h2>
-<p>Three-stage build. Stage 1 compiles FlashMQ from source. Stage 2 compiles real_writer from source. Stage 3 assembles the runtime image — no pre-built binaries required on the host.</p>
+<p>Three-stage build. Stage 1 compiles FlashMQ from source. Stage 2 compiles parquet_writer from source. Stage 3 assembles the runtime image — no pre-built binaries required on the host.</p>
 
 <div class="file-label">docker/evelyn-container/Dockerfile</div>
 <pre>
@@ -163,7 +163,7 @@
 <span class="kw">RUN</span> cmake -B /flashmq/build -S /flashmq -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /flashmq/build --parallel $(nproc)
 
-<span class="cm"># ── Stage 2: Build real_writer ───────────────────────────────────────────</span>
+<span class="cm"># ── Stage 2: Build parquet_writer ───────────────────────────────────────────</span>
 <span class="kw">FROM</span> ubuntu:<span class="num">24.04</span> <span class="kw">AS</span> writer-builder
 <span class="kw">ENV</span> DEBIAN_FRONTEND=noninteractive
 
@@ -177,14 +177,14 @@
 
 <span class="kw">WORKDIR</span> /build
 <span class="kw">COPY</span> source/parquet_writer_cpp/ .
-<span class="kw">RUN</span> make real_writer
+<span class="kw">RUN</span> make parquet_writer
 
 <span class="cm"># ── Stage 3: Runtime image ───────────────────────────────────────────────</span>
 <span class="kw">FROM</span> ubuntu:<span class="num">24.04</span>
 <span class="kw">ENV</span> DEBIAN_FRONTEND=noninteractive
 
 <span class="kw">RUN</span> apt-get update && apt-get install -y \
-    <span class="cm"># real_writer runtime deps</span>
+    <span class="cm"># parquet_writer runtime deps</span>
     libarrow1600 libparquet1600 \
     libsnappy1v5 libzstd1 liblz4-1 libbrotli1 \
     libmosquitto1 libyaml-cpp0.8 libsimdjson0 \
@@ -197,8 +197,8 @@
 
 <span class="cm"># Binaries from builder stages</span>
 <span class="kw">COPY</span> --from=flashmq-builder  /flashmq/build/flashmq   /usr/local/bin/flashmq
-<span class="kw">COPY</span> --from=writer-builder   /build/real_writer        /usr/local/bin/real_writer
-<span class="kw">RUN</span> chmod +x /usr/local/bin/flashmq /usr/local/bin/real_writer
+<span class="kw">COPY</span> --from=writer-builder   /build/parquet_writer        /usr/local/bin/parquet_writer
+<span class="kw">RUN</span> chmod +x /usr/local/bin/flashmq /usr/local/bin/parquet_writer
 
 <span class="cm"># Default configs — baked in as fallback, NOT the live config path</span>
 <span class="cm"># entrypoint.sh copies these to /etc/evelyn/ on first run if not present</span>
@@ -257,8 +257,8 @@
 <span class="cm"># bridge config changed → restart FlashMQ</span>
 subprocess.<span class="fn">run</span>([<span class="str">"supervisorctl"</span>, <span class="str">"restart"</span>, <span class="str">"flashmq"</span>])
 
-<span class="cm"># storage path changed → restart real_writer</span>
-subprocess.<span class="fn">run</span>([<span class="str">"supervisorctl"</span>, <span class="str">"restart"</span>, <span class="str">"real_writer"</span>])
+<span class="cm"># storage path changed → restart parquet_writer</span>
+subprocess.<span class="fn">run</span>([<span class="str">"supervisorctl"</span>, <span class="str">"restart"</span>, <span class="str">"parquet_writer"</span>])
 </pre>
 <p>No Docker socket mount required. No systemd on the host required. supervisord communicates via a Unix socket inside the container (<code>/var/run/supervisor.sock</code>).</p>
 
@@ -295,14 +295,14 @@ stdout_logfile_maxbytes=10MB
 stdout_logfile_backups=3
 priority=10
 
-[program:real_writer]
-command=/usr/local/bin/real_writer --config /etc/evelyn/writer.yaml
+[program:parquet_writer]
+command=/usr/local/bin/parquet_writer --config /etc/evelyn/writer.yaml
 autostart=true
 autorestart=true
 startretries=5
 startsecs=3
-stdout_logfile=/var/log/supervisor/real_writer.log
-stderr_logfile=/var/log/supervisor/real_writer.log
+stdout_logfile=/var/log/supervisor/parquet_writer.log
+stderr_logfile=/var/log/supervisor/parquet_writer.log
 stdout_logfile_maxbytes=20MB
 stdout_logfile_backups=5
 priority=20
@@ -396,10 +396,10 @@ Manages processes via supervisorctl instead of systemctl.
 Endpoints
 ---------
 GET  /status          supervisorctl status + health summary
-POST /start           supervisorctl start flashmq real_writer
-POST /stop            supervisorctl stop flashmq real_writer
+POST /start           supervisorctl start flashmq parquet_writer
+POST /stop            supervisorctl stop flashmq parquet_writer
 GET  /storage         current parquet output path
-POST /storage         {"path":"..."} update writer yaml, mkdir, restart real_writer
+POST /storage         {"path":"..."} update writer yaml, mkdir, restart parquet_writer
 GET  /bridge          current FlashMQ bridge config
 POST /bridge          {"address","port","topic"} write conf, restart flashmq
 POST /bridge/clear    remove bridge, restart flashmq
@@ -504,11 +504,11 @@ bridge {{
 
         <span class="kw">elif</span> path == <span class="str">"/start"</span> <span class="kw">and</span> method == <span class="str">"POST"</span>:
             ok1, _ = <span class="fn">supervisorctl</span>(<span class="str">"start"</span>, <span class="str">"flashmq"</span>)
-            ok2, _ = <span class="fn">supervisorctl</span>(<span class="str">"start"</span>, <span class="str">"real_writer"</span>)
+            ok2, _ = <span class="fn">supervisorctl</span>(<span class="str">"start"</span>, <span class="str">"parquet_writer"</span>)
             <span class="fn">respond</span>(writer, <span class="str">"200 OK"</span>, {<span class="str">"started"</span>: ok1 <span class="kw">and</span> ok2})
 
         <span class="kw">elif</span> path == <span class="str">"/stop"</span> <span class="kw">and</span> method == <span class="str">"POST"</span>:
-            <span class="fn">supervisorctl</span>(<span class="str">"stop"</span>, <span class="str">"real_writer"</span>)
+            <span class="fn">supervisorctl</span>(<span class="str">"stop"</span>, <span class="str">"parquet_writer"</span>)
             <span class="fn">supervisorctl</span>(<span class="str">"stop"</span>, <span class="str">"flashmq"</span>)
             <span class="fn">respond</span>(writer, <span class="str">"200 OK"</span>, {<span class="str">"stopped"</span>: <span class="kw">True</span>})
 
@@ -529,7 +529,7 @@ bridge {{
             cfg.<span class="fn">setdefault</span>(<span class="str">"output"</span>, {})[<span class="str">"base_path"</span>] = new_path
             <span class="kw">with</span> <span class="fn">open</span>(WRITER_YAML, <span class="str">"w"</span>) <span class="kw">as</span> f:
                 yaml.<span class="fn">dump</span>(cfg, f)
-            <span class="fn">supervisorctl</span>(<span class="str">"restart"</span>, <span class="str">"real_writer"</span>)
+            <span class="fn">supervisorctl</span>(<span class="str">"restart"</span>, <span class="str">"parquet_writer"</span>)
             <span class="fn">respond</span>(writer, <span class="str">"200 OK"</span>, {<span class="str">"path"</span>: new_path, <span class="str">"restarted"</span>: <span class="kw">True</span>})
 
         <span class="kw">elif</span> path == <span class="str">"/bridge"</span> <span class="kw">and</span> method == <span class="str">"GET"</span>:
@@ -671,15 +671,31 @@ mqtt:
   client_id: evelyn-writer-container
   topic: "unit/#"
   qos: 0
-  topic_kv_map:
-    - key: unit_id
-      index: 1
-    - key: point_name
-      index: 3
+
+  topic_parser: positional
+  # Segments for: unit/{unit_id}/{device}/{instance}/{point_name}/{dtype_hint}
+  #               0     1          2        3           4            5
+  topic_segments:
+    - "_"          # 0: "unit" (literal, ignored)
+    - unit_id      # 1: hex unit serial
+    - device       # 2: "bms" / "pcs" / "rack"
+    - instance     # 3: "bms_1" / "bms_2" / etc.
+    - point_name   # 4: "Batt1_SBMU1_Current"
+    - dtype_hint   # 5: type hint — drives int vs float storage, not stored
+
+  partition_field: site_id
+  timestamp_field: ts
+  timestamp_format: iso8601
 
 output:
   base_path: /data/parquet
-  project_id: evelyn
+  project_id: 0
+  site_id: "EVELYN01"          # ★ set to match the site serial at deployment
+  partitions:
+    - "site={site_id}"
+    - "{year}"
+    - "{month}"
+    - "{day}"
   compression: snappy
   flush_interval_seconds: 10
   max_messages_per_part: 5000000
@@ -747,7 +763,7 @@ docker run -d \
       - <span class="str">"1883:1883"</span>    <span class="cm"># MQTT</span>
       - <span class="str">"9001:9001"</span>    <span class="cm"># MQTT-over-WebSocket</span>
       - <span class="str">"8080:8080"</span>    <span class="cm"># HTML dashboards</span>
-      - <span class="str">"8771:8771"</span>    <span class="cm"># real_writer health</span>
+      - <span class="str">"8771:8771"</span>    <span class="cm"># parquet_writer health</span>
       - <span class="str">"8772:8772"</span>    <span class="cm"># bridge_api</span>
     <span class="kw">volumes</span>:
       - <span class="str">${CONFIG_PATH:-/etc/evelyn-site}:/etc/evelyn"</span>
@@ -771,7 +787,7 @@ CTX="$REPO_ROOT/docker/evelyn-container"
 
 <span class="cm"># ── Both binaries are built from source inside Docker ────────────────────</span>
 <span class="cm"># No pre-built binaries needed on the host.</span>
-<span class="cm"># real_writer: built from source/parquet_writer_cpp/ (Stage 2)</span>
+<span class="cm"># parquet_writer: built from source/parquet_writer_cpp/ (Stage 2)</span>
 <span class="cm"># FlashMQ:     cloned from github.com/halfgaar/FlashMQ (Stage 1)</span>
 
 <span class="cm"># ── Copy HTML pages ──────────────────────────────────────────────────────</span>
@@ -814,8 +830,8 @@ docker build -t "$TAG" "$CTX"
 <h2 id="upgrade">12. Upgrade / Update Workflow</h2>
 <table>
   <tr><th>What changed</th><th>How to update</th></tr>
-  <tr><td>New real_writer binary</td><td><code>scripts/evelyn-container-build.sh</code> → <code>docker stop evelyn && docker rm evelyn && docker run …</code></td></tr>
-  <tr><td>Writer config only (flush interval, etc.)</td><td><code>docker exec evelyn supervisorctl restart real_writer</code> after editing config inside container, OR use <code>POST /storage</code> via bridge_api</td></tr>
+  <tr><td>New parquet_writer binary</td><td><code>scripts/evelyn-container-build.sh</code> → <code>docker stop evelyn && docker rm evelyn && docker run …</code></td></tr>
+  <tr><td>Writer config only (flush interval, etc.)</td><td><code>docker exec evelyn supervisorctl restart parquet_writer</code> after editing config inside container, OR use <code>POST /storage</code> via bridge_api</td></tr>
   <tr><td>Bridge to new EMS hardware</td><td><code>POST http://host:8772/bridge</code> with <code>{"address":"…","port":1883,"topic":"unit/#"}</code> — bridge_api updates config and restarts FlashMQ</td></tr>
   <tr><td>HTML page update</td><td>Rebuild image — nginx layer is small (~50 KB pages), rebuilds fast from cache</td></tr>
   <tr><td>bridge_api code change</td><td>Rebuild image (Python layer) or: <code>docker cp bridge_api_container.py evelyn:/opt/evelyn/</code> + <code>docker exec evelyn supervisorctl restart bridge_api</code></td></tr>
@@ -832,9 +848,9 @@ docker build -t "$TAG" "$CTX"
 
 <div class="note"><strong>Config persistence:</strong> resolved — <code>/etc/evelyn</code> is an external volume (<code>-v /etc/evelyn-site:/etc/evelyn</code>). bridge_api edits (bridge config, storage path) persist across restarts and image upgrades. Defaults are re-installed only if a config file is missing.</div>
 
-<div class="note"><strong>WAL files:</strong> WAL lives in <code>/data/parquet/.wal</code> — inside the data volume, so survives container restarts. real_writer replays WAL on startup. Crash recovery works correctly.</div>
+<div class="note"><strong>WAL files:</strong> WAL lives in <code>/data/parquet/.wal</code> — inside the data volume, so survives container restarts. parquet_writer replays WAL on startup. Crash recovery works correctly.</div>
 
-<div class="note"><strong>current_state.parquet:</strong> written to <code>/data/parquet/current_state.parquet</code> — inside the volume, persistent. <code>GET /query/current</code> works as soon as real_writer has completed its first flush.</div>
+<div class="note"><strong>current_state.parquet:</strong> written to <code>/data/parquet/current_state.parquet</code> — inside the volume, persistent. <code>GET /query/current</code> works as soon as parquet_writer has completed its first flush.</div>
 
 <table style="margin-top:16px">
   <tr><th>Open question</th><th>Recommendation</th></tr>

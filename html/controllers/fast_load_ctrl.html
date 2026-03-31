@@ -61,6 +61,10 @@ h1 { color:var(--accent); font-size:1.2rem; margin-bottom:2px; }
               border:1px solid var(--border); }
 .btn-ghost:hover:not(:disabled) { color:var(--text); border-color:var(--muted); opacity:1; }
 .btn-orange { background:#7a4800; color:#e3b341; border:1px solid #6a3e00; }
+.btn-save   { background:transparent; color:#3fb950; border:1px solid #3fb95066; }
+.btn-save:hover:not(:disabled)  { border-color:var(--green); background:#1a7f3722; opacity:1; }
+.btn-load   { background:transparent; color:var(--purple); border:1px solid #bc8cff66; }
+.btn-load:hover:not(:disabled)  { border-color:var(--purple); background:#2d1b4a33; opacity:1; }
 .btn-sm { padding:4px 9px; font-size:.74rem; }
 .btn-row { display:flex; gap:5px; flex-wrap:wrap; align-items:center; }
 
@@ -214,7 +218,11 @@ select.ch-sel { background:var(--code-bg); border:1px solid var(--border);
   <div class="block-lib">
     <div class="sec-hdr">
       Block Library
-      <button class="btn btn-accent btn-sm" onclick="newBlock()">+ New</button>
+      <div class="btn-row" style="gap:4px">
+        <button class="btn btn-save btn-sm" onclick="saveToFile()" title="Save waveform to JSON file">↓ Save</button>
+        <button class="btn btn-load btn-sm" onclick="loadFromFile()" title="Load waveform from JSON file">↑ Load</button>
+        <button class="btn btn-accent btn-sm" onclick="newBlock()">+ New</button>
+      </div>
     </div>
     <div class="block-list" id="block-list">
       <div style="color:var(--muted);font-size:.8rem;text-align:center;padding:16px 0">
@@ -328,6 +336,7 @@ select.ch-sel { background:var(--code-bg); border:1px solid var(--border);
   <div class="term" id="term"></div>
 </div>
 
+<input type="file" id="wf-file-in" accept=".json" style="display:none">
 <script>
 // ─── Constants ────────────────────────────────────────────────────────────────
 const COLORS = [
@@ -358,6 +367,32 @@ let pbStart   = null;
 let pbTimer   = null;
 let pbMeta    = [];
 let pbTotalMs = 0;
+
+// ─── File save / load ────────────────────────────────────────────────────────
+function saveToFile() {
+  const payload = JSON.stringify({ version: 1, blocks, sequence, loopSeq, colorIdx }, null, 2);
+  const blob = new Blob([payload], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  // Filename: waveform-YYYY-MM-DD_HHMM.json
+  const now  = new Date();
+  const ts   = now.getFullYear() + '-' +
+               String(now.getMonth()+1).padStart(2,'0') + '-' +
+               String(now.getDate()).padStart(2,'0') + '_' +
+               String(now.getHours()).padStart(2,'0') +
+               String(now.getMinutes()).padStart(2,'0');
+  a.href     = url;
+  a.download = 'waveform-' + ts + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  tlog('Saved → ' + a.download + '  (' + Object.keys(blocks).length + ' blocks, ' + sequence.length + ' seq entries)', 'inf');
+}
+
+function loadFromFile() {
+  const inp = document.getElementById('wf-file-in');
+  inp.value = '';   // allow re-selecting the same file
+  inp.click();
+}
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
 function save() {
@@ -1063,6 +1098,40 @@ window.addEventListener('DOMContentLoaded', () => {
   loadSaved();
   renderAll();
   tlog('Ready — connect to controller at ws://host:81', 'inf');
+
+  document.getElementById('wf-file-in').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const d = JSON.parse(ev.target.result);
+        if (!d.blocks || typeof d.blocks !== 'object') throw new Error('missing "blocks" key');
+        // Migrate old single-step format if needed
+        Object.values(d.blocks).forEach(bl => {
+          if (!bl.steps) {
+            bl.steps = [{ vTarget: bl.vTarget||0, iTarget: bl.iTarget||0,
+                          rampMs: bl.rampMs||500, holdMs: bl.holdMs||2000 }];
+            delete bl.vTarget; delete bl.iTarget; delete bl.rampMs; delete bl.holdMs;
+          }
+        });
+        const nb = Object.keys(d.blocks).length;
+        const ns = Array.isArray(d.sequence) ? d.sequence.length : 0;
+        if (Object.keys(blocks).length > 0 &&
+            !confirm('Replace current waveform with "' + file.name + '"?\n(' + nb + ' blocks, ' + ns + ' sequence entries)')) return;
+        blocks   = d.blocks;
+        sequence = Array.isArray(d.sequence) ? d.sequence : [];
+        loopSeq  = !!d.loopSeq;
+        colorIdx = typeof d.colorIdx === 'number' ? d.colorIdx : 0;
+        save();
+        renderAll();
+        tlog('Loaded "' + file.name + '" — ' + nb + ' blocks, ' + ns + ' seq entries', 'inf');
+      } catch (err) {
+        tlog('Load failed: ' + err.message, 'err');
+      }
+    };
+    reader.readAsText(file);
+  });
 });
 
 window.addEventListener('resize', () => redraw());

@@ -87,8 +87,16 @@
 
   <a class="card" href="evelyn_container_design.html">
     <div class="card-title">Container Design (Option C)</div>
-    <div class="card-desc">Single Docker container: FlashMQ + real_writer + bridge_api + nginx under supervisord. Full Dockerfile, supervisord.conf, build script, and port map.</div>
+    <div class="card-desc">Single Docker container: FlashMQ + parquet_writer + bridge_api + nginx under supervisord. Full Dockerfile, supervisord.conf, build script, and port map.</div>
     <span class="card-tag">design</span>
+    <span class="card-tag">docker</span>
+  </a>
+
+  <a class="card" href="evelyn_writer_project_build.html">
+    <div class="card-title">Kubernetes Build &amp; Package</div>
+    <div class="card-desc">Build script that compiles parquet_writer and FlashMQ via Docker, collects HTML/Python/shell files from the repo, writes K8s manifests, and packages a deployment tar.gz.</div>
+    <span class="card-tag">kubernetes</span>
+    <span class="card-tag">build</span>
     <span class="card-tag">docker</span>
   </a>
 
