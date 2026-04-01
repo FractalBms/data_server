@@ -570,6 +570,34 @@ void loop() {
 
     handleSerial();
 
+    // ── WiFi watchdog / auto-reconnect ────────────────────────────────────────
+    if (wifiSSID.length() > 0) {
+        bool wifiUp = (WiFi.status() == WL_CONNECTED);
+        if (wifiConnected && !wifiUp) {
+            wifiConnected  = false;
+            wsServerStarted = false;
+            Serial.println("WiFi lost — retry in 10 s");
+        }
+        static unsigned long lastReconnectMs = 0;
+        if (!wifiConnected && !wifiUp && millis() - lastReconnectMs > 10000) {
+            lastReconnectMs = millis();
+            Serial.printf("Reconnecting to %s...\n", wifiSSID.c_str());
+            WiFi.begin(wifiSSID.c_str(), wifiPass.c_str());
+        }
+        if (!wifiConnected && wifiUp) {
+            wifiConnected = true;
+            Serial.printf("WiFi up: %s\n", WiFi.localIP().toString().c_str());
+            if (!wsServerStarted) {
+                setupOTA();
+                webSocket.begin();
+                webSocket.onEvent(webSocketEvent);
+                wsServerStarted = true;
+                Serial.println("WS + OTA restarted");
+            }
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     if (wifiConnected && wsServerStarted) {
         webSocket.loop();
         ArduinoOTA.handle();
@@ -749,7 +777,11 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
             break;
         case WStype_TEXT: {
             wsMessageCount++;
-            StaticJsonDocument<1024> doc;
+            // load_profile with 20 steps × 2 channels needs ~5 KB in ArduinoJson.
+            // DynamicJsonDocument allocates on the heap, not the stack — avoids
+            // stack overflow (loopTask default stack is only 8 KB; 6 KB static
+            // leaves no headroom for the WS callback chain).
+            DynamicJsonDocument doc(6144);
             if (deserializeJson(doc, payload, length)) return;
             handleWsCommand(num, doc);
             break;

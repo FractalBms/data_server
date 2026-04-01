@@ -271,6 +271,8 @@ subprocess.<span class="fn">run</span>([<span class="str">"supervisorctl"</span>
 [supervisord]
 nodaemon=true
 logfile=/var/log/supervisor/supervisord.log
+logfile_maxbytes=10MB
+logfile_backups=3
 pidfile=/var/run/supervisord.pid
 user=root
 
@@ -325,6 +327,7 @@ autorestart=true
 stdout_logfile=/var/log/supervisor/nginx.log
 stderr_logfile=/var/log/supervisor/nginx.log
 stdout_logfile_maxbytes=5MB
+stdout_logfile_backups=3
 priority=40
 </pre>
 
@@ -336,7 +339,7 @@ priority=40
 <div class="file-label">docker/evelyn-container/configs/nginx.conf</div>
 <pre>
 worker_processes auto;
-error_log /var/log/nginx/error.log warn;
+error_log  /dev/stderr warn;
 pid /var/run/nginx.pid;
 
 events { worker_connections 256; }
@@ -344,6 +347,7 @@ events { worker_connections 256; }
 http {
     include       /etc/nginx/mime.types;
     default_type  application/octet-stream;
+    access_log    /dev/stdout combined;
     sendfile      on;
     keepalive_timeout 30;
 
@@ -844,7 +848,7 @@ docker build -t "$TAG" "$CTX"
 
 <div class="warn"><strong>FlashMQ persistence dir:</strong> <code>/var/lib/flashmq</code> is inside the container — ephemeral by default. Retained QoS-1 messages are lost on container restart unless this is also volume-mounted. For QoS-0 only (our current mode) this is acceptable.</div>
 
-<div class="warn"><strong>Supervisor logs:</strong> <code>/var/log/supervisor/</code> is ephemeral. Use <code>docker logs evelyn</code> (supervisord stdout) or mount a log volume: <code>-v /data/logs/evelyn:/var/log/supervisor</code></div>
+<div class="warn"><strong>Supervisor logs:</strong> <code>/var/log/supervisor/</code> is ephemeral. Use <code>docker logs evelyn</code> (supervisord stdout) or mount a log volume: <code>-v /data/logs/evelyn:/var/log/supervisor</code>. nginx logs are redirected to stdout/stderr so supervisord captures and rotates them — no separate <code>/var/log/nginx/</code> volume needed.</div>
 
 <div class="note"><strong>Config persistence:</strong> resolved — <code>/etc/evelyn</code> is an external volume (<code>-v /etc/evelyn-site:/etc/evelyn</code>). bridge_api edits (bridge config, storage path) persist across restarts and image upgrades. Defaults are re-installed only if a config file is missing.</div>
 
