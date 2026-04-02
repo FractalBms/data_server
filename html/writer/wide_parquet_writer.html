@@ -379,26 +379,31 @@ guard:
 # 12 units × 34 signals (24 float + 10 int)
 # 600 sweeps @ 1 Hz → 244,800 messages · both writers subscribe simultaneously
 
-SWEEPS        = 600           # 1 Hz × 600 s
-JITTER_MAX_MS = 200           # burst fits inside 250ms time_window_ms
-SWEEP_PERIOD  = 1.0           # seconds
+BURST_MIN_MS = 50     # minimum burst spread per sweep
+BURST_MAX_MS = 200    # maximum burst spread — fits inside time_window_ms: 250
+SWEEP_PERIOD = 1.0    # 1 Hz inter-sweep interval
 
 for sweep in range(SWEEPS):
     sweep_wall_start = time.time()
-    sweep_ts = base_ts + sweep * 1.0
-    ts_str   = f"2026-04-01T10:..."
+    sweep_base_ts = base_ts + sweep * 1.0    # simulated 1 Hz tick
 
-    # Monotonically increasing delays within a random 50–200 ms burst.
-    # All msgs share the same simulated ts → tests time_window_ms coalescing.
-    burst_ms = random.uniform(50, JITTER_MAX_MS)
-    delays   = sorted(random.uniform(0, burst_ms * 1e-3) for _ in range(n_msgs))
+    # Monotonically increasing intra-burst delays — same ordering in wall-clock
+    # AND in the payload ts, so the writer sees timestamps that are individually
+    # distinct but all within a 50–200 ms window.  time_window_ms: 250 coalesces
+    # them under the first message's ts; without the window each row gets its own.
+    burst_s = random.uniform(BURST_MIN_MS, BURST_MAX_MS) * 1e-3
+    delays  = sorted(random.uniform(0, burst_s) for _ in range(N_MSGS))
 
-    for i, (unit, signal) in enumerate(all_combos):
+    for i, (unit, device, instance, signame, dtype) in enumerate(all_combos):
+        msg_ts = sweep_base_ts + delays[i]   # unique, monotonic per-message ts
+        ts_str = fmt_ts(msg_ts)              # ISO-8601 UTC with ms precision
+
         target = sweep_wall_start + delays[i]
         if target > time.time(): time.sleep(target - time.time())
+
         client.publish(topic, json.dumps({"ts": ts_str, "value": val}), qos=0)
 
-    # Sleep out the rest of the 1-second interval
+    # Hold the 1-second cadence
     time.sleep(max(0, SWEEP_PERIOD - (time.time() - sweep_wall_start)))</pre>
 <p style="font-size:0.8rem;color:#64748b;margin:8px 0 0">
   Full script at <code>/tmp/bench2/compare_run.py</code> on phil-dev.
