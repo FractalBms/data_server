@@ -98,6 +98,11 @@
       <td class="metric-val worse">70,017 <small style="color:#94a3b8">(one per message)</small></td>
     </tr>
     <tr>
+      <td>Duplicate same-point same-window</td>
+      <td class="metric-val better">Last-write-wins — overwritten in-place, no extra row</td>
+      <td class="metric-val">N/A — no time window</td>
+    </tr>
+    <tr>
       <td>Flush time — max</td>
       <td class="metric-val better">
         <span class="flush-bar" style="width:4px"></span>6 ms
@@ -128,6 +133,8 @@
   Long+compound is <strong>55% smaller</strong> and <strong>13× faster to flush</strong> at 34 signals/unit with 6,000 rows/file.
   <code>time_window_ms: 250</code> coalesced 408 per-sweep messages into <strong>600 distinct timestamps</strong>
   (116× reduction) — one per 1 Hz tick — confirming correct burst coalescing.
+  If two measurements of the same point arrive within the window, <strong>last-write-wins</strong>:
+  the earlier row is overwritten in-place — no duplicate rows, no extra storage cost.
 </div>
 <div class="highlight warn">
   Wide flush slowdown is caused by Arrow allocating one array builder per signal column (38 here, scales with cardinality).

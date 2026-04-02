@@ -1595,20 +1595,24 @@ static void process_message(const char* topic, const char* payload) {
         row.ints.erase("project_id");
     }
 
-    // Time window coalescing: all messages arriving within time_window_ms of the
-    // first message in a window share its timestamp, smoothing sub-second jitter.
+    // Time window coalescing + last-write-wins dedup.
+    // Statics are safe here — process_message is only called from parse_thread (single thread).
+    static int64_t s_window_open_us = 0;
+    static int64_t s_window_ts_us   = 0;
+    // dedup_key → index in g_buffers[key].rows; cleared when window expires or after flush.
+    static std::unordered_map<std::string, size_t> s_dedup;
+
     if (g_cfg->time_window_ms > 0) {
         auto now_us = static_cast<int64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count());
-        static int64_t s_window_open_us = 0;
-        static int64_t s_window_ts_us   = 0;
         int64_t window_dur_us = int64_t(g_cfg->time_window_ms) * 1000;
         auto ts_it = row.ints.find("ts");
         if (ts_it != row.ints.end()) {
             if (s_window_open_us == 0 || (now_us - s_window_open_us) >= window_dur_us) {
                 s_window_open_us = now_us;
                 s_window_ts_us   = ts_it->second;
+                s_dedup.clear();
             }
             ts_it->second = s_window_ts_us;
         }
@@ -1629,10 +1633,26 @@ static void process_message(const char* topic, const char* payload) {
         g_current_state[SensorKey{info_opt->source_type, row.ints, row.strings}] = row;
 
     g_msgs_received.fetch_add(1);
+    ++g_received_since_sync;
+
+    // Last-write-wins: if this (partition, topic) already has a row in the current
+    // window, overwrite it in-place rather than appending a duplicate.
+    // Stale indices (from a flush that cleared g_buffers) are detected by the
+    // size check — after std::exchange the partition starts at rows.size()==0.
+    if (g_cfg->time_window_ms > 0) {
+        std::string dk = pval + '\x00' + topic_str;
+        auto& part = g_buffers[key];
+        auto dit = s_dedup.find(dk);
+        if (dit != s_dedup.end() && dit->second < part.rows.size()) {
+            part.rows[dit->second] = std::move(row);   // overwrite — no row count change
+            return;
+        }
+        s_dedup[dk] = part.rows.size();   // record index of the row we're about to push
+    }
+
     auto& part = g_buffers[key];
     part.rows.push_back(std::move(row));
     ++g_total_buffered;
-    ++g_received_since_sync;
     if (static_cast<int>(part.rows.size()) >= g_cfg->max_messages_per_part)
         g_flush_cv.notify_one();
 }
