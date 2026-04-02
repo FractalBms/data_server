@@ -44,6 +44,7 @@
 <div class="topo">
   Topology: <span>12 units</span> × <span>34 signals</span> (24 float + 10 int) ·
   <span>600 sweeps</span> @ 1 Hz · <span>244,800 messages</span> · MQTT QoS-0 · Snappy compression ·
+  <span>6,000 rows/file</span> · monotonic burst jitter 50–200 ms/sweep ·
   Generator: <code><a href="#generator">compare_run.py</a></code>
 </div>
 
@@ -262,8 +263,9 @@ output:
     - "{day}"
   compression: snappy
   flush_interval_seconds: 60
-  max_messages_per_part: 10000000
+  max_messages_per_part: 6000
   time_window_ms: 250          # coalesce msgs within 250 ms under one shared timestamp
+  max_messages_per_part: 6000  # ~6 k rows per parquet file
   wide_point_name: true
   store_mqtt_topic: false
   store_project_id: false
@@ -308,7 +310,7 @@ output:
     - "{day}"
   compression: snappy
   flush_interval_seconds: 60
-  max_messages_per_part: 10000000
+  max_messages_per_part: 6000
   wide_point_name: true        # suppress site_id / project_id columns after partitioning
   store_mqtt_topic: false
   store_project_id: false
@@ -352,7 +354,7 @@ output:
     - "{day}"
   compression: snappy
   flush_interval_seconds: 60
-  max_messages_per_part: 10000000
+  max_messages_per_part: 6000
   partition_as_filename_prefix: true   # files: 0215D1D8_20260401T....parquet
   wide_point_name: true
   store_mqtt_topic: false
@@ -377,17 +379,27 @@ guard:
 # 12 units × 34 signals (24 float + 10 int)
 # 600 sweeps @ 1 Hz → 244,800 messages · both writers subscribe simultaneously
 
-SWEEPS       = 600          # 1 Hz × 600 s
-SIM_DURATION = 600          # simulated seconds
-RATE         = "1 Hz"
+SWEEPS        = 600           # 1 Hz × 600 s
+JITTER_MAX_MS = 200           # burst fits inside 250ms time_window_ms
+SWEEP_PERIOD  = 1.0           # seconds
 
 for sweep in range(SWEEPS):
-    sweep_ts = base_ts + sweep * 1.0    # 1-second intervals
+    sweep_wall_start = time.time()
+    sweep_ts = base_ts + sweep * 1.0
     ts_str   = f"2026-04-01T10:..."
-    for unit in UNITS:
-        for (device, instance, signame, dtype) in ALL_SIGNALS:
-            topic = f"bench/{unit}/{device}/{instance}/{signame}/{dtype}"
-            client.publish(topic, json.dumps({"ts": ts_str, "value": val}), qos=0)</pre>
+
+    # Monotonically increasing delays within a random 50–200 ms burst.
+    # All msgs share the same simulated ts → tests time_window_ms coalescing.
+    burst_ms = random.uniform(50, JITTER_MAX_MS)
+    delays   = sorted(random.uniform(0, burst_ms * 1e-3) for _ in range(n_msgs))
+
+    for i, (unit, signal) in enumerate(all_combos):
+        target = sweep_wall_start + delays[i]
+        if target > time.time(): time.sleep(target - time.time())
+        client.publish(topic, json.dumps({"ts": ts_str, "value": val}), qos=0)
+
+    # Sleep out the rest of the 1-second interval
+    time.sleep(max(0, SWEEP_PERIOD - (time.time() - sweep_wall_start)))</pre>
 <p style="font-size:0.8rem;color:#64748b;margin:8px 0 0">
   Full script at <code>/tmp/bench2/compare_run.py</code> on phil-dev.
   Results saved to <code>/tmp/bench2/results.json</code> after each run.
