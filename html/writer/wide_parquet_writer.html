@@ -49,6 +49,10 @@
 </div>
 
 <h2>Results</h2>
+<p style="font-size:0.78rem;color:#64748b;margin:0 0 12px">
+  Run: 244,800 msgs · 600 sweeps @ 1 Hz · monotonic burst jitter 50–200 ms/sweep ·
+  <code>time_window_ms: 250</code> on long+cmp · <code>max_messages_per_part: 6000</code> · phil-dev 2026-04-02
+</p>
 <table>
   <thead>
     <tr>
@@ -60,23 +64,23 @@
   <tbody>
     <tr>
       <td>Parquet files</td>
-      <td class="metric-val better">3</td>
-      <td class="metric-val">24 <small style="color:#94a3b8">(2 flushes × 12 units)</small></td>
+      <td class="metric-val better">41 <small style="color:#94a3b8">(~6,000 rows each)</small></td>
+      <td class="metric-val">132 <small style="color:#94a3b8">(11 flushes × 12 units)</small></td>
     </tr>
     <tr>
       <td>Rows written</td>
-      <td class="metric-val">2,447,998</td>
-      <td class="metric-val">2,447,998</td>
+      <td class="metric-val">244,800</td>
+      <td class="metric-val">244,800</td>
     </tr>
     <tr>
       <td>Total size (bytes)</td>
-      <td class="metric-val better">12,941,129</td>
-      <td class="metric-val worse">15,663,125</td>
+      <td class="metric-val better">1,640,574</td>
+      <td class="metric-val worse">3,657,104</td>
     </tr>
     <tr>
       <td>Total size (KB)</td>
-      <td class="metric-val better">12,637 KB</td>
-      <td class="metric-val worse">15,296 KB <small style="color:#dc2626">(+21%)</small></td>
+      <td class="metric-val better">1,602 KB</td>
+      <td class="metric-val worse">3,571 KB <small style="color:#dc2626">(+123%)</small></td>
     </tr>
     <tr>
       <td>Schema width (columns)</td>
@@ -85,22 +89,27 @@
     </tr>
     <tr>
       <td>Bytes per row</td>
-      <td class="metric-val">5</td>
-      <td class="metric-val">6</td>
+      <td class="metric-val better">6</td>
+      <td class="metric-val worse">14</td>
+    </tr>
+    <tr>
+      <td>Distinct timestamps</td>
+      <td class="metric-val better">600 <small style="color:#059669">(time_window_ms: 250 — 1 per sweep)</small></td>
+      <td class="metric-val worse">70,017 <small style="color:#94a3b8">(one per message)</small></td>
     </tr>
     <tr>
       <td>Flush time — max</td>
       <td class="metric-val better">
-        <span class="flush-bar" style="width:50px"></span>1,205 ms
+        <span class="flush-bar" style="width:4px"></span>6 ms
       </td>
       <td class="metric-val worse">
-        <span class="flush-bar wide" style="width:180px"></span>5,489 ms
+        <span class="flush-bar wide" style="width:44px"></span>73 ms
       </td>
     </tr>
     <tr>
       <td>Flush time — avg</td>
-      <td class="metric-val better">523 ms</td>
-      <td class="metric-val worse">3,156 ms <small style="color:#dc2626">(6× slower)</small></td>
+      <td class="metric-val better">4 ms</td>
+      <td class="metric-val worse">52 ms <small style="color:#dc2626">(13× slower)</small></td>
     </tr>
     <tr>
       <td>Partition strategy</td>
@@ -116,13 +125,14 @@
 </table>
 
 <div class="highlight">
-  Long+compound is <strong>21% smaller</strong> and <strong>6× faster to flush</strong> at 34 signals/unit.
-  Wide pivot gives per-unit file isolation via filename prefix — same directory tree, no performance cost from the naming change.
+  Long+compound is <strong>55% smaller</strong> and <strong>13× faster to flush</strong> at 34 signals/unit with 6,000 rows/file.
+  <code>time_window_ms: 250</code> coalesced 408 per-sweep messages into <strong>600 distinct timestamps</strong>
+  (116× reduction) — one per 1 Hz tick — confirming correct burst coalescing.
 </div>
 <div class="highlight warn">
   Wide flush slowdown is caused by Arrow allocating one array builder per signal column (38 here, scales with cardinality).
-  Switching from a <code>unit=</code> subdirectory to a <code>unit_id_</code> filename prefix made no measurable difference —
-  the bottleneck is Parquet encoding, not filesystem path construction.
+  Each 60-second flush writes 12 files in sequence (one per unit partition); all 12 share the same flush timestamp.
+  Wide files are 2.2× larger per row than long+compound due to sparse column layout with many nulls.
 </div>
 
 <h2>Schemas</h2>
