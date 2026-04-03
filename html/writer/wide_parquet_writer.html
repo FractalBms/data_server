@@ -54,6 +54,65 @@
 <h1>Parquet Schema Benchmark</h1>
 <div class="subtitle">Long+Compound vs Wide (pivot) — 244.8 k messages, 12 units, 34 signals, 600 s simulated @ 1 Hz</div>
 
+<div class="highlight" style="margin-bottom:20px">
+  <strong>Generator:</strong> <code>source/parquet_writer/compare_run.py</code> —
+  launches all three writers against the same MQTT stream simultaneously.
+  Topology: <strong>12 units × 34 signals</strong> (24 float + 10 int), <strong>600 sweeps @ 1 Hz</strong>,
+  monotonic burst jitter <strong>50–200 ms/sweep</strong> (fits within <code>time_window_ms: 250</code>).
+  Each message carries a unique payload <code>ts</code> derived from the simulated clock; the writer's time window
+  coalesces all messages in a burst under the first message's timestamp.
+  Optional <code>--cov</code> flag enables change-on-value filtering: floats publish only when the value drifts
+  &gt;1% from the last sent value; integers publish only on change.
+  Run: <code>python3 source/parquet_writer/compare_run.py [--cov]</code>
+  Results are saved to <code>/tmp/bench2/results.json</code> after each run.
+</div>
+
+<h2 style="margin-top:0">Normalized Long — Recommended Schema</h2>
+<div class="highlight" style="margin-top:0">
+  8 fixed columns — each MQTT topic dimension in its own column.
+  Topic <code>site/SITE_A/unit/0215D1D8/bms/bms_1/Pack_SOC/float</code> maps to one row.
+  Full topic path can be reconstructed; every dimension is independently filterable.
+  Smallest storage of all three schemas; single-digit ms flush latency.
+</div>
+<div class="card" style="margin-bottom:12px">
+  <div class="schema-cols">
+    <div><span class="col-name">ts</span><span class="col-type">timestamp[us, tz=UTC] &nbsp;← coalesced to window start within 250 ms burst</span></div>
+    <div><span class="col-name">unit_id</span><span class="col-type">string &nbsp;← e.g. 0215D1D8</span></div>
+    <div><span class="col-name">device_type</span><span class="col-type">string &nbsp;← bms / pcs / rack</span></div>
+    <div><span class="col-name">device</span><span class="col-type">string &nbsp;← bms_1 / pcs_2</span></div>
+    <div><span class="col-name">point_name</span><span class="col-type">string &nbsp;← Pack_SOC / ActivePower (last topic segment only)</span></div>
+    <div><span class="col-name">value</span><span class="col-type">double</span></div>
+    <div><span class="col-name">dtype_hint</span><span class="col-type">string &nbsp;← float / integer</span></div>
+    <div><span class="col-name">site</span><span class="col-type">dictionary&lt;string&gt; &nbsp;← partition key</span></div>
+  </div>
+  <p style="font-size:0.78rem;color:#64748b;margin:12px 0 4px">Topic → row mapping:</p>
+  <pre style="font-size:0.75rem">Topic:  site/SITE_A/unit/0215D1D8/bms/bms_1/Pack_SOC/float
+Row:    ts=2026-04-01T10:00:01Z  unit_id=0215D1D8  device_type=bms
+        device=bms_1  point_name=Pack_SOC  value=87.3  dtype_hint=float</pre>
+</div>
+<div class="grid2" style="margin-bottom:20px">
+  <div class="card">
+    <div class="card-title long-title" style="font-size:0.85rem">All signals for one unit</div>
+    <pre>SELECT ts, device_type, device, point_name, value
+FROM read_parquet('/data/parquet/site=SITE_A/**/*.parquet')
+WHERE unit_id = '0215D1D8'
+  AND ts > now() - INTERVAL 1 HOUR
+ORDER BY ts;</pre>
+  </div>
+  <div class="card">
+    <div class="card-title long-title" style="font-size:0.85rem">Forward-fill gaps (COV / missed window)</div>
+    <pre>SELECT ts, unit_id,
+  LAST_VALUE(value IGNORE NULLS) OVER (
+    PARTITION BY unit_id
+    ORDER BY ts
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS value
+FROM read_parquet('/data/parquet/site=SITE_A/**/*.parquet')
+WHERE device_type = 'bms' AND point_name = 'Pack_SOC'
+ORDER BY unit_id, ts;</pre>
+  </div>
+</div>
+
 <div class="topo">
   Topology: <span>12 units</span> × <span>34 signals</span> (24 float + 10 int) ·
   <span>600 sweeps</span> @ 1 Hz · <span>244,800 messages</span> · MQTT QoS-0 · Snappy compression ·
