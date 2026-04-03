@@ -592,5 +592,107 @@ for sweep in range(SWEEPS):
   Benchmark: 244,800 messages · 1 Hz · parquet_writer C++ · Snappy compression · FlashMQ localhost · compare_run.py · phil-dev 2026-04-01
 </p>
 
+<h2 style="margin-top:40px;border-top:2px solid #bfdbfe;padding-top:24px">Appendix — Stream Replay</h2>
+<div class="highlight" style="margin-top:0">
+  The writer can record every incoming MQTT message verbatim — topic string, value, and original timestamp —
+  producing a Parquet log that can be replayed byte-for-byte back into any MQTT broker.
+  This uses the built-in <code>store_mqtt_topic</code> flag (default <code>true</code>) with
+  <code>time_window_ms: 0</code> to preserve per-message timestamps exactly.
+</div>
+
+<h3>Replay schema</h3>
+<div class="card" style="margin-bottom:16px">
+  <div class="schema-cols">
+    <div><span class="col-name">ts</span><span class="col-type">timestamp[us, tz=UTC] &nbsp;← original payload ts, unmodified</span></div>
+    <div><span class="col-name">mqtt_topic</span><span class="col-type">string &nbsp;← full topic e.g. site/SITE_A/unit/0215D1D8/bms/bms_1/Pack_SOC/float</span></div>
+    <div><span class="col-name">value</span><span class="col-type">double</span></div>
+    <div><span class="col-name">site</span><span class="col-type">dictionary&lt;string&gt; &nbsp;← partition key (optional)</span></div>
+  </div>
+</div>
+
+<h3>Capture config — <code>config_replay_capture.yaml</code></h3>
+<pre>mqtt:
+  host: localhost
+  port: 1883
+  client_id: pw-replay-capture
+  topic: "#"          # subscribe to everything
+  qos: 0
+
+  topic_parser: positional
+  topic_segments:
+    - "_"             # skip — value + ts extracted from payload JSON only
+
+  store_mqtt_topic: true   # default true; stores raw topic string as column
+
+output:
+  base_path: /data/replay
+  partitions:
+    - "{year}"
+    - "{month}"
+    - "{day}"
+  compression: snappy
+  flush_interval_seconds: 60
+  max_messages_per_part: 6000
+  time_window_ms: 0         # MUST be 0 — preserve per-message timestamps exactly
+  wide_point_name: false
+  store_project_id: false
+  store_sample_count: false
+
+health:
+  enabled: true
+  port: 8771
+wal:
+  enabled: true
+guard:
+  min_free_gb: 2.0</pre>
+
+<h3>Replay script</h3>
+<pre style="font-size:0.78rem">#!/usr/bin/env python3
+"""Replay a captured Parquet stream back into an MQTT broker at original rate."""
+import duckdb, json, time
+import paho.mqtt.client as mqtt
+
+PARQUET_PATH = "/data/replay/**/*.parquet"
+BROKER_HOST  = "localhost"
+BROKER_PORT  = 1883
+
+client = mqtt.Client(client_id="replay-publisher")
+client.connect(BROKER_HOST, BROKER_PORT)
+client.loop_start()
+
+rows = duckdb.sql(f"""
+    SELECT ts, mqtt_topic, value
+    FROM read_parquet('{PARQUET_PATH}')
+    ORDER BY ts
+""").fetchall()
+
+print(f"Replaying {len(rows):,} messages...")
+t0_real = time.time()
+t0_data = rows[0][0].timestamp()
+
+for ts, topic, value in rows:
+    # sleep to maintain original inter-message timing
+    lag = (ts.timestamp() - t0_data) - (time.time() - t0_real)
+    if lag > 0:
+        time.sleep(lag)
+    payload = json.dumps({"ts": ts.isoformat() + "Z", "value": value})
+    client.publish(topic, payload, qos=0)
+
+client.loop_stop()
+client.disconnect()
+print("Replay complete.")</pre>
+
+<div class="highlight warn" style="margin-top:12px">
+  <strong>Two constraints for a valid replay capture:</strong>
+  <ol style="margin:8px 0 0 0;padding-left:18px">
+    <li><strong><code>time_window_ms</code> must be 0.</strong>
+      The 250 ms coalescing deliberately collapses multiple per-message timestamps to one shared ts —
+      replay would lose intra-burst ordering within each window.</li>
+    <li><strong>Payload must be <code>{"ts": …, "value": …}</code> only.</strong>
+      The writer extracts exactly those two fields; any extra payload fields (quality flags, string values, etc.)
+      are not stored. For the current EMS topology all messages follow this two-key structure, so replay is complete.</li>
+  </ol>
+</div>
+
 </body>
 </html>
