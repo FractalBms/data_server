@@ -1,7 +1,7 @@
 /*
  * fast_load_control.ino
  * Fast DAC Load Controller for Heltec LoRa32 V2/V3
- * Version: 1.3.3
+ * Version: 1.3.9
  *
  * Based on load_controller_lora32.ino v1.5.5
  *
@@ -67,20 +67,25 @@
   #include <U8g2lib.h>
 #endif
 #include "driver/twai.h"
+#include "mbedtls/md.h"
+// esp_random() is available via esp_system.h (pulled in by Arduino core)
 
-// FAST: I2S driver for DMA DAC output (V2 / T-Display only)
+// FAST: DAC continuous driver for DMA DAC output (V2 / T-Display only)
+// Replaces deprecated I2S_MODE_DAC_BUILT_IN which conflicts with driver_ng on ESP32 Arduino 3.x
 #if !defined(HELTEC_V3)
-  #include "driver/i2s.h"
+  #include "driver/dac_continuous.h"
 #endif
 
 // ─── Program identity ─────────────────────────────────────────────────────────
 #define PROG_NAME     "FastLoad"
-#define PROG_VERSION  "1.3.3"
+#define PROG_VERSION  "1.3.9"
 
 // ─── FAST: DAC output rate ────────────────────────────────────────────────────
-#define SAMPLE_RATE        5000   // Hz — DAC update rate (I2S DMA on V2)
-#define I2S_DMA_BUF_LEN    64    // Samples per DMA buffer (12.8 ms per buf)
-#define I2S_DMA_BUF_COUNT  4     // Number of DMA buffers (51.2 ms total)
+#define SAMPLE_RATE        5000   // Hz — DAC update rate per channel
+// dac_continuous ALTER mode interleaves 2 channels, so the clock rate is 2×SAMPLE_RATE
+#define DAC_CLOCK_RATE     (SAMPLE_RATE * 2)
+#define I2S_DMA_BUF_LEN    64    // Samples per channel per buffer (12.8 ms per buf)
+#define I2S_DMA_BUF_COUNT  4     // Number of DMA descriptors (51.2 ms total)
 // On V3 (PWM), this also sets the PWM carrier frequency
 #define PWM_CARRIER_FREQ   SAMPLE_RATE
 
@@ -142,6 +147,7 @@
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 #define WS_PORT       81
+#define WS_SECRET_DEFAULT "changeme"   // override at runtime: set secret <value>
 #define SERIAL_BAUD   115200
 #define DAC_MAX       4095      // 12-bit internal representation
 #define MAX_VOLTAGE   60.0f
@@ -201,8 +207,12 @@ volatile float    voltageValue = 0.0f;
 volatile float    currentValue = 0.0f;
 
 // ─── FAST: cycle counters (written by dacTask, read by broadcastStatus) ───────
-volatile uint32_t dacBufCount       = 0;  // increments each i2s_write (expect ~78/s)
+volatile uint32_t dacBufCount       = 0;  // increments each dac write (expect ~78/s)
 volatile uint32_t dacStepTransitions = 0; // increments on each profile step advance
+
+#if !defined(HELTEC_V3)
+static dac_continuous_handle_t dac_handle = NULL;
+#endif
 
 enum DacChannel { CHANNEL_VOLTAGE = 0, CHANNEL_CURRENT = 1 };
 DacChannel displayChannel = CHANNEL_VOLTAGE;
@@ -235,6 +245,11 @@ int   profileCStep        = 0;
 unsigned long profileCStepStart  = 0;
 float profileCStepStartVal       = 0;
 bool  profileCInRamp      = false;
+
+// ─── WS auth ─────────────────────────────────────────────────────────────────
+String   wsSecret = WS_SECRET_DEFAULT;
+bool     wsAuthenticated[4] = {false, false, false, false};
+String   wsNonce[4];
 
 // ─── Counters, CAN, GPIO (identical to original) ──────────────────────────────
 uint32_t wsMessageCount = 0;
@@ -366,29 +381,29 @@ void loadProfileFromPrefs() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FAST: I2S DMA DAC initialisation (V2 / T-Display only)
+// FAST: DAC continuous DMA initialisation (V2 / T-Display only)
+// Uses dac_continuous driver (IDF 5.x) instead of deprecated I2S_MODE_DAC_BUILT_IN,
+// which conflicted with driver_ng on ESP32 Arduino 3.x.
+//
+// ALTER mode: bytes interleaved as [DAC1, DAC2, DAC1, DAC2, ...]
+//   DAC1 = GPIO25 (voltage), DAC2 = GPIO26 (current)
+// Clock rate = SAMPLE_RATE * 2 so each channel gets SAMPLE_RATE Hz.
 // ─────────────────────────────────────────────────────────────────────────────
 #if !USE_PWM_DAC
 static void i2s_dac_init() {
-    i2s_config_t cfg = {
-        .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX
-                                              | I2S_MODE_DAC_BUILT_IN),
-        .sample_rate          = SAMPLE_RATE,
-        .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
-        // RIGHT_LEFT gives both DAC channels:
-        //   RIGHT → DAC1 (GPIO25), LEFT → DAC2 (GPIO26)
-        .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
-        .communication_format = I2S_COMM_FORMAT_STAND_MSB,
-        .intr_alloc_flags     = 0,
-        .dma_buf_count        = I2S_DMA_BUF_COUNT,
-        .dma_buf_len          = I2S_DMA_BUF_LEN,
-        .use_apll             = false,
-        .tx_desc_auto_clear   = true,
+    dac_continuous_config_t cfg = {
+        .chan_mask  = DAC_CHANNEL_MASK_ALL,           // GPIO25 + GPIO26
+        .desc_num  = I2S_DMA_BUF_COUNT,
+        .buf_size  = I2S_DMA_BUF_LEN * 2,            // 2 bytes per sample (one per channel)
+        .freq_hz   = DAC_CLOCK_RATE,                  // 10000 Hz total; each channel = 5000 Hz
+        .offset    = 0,
+        .clk_src   = DAC_DIGI_CLK_SRC_APLL,          // APLL supports lower rates (APB min ~20kHz)
+        .chan_mode  = DAC_CHANNEL_MODE_ALTER,          // interleave DAC1/DAC2
     };
-    i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
-    i2s_set_dac_mode(I2S_DAC_CHANNEL_BOTH_EN);  // enable GPIO25 + GPIO26
-    Serial.printf("I2S DAC: %d Hz, %d bufs × %d samples\n",
-                  SAMPLE_RATE, I2S_DMA_BUF_COUNT, I2S_DMA_BUF_LEN);
+    ESP_ERROR_CHECK(dac_continuous_new_channels(&cfg, &dac_handle));
+    ESP_ERROR_CHECK(dac_continuous_enable(dac_handle));
+    Serial.printf("DAC continuous: %d Hz/ch, %d desc × %d bytes\r\n",
+                  SAMPLE_RATE, I2S_DMA_BUF_COUNT, I2S_DMA_BUF_LEN * 2);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -398,9 +413,9 @@ static void i2s_dac_init() {
 // which ran at ~100 Hz from loop(). Now it runs at SAMPLE_RATE (5 kHz).
 // ─────────────────────────────────────────────────────────────────────────────
 static void dacTask(void* /*arg*/) {
-    // Local DMA write buffer: stereo 16-bit samples (LEFT|RIGHT per frame)
-    // Buffer size = I2S_DMA_BUF_LEN frames × 4 bytes/frame
-    static uint32_t buf[I2S_DMA_BUF_LEN];
+    // Local DMA write buffer: interleaved 8-bit DAC values [DAC1, DAC2, DAC1, ...]
+    // Buffer size = I2S_DMA_BUF_LEN samples × 2 channels = I2S_DMA_BUF_LEN*2 bytes
+    static uint8_t buf[I2S_DMA_BUF_LEN * 2];
 
     const float dt_ms = 1000.0f / SAMPLE_RATE; // ms per sample
 
@@ -517,19 +532,17 @@ static void dacTask(void* /*arg*/) {
                 }
             }
 
-            // ── Build stereo I2S sample ───────────────────────────────────
-            // DAC is 8-bit; I2S upper byte of each 16-bit half → DAC output.
-            // RIGHT half (bits 15:0)  → DAC1 GPIO25 (voltage)
-            // LEFT  half (bits 31:16) → DAC2 GPIO26 (current)
-            uint8_t v8 = (uint8_t)(dac1Value >> 4);  // 12-bit → 8-bit
-            uint8_t c8 = (uint8_t)(dac2Value >> 4);
-            buf[i] = ((uint32_t)(c8) << 24)   // LEFT high byte  → DAC2
-                   | ((uint32_t)(v8) <<  8);   // RIGHT high byte → DAC1
+            // ── Build interleaved DAC bytes ───────────────────────────────
+            // dac_continuous ALTER mode: buf[2i] → DAC1/GPIO25, buf[2i+1] → DAC2/GPIO26
+            uint8_t v8 = (uint8_t)(dac1Value >> 4);   // 12-bit → 8-bit (voltage)
+            uint8_t c8 = (uint8_t)(dac2Value >> 4);   // 12-bit → 8-bit (current)
+            buf[i * 2 + 0] = v8;   // DAC1 GPIO25
+            buf[i * 2 + 1] = c8;   // DAC2 GPIO26
         }
 
-        // Write buffer to I2S DMA (blocks until DMA accepts it)
+        // Write buffer to DAC DMA (blocks until DMA accepts it; timeout -1 = forever)
         size_t written = 0;
-        i2s_write(I2S_NUM_0, buf, sizeof(buf), &written, portMAX_DELAY);
+        dac_continuous_write(dac_handle, buf, sizeof(buf), &written, -1);
         dacBufCount++;
 
         // Re-sync run flags and write step indices back every buffer (~12.8 ms)
@@ -607,12 +620,12 @@ void setDAC(int channel, int value) {
         dac1Value    = value;
         writeDacHardware(0, dac1Value);
         voltageValue = (float)dac1Value / DAC_MAX * MAX_VOLTAGE;
-        Serial.printf("dac1: %d (%.1f V)\n", dac1Value, (float)voltageValue);
+        Serial.printf("dac1: %d (%.1f V)\r\n", dac1Value, (float)voltageValue);
     } else {
         dac2Value    = value;
         writeDacHardware(1, dac2Value);
         currentValue = (float)dac2Value / DAC_MAX * MAX_CURRENT;
-        Serial.printf("dac2: %d (%.1f A)\n", dac2Value, (float)currentValue);
+        Serial.printf("dac2: %d (%.1f A)\r\n", dac2Value, (float)currentValue);
     }
     broadcastStatus();
 }
@@ -622,8 +635,8 @@ void setDAC(int channel, int value) {
 // ─────────────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(SERIAL_BAUD);
-    Serial.printf("\n%s v%s\n", PROG_NAME, PROG_VERSION);
-    Serial.printf("Sample rate: %d Hz  Buffer: %d × %d samples\n",
+    Serial.printf("\n%s v%s\r\n", PROG_NAME, PROG_VERSION);
+    Serial.printf("Sample rate: %d Hz  Buffer: %d × %d samples\r\n",
                   SAMPLE_RATE, I2S_DMA_BUF_COUNT, I2S_DMA_BUF_LEN);
 
     pinMode(LED_PIN, OUTPUT);
@@ -643,7 +656,7 @@ void setup() {
     ledcAttach(DAC2_PIN, PWM_CARRIER_FREQ, PWM_RESOLUTION);
     ledcWrite(DAC1_PIN, 0);
     ledcWrite(DAC2_PIN, 0);
-    Serial.printf("PWM DAC: %d Hz, %d-bit (add RC filter!)\n",
+    Serial.printf("PWM DAC: %d Hz, %d-bit (add RC filter!)\r\n",
                   PWM_CARRIER_FREQ, PWM_RESOLUTION);
 #else
     // FAST: init I2S in DAC mode and start dacTask on Core 0
@@ -671,9 +684,10 @@ void setup() {
 #endif
     displaySplash();
 
-    // Load preferences — credential list + location
+    // Load preferences — credential list + location + WS secret
     preferences.begin(PREF_NAMESPACE, false);
     locationName = preferences.getString("location", "");
+    wsSecret     = preferences.getString("wsSecret", WS_SECRET_DEFAULT);
     wifiCredCount = preferences.getInt("wifiCount", 0);
     for (int i = 0; i < wifiCredCount && i < WIFI_MAX_CREDS; i++) {
         wifiCreds[i].ssid = preferences.getString(("wssid" + String(i)).c_str(), "");
@@ -697,7 +711,7 @@ void setup() {
     if (wifiCredCount > 0) {
         for (int i = 0; i < wifiCredCount && !wifiConnected; i++) {
             if (wifiCreds[i].ssid.length() == 0) continue;
-            Serial.printf("Trying WiFi %d/%d: %s\n", i+1, wifiCredCount, wifiCreds[i].ssid.c_str());
+            Serial.printf("Trying WiFi %d/%d: %s\r\n", i+1, wifiCredCount, wifiCreds[i].ssid.c_str());
             WiFi.begin(wifiCreds[i].ssid.c_str(), wifiCreds[i].pass.c_str());
             unsigned long t0 = millis();
             while (WiFi.status() != WL_CONNECTED && millis() - t0 < 8000) {
@@ -708,14 +722,14 @@ void setup() {
                 wifiCredActive  = i;
                 wifiSSID        = wifiCreds[i].ssid;
                 wifiPass        = wifiCreds[i].pass;
-                Serial.printf("\nWiFi: %s  IP: %s\n", wifiSSID.c_str(),
+                Serial.printf("\nWiFi: %s  IP: %s\r\n", wifiSSID.c_str(),
                               WiFi.localIP().toString().c_str());
                 setupOTA();
                 webSocket.begin();
                 webSocket.onEvent(webSocketEvent);
                 wsServerStarted = true;
             } else {
-                Serial.printf("\n  %s failed\n", wifiCreds[i].ssid.c_str());
+                Serial.printf("\n  %s failed\r\n", wifiCreds[i].ssid.c_str());
                 WiFi.disconnect(true);
                 delay(200);
             }
@@ -754,13 +768,13 @@ void loop() {
             lastReconnectMs = millis();
             // Rotate through credential list on each reconnect attempt
             reconnectIdx = reconnectIdx % wifiCredCount;
-            Serial.printf("Reconnecting to %s...\n", wifiCreds[reconnectIdx].ssid.c_str());
+            Serial.printf("Reconnecting to %s...\r\n", wifiCreds[reconnectIdx].ssid.c_str());
             WiFi.begin(wifiCreds[reconnectIdx].ssid.c_str(), wifiCreds[reconnectIdx].pass.c_str());
             reconnectIdx++;
         }
         if (!wifiConnected && wifiUp) {
             wifiConnected = true;
-            Serial.printf("WiFi up: %s\n", WiFi.localIP().toString().c_str());
+            Serial.printf("WiFi up: %s\r\n", WiFi.localIP().toString().c_str());
             if (!wsServerStarted) {
                 setupOTA();
                 webSocket.begin();
@@ -868,9 +882,9 @@ void setupOTA() {
     ArduinoOTA.onEnd([](){   otaInProgress = false; Serial.println("\nOTA done"); });
     ArduinoOTA.onProgress([](unsigned int p, unsigned int t){
         otaProgress = (int)((float)p / t * 100);
-        if (otaProgress % 10 == 0) Serial.printf("OTA: %d%%\n", otaProgress);
+        if (otaProgress % 10 == 0) Serial.printf("OTA: %d%%\r\n", otaProgress);
     });
-    ArduinoOTA.onError([](ota_error_t e){ Serial.printf("OTA err %u\n", e); otaInProgress = false; });
+    ArduinoOTA.onError([](ota_error_t e){ Serial.printf("OTA err %u\r\n", e); otaInProgress = false; });
     ArduinoOTA.begin();
 }
 
@@ -950,30 +964,88 @@ void broadcastStatus() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// HMAC-SHA256 challenge-response helpers
+// ─────────────────────────────────────────────────────────────────────────────
+static String makeNonce() {
+    // esp_random() uses hardware RNG (no ADC) — safe alongside analogRead()
+    String s;
+    for (int i = 0; i < 4; i++) {
+        char h[9]; sprintf(h, "%08x", (unsigned)esp_random());
+        s += h;
+    }
+    return s;
+}
+
+static String hmacSha256Hex(const String& secret, const String& data) {
+    uint8_t result[32];
+    mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
+        (const uint8_t*)secret.c_str(), secret.length(),
+        (const uint8_t*)data.c_str(),   data.length(),
+        result);
+    String out;
+    for (int i = 0; i < 32; i++) {
+        char h[3]; sprintf(h, "%02x", result[i]);
+        out += h;
+    }
+    return out;
+}
+
 // WebSocket event handler
 // ─────────────────────────────────────────────────────────────────────────────
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
     switch (type) {
         case WStype_CONNECTED:
             wsClientCount++;
-            Serial.printf("WS[%d] connected\n", num);
-            broadcastStatus();
+            if (num < 4) {
+                // If secret is empty, skip auth — mark authenticated immediately
+                if (wsSecret.length() == 0) {
+                    wsAuthenticated[num] = true;
+                    Serial.printf("WS[%d] connected (no secret — open access)\r\n", num);
+                    webSocket.sendTXT(num, "{\"type\":\"ok\",\"msg\":\"authenticated\"}");
+                } else {
+                    wsAuthenticated[num] = false;
+                    wsNonce[num] = makeNonce();
+                    Serial.printf("WS[%d] connected — sending challenge\r\n", num);
+                    String msg = "{\"type\":\"challenge\",\"nonce\":\"" + wsNonce[num] + "\"}";
+                    webSocket.sendTXT(num, msg);
+                }
+            }
             break;
         case WStype_DISCONNECTED:
             if (wsClientCount > 0) wsClientCount--;
-            Serial.printf("WS[%d] disconnected\n", num);
+            if (num < 4) wsAuthenticated[num] = false;
+            Serial.printf("WS[%d] disconnected\r\n", num);
             break;
         case WStype_TEXT: {
             wsMessageCount++;
-            Serial.printf("WS rx: %u bytes\r\n", (unsigned)length);
-            // load_profile with 100 steps × 2 channels needs up to ~14 KB in ArduinoJson.
-            // DynamicJsonDocument allocates on the heap, not the stack.
             DynamicJsonDocument doc(16384);
             DeserializationError err = deserializeJson(doc, payload, length);
             if (err) {
                 Serial.printf("JSON parse error: %s\r\n", err.c_str());
                 return;
             }
+            // ── Auth gate ─────────────────────────────────────────────────────
+            if (num < 4 && !wsAuthenticated[num]) {
+                if (strcmp(doc["cmd"] | "", "auth") == 0) {
+                    String expected = hmacSha256Hex(wsSecret, wsNonce[num]);
+                    if (String(doc["response"] | "") == expected) {
+                        wsAuthenticated[num] = true;
+                        Serial.printf("WS[%d] authenticated\r\n", num);
+                        webSocket.sendTXT(num, "{\"type\":\"ok\",\"msg\":\"authenticated\"}");
+                        broadcastStatus();
+                    } else {
+                        Serial.printf("WS[%d] auth failed — disconnecting\r\n", num);
+                        webSocket.sendTXT(num, "{\"type\":\"error\",\"msg\":\"auth failed\"}");
+                        webSocket.disconnect(num);
+                    }
+                } else {
+                    webSocket.sendTXT(num, "{\"type\":\"error\",\"msg\":\"not authenticated\"}");
+                    webSocket.disconnect(num);
+                }
+                return;
+            }
+            Serial.printf("WS rx: %u bytes\r\n", (unsigned)length);
             handleWsCommand(num, doc);
             break;
         }
@@ -1057,12 +1129,62 @@ void handleWsCommand(uint8_t num, JsonDocument& doc) {
             webSocket.sendTXT(num, "{\"type\":\"ok\",\"msg\":\"wifi removed\"}");
         }
     }
+    else if (strcmp(cmd, "get_profile") == 0) {
+        // Return the currently loaded profile so the web UI can sync on reconnect
+        DynamicJsonDocument resp(16384);
+        resp["type"]      = "profile_data";
+        resp["vRunning"]  = profileVRunning;
+        resp["cRunning"]  = profileCRunning;
+        resp["vStep"]     = profileVStep;
+        resp["cStep"]     = profileCStep;
+        resp["vLoop"]     = profileVLoop;
+        resp["cLoop"]     = profileCLoop;
+        JsonArray vArr = resp.createNestedArray("voltage");
+        for (int i = 0; i < profileVCount; i++) {
+            JsonObject s = vArr.createNestedObject();
+            s["name"]       = profileV[i].name;
+            s["value"]      = profileV[i].value;
+            s["durationMs"] = profileV[i].durationMs;
+            s["rampMs"]     = profileV[i].rampMs;
+        }
+        JsonArray cArr = resp.createNestedArray("current");
+        for (int i = 0; i < profileCCount; i++) {
+            JsonObject s = cArr.createNestedObject();
+            s["name"]       = profileC[i].name;
+            s["value"]      = profileC[i].value;
+            s["durationMs"] = profileC[i].durationMs;
+            s["rampMs"]     = profileC[i].rampMs;
+        }
+        String out;
+        serializeJson(resp, out);
+        webSocket.sendTXT(num, out);
+    }
     else if (strcmp(cmd, "set_location") == 0) {
         locationName = doc["value"] | "";
         preferences.begin(PREF_NAMESPACE, false);
         preferences.putString("location", locationName);
         preferences.end();
         broadcastStatus();
+    }
+    else if (strcmp(cmd, "set_secret") == 0) {
+        // Only allowed when no secret is currently set (first-time setup).
+        // Once a secret is set it can only be changed via the serial console.
+        if (wsSecret.length() > 0) {
+            webSocket.sendTXT(num, "{\"type\":\"error\",\"msg\":\"secret already set — use serial console to change\"}");
+            Serial.printf("WS[%d] set_secret rejected: secret already set\r\n", num);
+        } else {
+            wsSecret = doc["value"] | "";
+            wsSecret.trim();
+            if (wsSecret.length() == 0) {
+                webSocket.sendTXT(num, "{\"type\":\"error\",\"msg\":\"provide a non-empty secret\"}");
+            } else {
+                preferences.begin(PREF_NAMESPACE, false);
+                preferences.putString("wsSecret", wsSecret);
+                preferences.end();
+                Serial.printf("WS secret set via WebSocket (%d chars) — now locked\r\n", wsSecret.length());
+                webSocket.sendTXT(num, "{\"type\":\"ok\",\"msg\":\"secret updated\"}");
+            }
+        }
     }
 }
 
@@ -1141,7 +1263,7 @@ void handleSerial() {
                 wifiCreds[wifiCredCount].pass = rest.substring(sp + 1);
                 wifiCredCount++;
                 saveWifiCreds();
-                Serial.printf("Added [%d] %s\n", wifiCredCount-1, wifiCreds[wifiCredCount-1].ssid.c_str());
+                Serial.printf("Added [%d] %s\r\n", wifiCredCount-1, wifiCreds[wifiCredCount-1].ssid.c_str());
             } else if (wifiCredCount >= WIFI_MAX_CREDS) {
                 Serial.println("List full (max 4). Use wifi remove <idx> first.");
             } else {
@@ -1150,7 +1272,7 @@ void handleSerial() {
         } else if (args.startsWith("remove ")) {
             int idx = args.substring(7).toInt();
             if (idx >= 0 && idx < wifiCredCount) {
-                Serial.printf("Removed [%d] %s\n", idx, wifiCreds[idx].ssid.c_str());
+                Serial.printf("Removed [%d] %s\r\n", idx, wifiCreds[idx].ssid.c_str());
                 for (int i = idx; i < wifiCredCount - 1; i++) wifiCreds[i] = wifiCreds[i+1];
                 wifiCredCount--;
                 if (wifiCredActive == idx) wifiCredActive = -1;
@@ -1158,12 +1280,12 @@ void handleSerial() {
                 saveWifiCreds();
             } else { Serial.println("Invalid index"); }
         } else if (args == "list") {
-            Serial.printf("WiFi credentials (%d/%d):\n", wifiCredCount, WIFI_MAX_CREDS);
+            Serial.printf("WiFi credentials (%d/%d):\r\n", wifiCredCount, WIFI_MAX_CREDS);
             for (int i = 0; i < wifiCredCount; i++)
-                Serial.printf("  [%d] %s%s\n", i, wifiCreds[i].ssid.c_str(),
+                Serial.printf("  [%d] %s%s\r\n", i, wifiCreds[i].ssid.c_str(),
                               i == wifiCredActive ? " <active>" : "");
         } else if (args == "status") {
-            Serial.printf("WiFi: %s  SSID: %s  IP: %s\n",
+            Serial.printf("WiFi: %s  SSID: %s  IP: %s\r\n",
                 wifiConnected ? "CONNECTED" : "OFFLINE",
                 wifiConnected ? wifiSSID.c_str() : "-",
                 wifiConnected ? WiFi.localIP().toString().c_str() : "N/A");
@@ -1185,6 +1307,17 @@ void handleSerial() {
             String s = args.substring(4);
             ledMode = s=="on" ? LED_ON : s=="blink" ? LED_BLINK : LED_OFF;
         }
+        else if (args.startsWith("secret ") || args == "secret") {
+            wsSecret = args.startsWith("secret ") ? args.substring(7) : "";
+            wsSecret.trim();
+            preferences.begin(PREF_NAMESPACE, false);
+            preferences.putString("wsSecret", wsSecret);
+            preferences.end();
+            if (wsSecret.length() == 0)
+                Serial.printf("WS secret cleared — open access enabled\r\n");
+            else
+                Serial.printf("WS secret updated (%d chars)\r\n", wsSecret.length());
+        }
     }
     else if (line.startsWith("profile ")) {
         String args = line.substring(8);
@@ -1192,21 +1325,21 @@ void handleSerial() {
         else if (args == "stop") { stopProfile(true, true); saveProfileToPrefs(); }
     }
     else if (line == "version") {
-        Serial.printf("%s v%s\n", PROG_NAME, PROG_VERSION);
+        Serial.printf("%s v%s\r\n", PROG_NAME, PROG_VERSION);
     }
     else if (line == "status") {
-        Serial.printf("V: %.2f V  I: %.2f A  dac1: %d  dac2: %d\n",
+        Serial.printf("V: %.2f V  I: %.2f A  dac1: %d  dac2: %d\r\n",
                       (float)voltageValue, (float)currentValue,
                       (int)dac1Value, (int)dac2Value);
-        Serial.printf("ProfileV: %s  ProfileC: %s\n",
+        Serial.printf("ProfileV: %s  ProfileC: %s\r\n",
                       profileVRunning ? "running" : "stopped",
                       profileCRunning ? "running" : "stopped");
-        Serial.printf("WiFi: %s  SSID: %s  IP: %s  WS clients: %d\n",
+        Serial.printf("WiFi: %s  SSID: %s  IP: %s  WS clients: %d\r\n",
                       wifiConnected ? "UP" : "DOWN",
                       wifiConnected ? wifiSSID.c_str() : "-",
                       wifiConnected ? WiFi.localIP().toString().c_str() : "N/A",
                       wsClientCount);
-        Serial.printf("Sample rate: %d Hz\n", SAMPLE_RATE);
+        Serial.printf("Sample rate: %d Hz\r\n", SAMPLE_RATE);
     }
     else if (line == "help") {
         Serial.println("Commands:");
@@ -1214,6 +1347,7 @@ void handleSerial() {
         Serial.println("  wifi status              wifi clear");
         Serial.println("  set voltage <0-60>       set current <0-200>");
         Serial.println("  set dac1 <0-4095>        set dac2 <0-4095>   set led <on|off|blink>");
+        Serial.println("  set secret <value>       (WS auth secret — saved to NVS)");
         Serial.println("  profile start            profile stop");
         Serial.println("  version                  status");
     }
