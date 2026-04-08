@@ -164,118 +164,107 @@ USB serial port before connecting over the network.</p>
 <p>Press the <strong>Reset (RST)</strong> button on the board — top-right edge as shown:</p>
 
 <!-- LoRa32 V2 board diagram -->
-<svg viewBox="0 0 480 212" width="480" height="212"
+<svg viewBox="0 0 520 162" width="520" height="162"
      xmlns="http://www.w3.org/2000/svg"
      style="display:block;margin:10px 0 14px;font-family:'Segoe UI',sans-serif;max-width:100%">
 
-  <!-- board body (landscape, light grey PCB) -->
-  <rect x="50" y="32" width="400" height="140" rx="5"
-        fill="#d0d0d0" stroke="#999" stroke-width="1.5"/>
+  <!-- board body (landscape, PCB green) -->
+  <rect x="45" y="26" width="400" height="90" rx="4"
+        fill="#2a5c2a" stroke="#1a3c1a" stroke-width="1.5"/>
 
-  <!-- TOP PIN ROW: 18 pins, pitch=21, start x=57                              -->
-  <!-- GND 3V3 3V3 36 37 38 39 34 35 32 33 25 26 27 14 12 13 21              -->
-  <rect x="57"  y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="78"  y="18" width="10" height="18" rx="1" fill="#cc3333" stroke="#ff5555" stroke-width=".8"/>
-  <rect x="99"  y="18" width="10" height="18" rx="1" fill="#cc3333" stroke="#ff5555" stroke-width=".8"/>
-  <rect x="120" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="141" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="162" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="183" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="204" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="225" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="246" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="267" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="288" y="18" width="10" height="18" rx="1" fill="#225599" stroke="#4488ff" stroke-width=".8"/>
-  <rect x="309" y="18" width="10" height="18" rx="1" fill="#225599" stroke="#4488ff" stroke-width=".8"/>
-  <rect x="330" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="351" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="372" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="393" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="414" y="18" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <!-- TOP PIN ROW: 14 pins, pitch=27, start x=52 -->
+  <rect x="52"  y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="79"  y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="106" y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="133" y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="160" y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="187" y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="214" y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="241" y="16" width="10" height="14" rx="1" fill="#225599" stroke="#4488ff" stroke-width=".8"/>
+  <rect x="268" y="16" width="10" height="14" rx="1" fill="#225599" stroke="#4488ff" stroke-width=".8"/>
+  <rect x="295" y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="322" y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="349" y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="376" y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="403" y="16" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
 
-  <!-- TOP ROW LABELS (rotated -75° from pin centre) -->
-  <text transform="translate(62,16) rotate(-75)"  text-anchor="start" font-size="5.5" fill="#5a7a5a">GND</text>
-  <text transform="translate(83,16) rotate(-75)"  text-anchor="start" font-size="5.5" fill="#ff7777" font-weight="bold">3V3</text>
-  <text transform="translate(104,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#ff7777" font-weight="bold">3V3</text>
-  <text transform="translate(125,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">36</text>
-  <text transform="translate(146,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">37</text>
-  <text transform="translate(167,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">38</text>
-  <text transform="translate(188,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">39</text>
-  <text transform="translate(209,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">34</text>
-  <text transform="translate(230,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">35</text>
-  <text transform="translate(251,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">32</text>
-  <text transform="translate(272,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">33</text>
-  <text transform="translate(293,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#88aaff" font-weight="bold">DAC0&#x25B6;</text>
-  <text transform="translate(314,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#88aaff" font-weight="bold">DAC1&#x25B6;</text>
-  <text transform="translate(335,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">27</text>
-  <text transform="translate(356,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">14</text>
-  <text transform="translate(377,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">12</text>
-  <text transform="translate(398,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">13</text>
-  <text transform="translate(419,16) rotate(-75)" text-anchor="start" font-size="5.5" fill="#7a9a7a">21</text>
+  <!-- TOP ROW KEY LABELS -->
+  <text transform="translate(246,14) rotate(-75)" text-anchor="start" font-size="5.5" fill="#88aaff" font-weight="bold">DAC0&#x25B6;</text>
+  <text transform="translate(273,14) rotate(-75)" text-anchor="start" font-size="5.5" fill="#88aaff" font-weight="bold">DAC1&#x25B6;</text>
 
-  <!-- BOTTOM PIN ROW: 18 pins (no labels) -->
-  <rect x="57"  y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="78"  y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="99"  y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="120" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="141" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="162" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="183" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="204" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="225" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="246" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="267" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="288" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="309" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="330" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="351" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="372" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="393" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
-  <rect x="414" y="168" width="10" height="18" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <!-- BOTTOM PIN ROW: 14 pins -->
+  <rect x="52"  y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="79"  y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="106" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="133" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="160" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="187" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="214" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="241" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="268" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="295" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="322" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="349" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="376" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
+  <rect x="403" y="112" width="10" height="14" rx="1" fill="#c8a000" stroke="#a08000" stroke-width=".5"/>
 
-  <!-- LEFT END: PRG (top), USB (middle), RST (bottom) -->
-  <rect x="57" y="42" width="18" height="10" rx="3"
+  <!-- LEFT END: PRG (top), USB-C (protruding left), RST (bottom) -->
+  <rect x="50" y="35" width="18" height="9" rx="3"
         fill="#555" stroke="#888" stroke-width="1"/>
-  <text x="66" y="50" text-anchor="middle" font-size="7" fill="#ddd">PRG</text>
+  <text x="59" y="43" text-anchor="middle" font-size="6.5" fill="#ddd">PRG</text>
 
-  <rect x="24" y="93" width="30" height="18" rx="3"
-        fill="#555" stroke="#888" stroke-width="1"/>
-  <text x="39" y="105" text-anchor="middle" font-size="7" fill="#ddd">USB</text>
+  <!-- USB-C port protruding from left edge -->
+  <rect x="28" y="60" width="20" height="13" rx="3"
+        fill="#444" stroke="#777" stroke-width="1"/>
+  <text x="38" y="69" text-anchor="middle" font-size="5.5" fill="#bbb">USB</text>
 
-  <rect x="57" y="148" width="18" height="10" rx="3"
+  <rect x="50" y="96" width="18" height="9" rx="3"
         fill="#cc3333" stroke="#ff6666" stroke-width="1.5"/>
-  <text x="66" y="156" text-anchor="middle" font-size="7" fill="#fff" font-weight="bold">RST</text>
+  <text x="59" y="104" text-anchor="middle" font-size="6.5" fill="#fff" font-weight="bold">RST</text>
 
   <!-- WiFi coil region -->
-  <rect x="105" y="38" width="50" height="130" rx="3"
-        fill="#bebebe" stroke="#888" stroke-width=".8"/>
-  <ellipse cx="130" cy="88" rx="14" ry="6" fill="none" stroke="#666" stroke-width="1.2"/>
-  <ellipse cx="130" cy="100" rx="14" ry="6" fill="none" stroke="#666" stroke-width="1.2"/>
-  <ellipse cx="130" cy="112" rx="14" ry="6" fill="none" stroke="#666" stroke-width="1.2"/>
-  <text x="130" y="152" text-anchor="middle" font-size="7.5" fill="#444">WiFi/BT</text>
+  <rect x="90" y="32" width="58" height="78" rx="3"
+        fill="#234523" stroke="#345634" stroke-width=".8"/>
+  <ellipse cx="119" cy="58" rx="13" ry="5.5" fill="none" stroke="#6a9a6a" stroke-width="1.2"/>
+  <ellipse cx="119" cy="70" rx="13" ry="5.5" fill="none" stroke="#6a9a6a" stroke-width="1.2"/>
+  <ellipse cx="119" cy="82" rx="13" ry="5.5" fill="none" stroke="#6a9a6a" stroke-width="1.2"/>
+  <text x="119" y="101" text-anchor="middle" font-size="7" fill="#8aba8a">WiFi/BT</text>
 
-  <!-- OLED display — full width to antenna -->
-  <rect x="163" y="36" width="285" height="132" rx="3"
-        fill="#080818" stroke="#223" stroke-width="1"/>
-  <text x="305" y="98" text-anchor="middle" font-size="11" fill="#4466aa">OLED 128×64</text>
-  <text x="305" y="114" text-anchor="middle" font-size="8"  fill="#334488">display</text>
+  <!-- OLED display -->
+  <rect x="155" y="31" width="95" height="80" rx="3"
+        fill="#050510" stroke="#223366" stroke-width="1.2"/>
+  <text x="202" y="68" text-anchor="middle" font-size="8.5" fill="#3355aa">OLED</text>
+  <text x="202" y="80" text-anchor="middle" font-size="7" fill="#224488">128×64</text>
 
-  <!-- Antenna socket protruding right -->
-  <rect x="448" y="89" width="22" height="26" rx="3"
-        fill="#666" stroke="#aaa" stroke-width="1"/>
-  <circle cx="459" cy="102" r="6" fill="none" stroke="#ccc" stroke-width="1.5"/>
-  <circle cx="459" cy="102" r="2.5" fill="#aaa"/>
-  <text x="459" y="127" text-anchor="middle" font-size="7" fill="#666">ANT</text>
+  <!-- LoRa SX1276 module -->
+  <rect x="257" y="29" width="115" height="84" rx="3"
+        fill="#1a2e1a" stroke="#2a4a2a" stroke-width="1.2"/>
+  <text x="314" y="68" text-anchor="middle" font-size="8.5" fill="#5a8a5a">LoRa</text>
+  <text x="314" y="81" text-anchor="middle" font-size="7" fill="#486848">SX1276</text>
 
-  <!-- RST callout below board -->
-  <circle cx="66" cy="158" r="2.5" fill="#ff6666"/>
-  <line x1="66" y1="160" x2="66" y2="193" stroke="#ff6666" stroke-width="1.2" stroke-dasharray="3,2"/>
-  <rect x="2" y="193" width="148" height="17" rx="4"
-        fill="#2a0a0a" stroke="#ff6666" stroke-width="1.2"/>
-  <text x="76" y="204" text-anchor="middle" font-size="7.5" fill="#ff8888" font-weight="bold">RST — press to reboot</text>
+  <!-- Right end spacer / antenna lead -->
+  <rect x="378" y="31" width="62" height="80" rx="3"
+        fill="#254025" stroke="#345534" stroke-width=".8"/>
+
+  <!-- Antenna socket protruding from right edge -->
+  <rect x="443" y="57" width="18" height="18" rx="3"
+        fill="#555" stroke="#999" stroke-width="1"/>
+  <circle cx="452" cy="66" r="5" fill="none" stroke="#ccc" stroke-width="1.3"/>
+  <circle cx="452" cy="66" r="2" fill="#999"/>
+  <text x="452" y="84" text-anchor="middle" font-size="6.5" fill="#888">ANT</text>
+
+  <!-- RST callout: dashed line down to label box -->
+  <circle cx="59" cy="100" r="2.5" fill="#ff6666"/>
+  <line x1="59" y1="103" x2="59" y2="140" stroke="#ff6666" stroke-width="1.2" stroke-dasharray="3,2"/>
+  <rect x="4" y="140" width="152" height="18" rx="4"
+        fill="#2a0808" stroke="#ff6666" stroke-width="1.2"/>
+  <text x="80" y="152" text-anchor="middle" font-size="7.5" fill="#ff8888" font-weight="bold">RST — press to reboot</text>
+
+  <!-- PRG small label -->
+  <text x="50" y="26" text-anchor="start" font-size="6" fill="#888">PRG/Boot</text>
 
   <!-- board label -->
-  <text x="448" y="174" text-anchor="end" font-size="8" fill="#666">Heltec LoRa32 V2</text>
+  <text x="440" y="123" text-anchor="end" font-size="7.5" fill="#5a8a5a">Heltec LoRa32 V2</text>
 </svg>
 
 <div class="tip" style="margin:10px 0">
