@@ -220,6 +220,10 @@ output:
   store_mqtt_topic: false
   store_project_id: false
   store_sample_count: false
+compact:
+  enabled: true
+  interval_seconds: 120
+  min_files: 3
 health:
   enabled: false
 wal:
@@ -291,6 +295,10 @@ output:
   store_mqtt_topic: false
   store_project_id: false
   store_sample_count: false
+compact:
+  enabled: true
+  interval_seconds: 120
+  min_files: 3
 health:
   enabled: false
 wal:
@@ -364,6 +372,10 @@ output:
   store_mqtt_topic: false
   store_project_id: false
   store_sample_count: false
+compact:
+  enabled: true
+  interval_seconds: 120
+  min_files: 3
 health:
   enabled: false
 wal:
