@@ -396,6 +396,9 @@ async function fetchResults() {
       if (s.status === 'running' || s.status === 'started') {
         dot.className = 'status-dot warn';
         stat.textContent = `test still running — started ${s.ts || ''}. Try again in a moment.`;
+      } else if (s.status === 'complete') {
+        dot.className = 'status-dot error';
+        stat.textContent = `test complete but results.json fetch failed — CORS headers missing? Check server on ${base}`;
       } else if (s.status === 'failed') {
         dot.className = 'status-dot error';
         stat.textContent = `test failed (exit ${s.exit ?? '?'}) — check log on host`;
