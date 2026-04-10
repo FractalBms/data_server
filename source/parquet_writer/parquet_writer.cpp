@@ -751,7 +751,8 @@ arrow::Status flush_partition(const std::string& path,
                                const std::vector<Row>& rows,
                                const std::string& compression,
                                bool merge_wide = false,
-                               const std::string& partition_key = "") {
+                               const std::string& partition_key = "",
+                               bool null_fill = false) {
     if (rows.empty()) return arrow::Status::OK();
     std::vector<Row> merged;
     const std::vector<Row>* rp = &rows;
@@ -759,7 +760,7 @@ arrow::Status flush_partition(const std::string& path,
 
     // null_fill_unchanged: replace unchanged column values with null (absent key).
     // Slow signals compress extremely well as runs of nulls in columnar format.
-    if (merge_wide && g_cfg->null_fill_unchanged && !partition_key.empty()) {
+    if (merge_wide && null_fill && !partition_key.empty()) {
         std::lock_guard<std::mutex> lk(s_nf_mtx);
         auto& last = s_nf_last[partition_key];
         for (auto& row : merged) {
@@ -1174,7 +1175,8 @@ static void do_flush(std::map<PartitionKey, Partition> to_flush,
             }
             status = flush_partition(path, part.rows, g_cfg->compression,
                                          !g_cfg->compound_field_name.empty(),
-                                         key.partition_value);
+                                         key.partition_value,
+                                         g_cfg->null_fill_unchanged);
             if (status.ok()) break;
             std::cerr << "[flush] attempt " << attempt + 1 << " failed: "
                       << status.ToString() << "\n" << std::flush;
@@ -1349,7 +1351,8 @@ static void replay_wal_files() {
                 std::cout << "[wal] data timestamp: " << collection_suffix << "\n";
             auto status = flush_partition(path, part_rows, g_cfg->compression,
                                               !g_cfg->compound_field_name.empty(),
-                                              key.partition_value);
+                                              key.partition_value,
+                                              g_cfg->null_fill_unchanged);
             if (status.ok()) {
                 std::cout << "[wal] flushed " << part_rows.size() << " replayed rows → " << path << "\n" << std::flush;
             } else {
