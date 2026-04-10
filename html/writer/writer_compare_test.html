@@ -134,6 +134,83 @@ code { padding:1px 5px; font-size:.82rem; }
   all other signal columns null. Set <code>time_window_ms: 0</code> to disable.
 </div>
 
+<!-- ── SIGNAL FILTER ── -->
+<details style="margin-bottom:16px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+<summary style="padding:10px 14px;cursor:pointer;background:var(--surface);font-size:.85rem;
+                color:var(--orange);font-weight:600;list-style:none">
+  ▶ Signal Filtering — 36 signals dropped before publish (constants &amp; monotonics)
+</summary>
+<div style="padding:14px 16px;font-size:.8rem;line-height:1.6">
+  <p style="color:var(--muted);margin-bottom:10px">
+    When running with <code>--csv</code>, signals are pre-filtered before being published to MQTT.
+    Constants compress well individually but waste column space; monotonics (heartbeats, counters)
+    have maximum entropy and actively harm compression ratios. Identified from 200-sample analysis
+    of SBESS3 UC 61B5 real data.
+  </p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div>
+      <div style="color:var(--red);font-weight:600;margin-bottom:6px">Dropped — Monotonic (6)</div>
+      <table style="border-collapse:collapse;width:100%;font-size:.75rem">
+        <thead><tr>
+          <th style="text-align:left;padding:2px 8px;color:var(--muted);border-bottom:1px solid var(--border)">Signal</th>
+          <th style="text-align:left;padding:2px 8px;color:var(--muted);border-bottom:1px solid var(--border)">Reason</th>
+        </tr></thead>
+        <tbody>
+          <tr><td style="padding:2px 8px;color:var(--text)">BMS_SysHB, SysHB</td><td style="padding:2px 8px;color:var(--muted)">heartbeat counter +1/s</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">Counter (bms + pcs)</td><td style="padding:2px 8px;color:var(--muted)">sweep counter +1/s</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">ItemDeletionTime (bms + pcs)</td><td style="padding:2px 8px;color:var(--muted)">internal Unix timestamp</td></tr>
+        </tbody>
+      </table>
+      <div style="color:var(--yellow);font-weight:600;margin:10px 0 6px">Dropped — Constants (30)</div>
+      <table style="border-collapse:collapse;width:100%;font-size:.75rem">
+        <thead><tr>
+          <th style="text-align:left;padding:2px 8px;color:var(--muted);border-bottom:1px solid var(--border)">Signal</th>
+          <th style="text-align:left;padding:2px 8px;color:var(--muted);border-bottom:1px solid var(--border)">Value</th>
+        </tr></thead>
+        <tbody>
+          <tr><td style="padding:2px 8px;color:var(--text)">AvgCellT, BMS_AvgCellT</td><td style="padding:2px 8px;color:var(--muted)">0.0 (sensor offline)</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">BMS_ChaCurrLimit / DischCurrLimit</td><td style="padding:2px 8px;color:var(--muted)">±652 A fixed</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">ChaCurrLimit / DischCurrLimit</td><td style="padding:2px 8px;color:var(--muted)">±3912 A fixed</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">BMS_MaxP_Bus1/2/3, BMS_MinP_Bus1/2/3</td><td style="padding:2px 8px;color:var(--muted)">±1304 kW fixed</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">BMS_MaxCellT, MaxCellT, MinCellT</td><td style="padding:2px 8px;color:var(--muted)">27/29/23 °C fixed</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">BMS_RackCount, RackCount</td><td style="padding:2px 8px;color:var(--muted)">8 / 48 fixed</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">BMS_SysSOH, SysSOH</td><td style="padding:2px 8px;color:var(--muted)">100% fixed</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">ConnectingStatus</td><td style="padding:2px 8px;color:var(--muted)">3030 fixed</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">SN (bms + pcs), TS (bms + pcs)</td><td style="padding:2px 8px;color:var(--muted)">200 / 2026 fixed</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">ACBreaker, Bank1/2/3Enable</td><td style="padding:2px 8px;color:var(--muted)">1 (always closed/enabled)</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--text)">DisableEvenBMS, DisableOddBMS</td><td style="padding:2px 8px;color:var(--muted)">0 (never disabled)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <div style="color:var(--green);font-weight:600;margin-bottom:6px">Kept — Analytical signals (33)</div>
+      <table style="border-collapse:collapse;width:100%;font-size:.75rem">
+        <thead><tr>
+          <th style="text-align:left;padding:2px 8px;color:var(--muted);border-bottom:1px solid var(--border)">Signal</th>
+          <th style="text-align:left;padding:2px 8px;color:var(--muted);border-bottom:1px solid var(--border)">Range</th>
+        </tr></thead>
+        <tbody>
+          <tr><td style="padding:2px 8px;color:var(--teal)">BMS_AvgCellV, AvgCellV</td><td style="padding:2px 8px;color:var(--muted)">3.367–3.372 V</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">BMS_MaxCellV, MaxCellV</td><td style="padding:2px 8px;color:var(--muted)">3.374–3.382 V</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">BMS_MinCellV, MinCellV</td><td style="padding:2px 8px;color:var(--muted)">3.358–3.364 V</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">BMS_MinCellT</td><td style="padding:2px 8px;color:var(--muted)">24–25 °C</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">BMS_SysCurrent, SysCurrent</td><td style="padding:2px 8px;color:var(--muted)">−226 to −165 A</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">BMS_SysSOC, SysSOC</td><td style="padding:2px 8px;color:var(--muted)">81–82 %</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">BMS_SysVoltage, SysVoltage</td><td style="padding:2px 8px;color:var(--muted)">1151–1153 V</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">Hz</td><td style="padding:2px 8px;color:var(--muted)">59.96–60.04 Hz</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">DCA, DCV, DCkW</td><td style="padding:2px 8px;color:var(--muted)">DC bus measurements</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">PCS_P, PCS_Q, kW, kVA, kVAR</td><td style="padding:2px 8px;color:var(--muted)">AC power measurements</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">AphA, AphB, AphC</td><td style="padding:2px 8px;color:var(--muted)">phase currents</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">PhVphA, PhVphB, PhVphC</td><td style="padding:2px 8px;color:var(--muted)">phase voltages</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">PCS_MaxP, PCS_MinP</td><td style="padding:2px 8px;color:var(--muted)">power limits (vary)</td></tr>
+          <tr><td style="padding:2px 8px;color:var(--teal)">PF, WatchdogResponse</td><td style="padding:2px 8px;color:var(--muted)">power factor / watchdog</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</details>
+
 <!-- ── TOPOLOGY ── -->
 <h2>Test Topology</h2>
 <div class="card-row">

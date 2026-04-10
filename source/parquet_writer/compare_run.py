@@ -90,6 +90,26 @@ if os.path.isfile(CFG_WIDE_PIVOT):
 
 UNITS = [f"{0x0215D1D8 + i:08X}" for i in range(12)]
 
+# ── Signals excluded from CSV replay ─────────────────────────────────────────
+# Identified from SBESS3 UC 61B5 real data (200-sample analysis):
+#   MONOTONIC  — increment every sweep; compress very poorly (entropy = max)
+#   CONSTANT   — single unique value across entire run; waste column space
+CSV_EXCLUDE = {
+    # Monotonic — heartbeats / counters / internal timestamps
+    'BMS_SysHB', 'SysHB', 'Counter', 'ItemDeletionTime',
+    # Constants — zero analytical value in this dataset
+    'AvgCellT', 'BMS_AvgCellT',
+    'BMS_ChaCurrLimit', 'BMS_DischCurrLimit',
+    'BMS_MaxCellT',
+    'BMS_MaxP_Bus1', 'BMS_MaxP_Bus2', 'BMS_MaxP_Bus3',
+    'BMS_MinP_Bus1', 'BMS_MinP_Bus2', 'BMS_MinP_Bus3',
+    'BMS_RackCount', 'BMS_SysSOH',
+    'ChaCurrLimit', 'ConnectingStatus', 'DischCurrLimit',
+    'MaxCellT', 'MinCellT', 'RackCount', 'SN', 'SysSOH', 'TS',
+    'ACBreaker', 'Bank1Enable', 'Bank2Enable', 'Bank3Enable',
+    'DisableEvenBMS', 'DisableOddBMS',
+}
+
 # ── CSV replay loader ─────────────────────────────────────────────────────────
 def load_csv_replay(zip_path):
     """Parse InfluxDB Flux CSV from SBESS3 zip.
@@ -126,6 +146,7 @@ def load_csv_replay(zip_path):
                     instance = row[11]   # source_device_id: bms_1, pcs_1, ...
                     val_str  = row[6]    # _value
                     if point.startswith('log-'): continue
+                    if point in CSV_EXCLUDE: continue
                     if instance not in TARGET_DEVICES: continue
                     try:
                         val = float(val_str)
