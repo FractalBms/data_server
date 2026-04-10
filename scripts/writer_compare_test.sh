@@ -362,7 +362,7 @@ output:
   base_path: $OUTDIR/wide
   site_id: "$SITE"
   partitions: ["{year}", "{month}", "{day}"]
-  compression: snappy
+  compression: zstd
   flush_interval_seconds: 60
   max_messages_per_part: 6000
   partition_as_filename_prefix: true
