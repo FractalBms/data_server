@@ -117,23 +117,32 @@ for pkg in paho-mqtt pyarrow pyyaml; do
   fi
 done
 
-# ── 4. ensure FlashMQ running ─────────────────────────────────────────────────
+# ── 4. ensure MQTT broker running (FlashMQ or mosquitto) ─────────────────────
 echo ""
-echo "[4] Checking FlashMQ..."
+echo "[4] Checking MQTT broker..."
 if systemctl is-active --quiet flashmq 2>/dev/null; then
   echo "  FlashMQ active (systemd)"
 elif pgrep -x flashmq >/dev/null 2>&1; then
   echo "  FlashMQ running (process)"
+elif systemctl is-active --quiet mosquitto 2>/dev/null; then
+  echo "  mosquitto active (systemd)"
+elif pgrep -x mosquitto >/dev/null 2>&1; then
+  echo "  mosquitto running (process)"
 else
-  echo "  Starting FlashMQ..."
+  echo "  Starting broker..."
   if command -v flashmq >/dev/null 2>&1; then
     flashmq --config /etc/flashmq/flashmq.conf --daemon 2>/dev/null || \
     flashmq --daemon 2>/dev/null || \
     { flashmq &
       sleep 1
       echo "  FlashMQ started (background)" ; }
+  elif command -v mosquitto >/dev/null 2>&1; then
+    echo phil | sudo -S systemctl start mosquitto 2>/dev/null || \
+    { mosquitto -d
+      sleep 1
+      echo "  mosquitto started (background)" ; }
   else
-    echo "  ERROR: flashmq not found — install FlashMQ or start broker manually"
+    echo "  ERROR: no MQTT broker found — install FlashMQ or mosquitto"
     exit 1
   fi
 fi

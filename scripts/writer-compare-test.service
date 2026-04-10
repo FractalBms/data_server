@@ -18,8 +18,8 @@
 
 [Unit]
 Description=Parquet Writer Schema Comparison Benchmark
-After=network.target flashmq.service
-Wants=flashmq.service
+After=network.target flashmq.service mosquitto.service
+Wants=flashmq.service mosquitto.service
 
 [Service]
 Type=oneshot
