@@ -965,8 +965,10 @@ static int compact_directory(const fs::path& dir,
                 auto scalar = std::make_shared<arrow::StringScalar>(uid);
                 auto arr_r  = arrow::MakeArrayFromScalar(*scalar, tbl->num_rows());
                 if (arr_r.ok()) {
-                    auto fld   = arrow::field("unit_id", arrow::utf8());
-                    auto add_r = tbl->AddColumn(1, fld, *arr_r);  // slot after ts
+                    auto fld     = arrow::field("unit_id", arrow::utf8());
+                    auto chunked = std::make_shared<arrow::ChunkedArray>(
+                                       arrow::ArrayVector{*arr_r});
+                    auto add_r = tbl->AddColumn(1, fld, chunked);  // slot after ts
                     if (add_r.ok()) tbl = *add_r;
                 }
             }
