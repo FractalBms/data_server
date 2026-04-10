@@ -17,15 +17,19 @@ OUTDIR=""
 SITE="SITE_A"
 CFGDIR="/tmp/writer-compare-cfg"
 LOGDIR=""
+LOOP=0
+INTERVAL=30   # seconds between loop iterations
 
 # ── arg parse ─────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --sweeps)  SWEEPS="$2";  shift 2 ;;
-    --cov)     COV_FLAG="--cov"; shift ;;
-    --outdir)  OUTDIR="$2";  shift 2 ;;
-    --site)    SITE="$2";    shift 2 ;;
-    --logdir)  LOGDIR="$2";  shift 2 ;;
+    --sweeps)    SWEEPS="$2";    shift 2 ;;
+    --cov)       COV_FLAG="--cov"; shift ;;
+    --outdir)    OUTDIR="$2";    shift 2 ;;
+    --site)      SITE="$2";      shift 2 ;;
+    --logdir)    LOGDIR="$2";    shift 2 ;;
+    --loop)      LOOP=1;         shift ;;
+    --interval)  INTERVAL="$2";  shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -268,42 +272,56 @@ YAML
 
 echo "  configs written"
 
-# ── 6. run benchmark ──────────────────────────────────────────────────────────
-cat > "$OUTDIR/status.json" << JSON
-{"status":"running","sweeps":$SWEEPS,"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-JSON
+# ── 6. run benchmark (once or loop) ──────────────────────────────────────────
+RUN=0
+while true; do
+  RUN=$(( RUN + 1 ))
+  [[ $LOOP -eq 1 ]] && echo "" && echo "========== RUN $RUN (loop mode, interval=${INTERVAL}s) =========="
 
-echo ""
-echo "[6] Running benchmark (sweeps=$SWEEPS)..."
-echo "    Output will also be logged to $LOG_FILE"
-echo ""
+  # rotate log per run when looping
+  if [[ $LOOP -eq 1 ]]; then
+    RUN_LOG="${LOG_FILE%.log}_run${RUN}.log"
+  else
+    RUN_LOG="$LOG_FILE"
+  fi
 
-"$PY" "$REPO_ROOT/source/parquet_writer/compare_run.py" \
-  --cfgdir   "$CFGDIR" \
-  --outdir   "$OUTDIR" \
-  --results  "$RESULTS_FILE" \
-  --sweeps   "$SWEEPS" \
-  --site     "$SITE" \
-  $COV_FLAG \
-  2>&1 | tee "$LOG_FILE"
-
-EXIT=${PIPESTATUS[0]}
-
-echo ""
-echo "=================================================="
-if [[ $EXIT -eq 0 ]]; then
-  echo "  DONE — results at $RESULTS_FILE"
-  echo "  Wide parquet: $OUTDIR/wide/"
-  echo "  Log:          $LOG_FILE"
-  # Write a simple status file for the HTML to poll
   cat > "$OUTDIR/status.json" << JSON
-{"status":"complete","results":"$RESULTS_FILE","wide":"$OUTDIR/wide","ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+{"status":"running","sweeps":$SWEEPS,"run":$RUN,"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 JSON
-else
-  echo "  FAILED (exit $EXIT) — see $LOG_FILE"
-  cat > "$OUTDIR/status.json" << JSON
-{"status":"failed","exit":$EXIT,"log":"$LOG_FILE","ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+
+  echo ""
+  echo "[6] Running benchmark (sweeps=$SWEEPS, run=$RUN)..."
+  echo "    Log: $RUN_LOG"
+  echo ""
+
+  "$PY" "$REPO_ROOT/source/parquet_writer/compare_run.py" \
+    --cfgdir   "$CFGDIR" \
+    --outdir   "$OUTDIR" \
+    --results  "$RESULTS_FILE" \
+    --sweeps   "$SWEEPS" \
+    --site     "$SITE" \
+    $COV_FLAG \
+    2>&1 | tee "$RUN_LOG"
+
+  EXIT=${PIPESTATUS[0]}
+
+  echo ""
+  echo "=================================================="
+  if [[ $EXIT -eq 0 ]]; then
+    echo "  DONE run=$RUN — results at $RESULTS_FILE"
+    cat > "$OUTDIR/status.json" << JSON
+{"status":"complete","results":"$RESULTS_FILE","run":$RUN,"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 JSON
-fi
-echo "=================================================="
-exit $EXIT
+  else
+    echo "  FAILED run=$RUN (exit $EXIT) — see $RUN_LOG"
+    cat > "$OUTDIR/status.json" << JSON
+{"status":"failed","exit":$EXIT,"run":$RUN,"log":"$RUN_LOG","ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+JSON
+  fi
+  echo "=================================================="
+
+  [[ $LOOP -eq 0 ]] && exit $EXIT
+
+  echo "  Next run in ${INTERVAL}s — Ctrl-C to stop"
+  sleep "$INTERVAL"
+done

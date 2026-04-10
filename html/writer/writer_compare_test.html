@@ -414,7 +414,8 @@ async function fetchResults() {
       const s = await rs.json();
       if (s.status === 'running' || s.status === 'started') {
         dot.className = 'status-dot warn';
-        stat.textContent = `test still running — started ${s.ts || ''}. Try again in a moment.`;
+        const run = s.run ? ` (run #${s.run})` : '';
+        stat.textContent = `test running${run} — started ${s.ts || ''}. Try again in a moment.`;
       } else if (s.status === 'complete') {
         dot.className = 'status-dot error';
         stat.textContent = `test complete but results.json fetch failed: ${resultsErr} — check server on ${base}`;
