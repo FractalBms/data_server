@@ -254,7 +254,7 @@ mqtt:
 output:
   base_path: $OUTDIR/wide
   site_id: "$SITE"
-  partitions: ["site={site_id}", "{year}", "{month}", "{day}"]
+  partitions: ["{year}", "{month}", "{day}"]
   compression: snappy
   flush_interval_seconds: 60
   max_messages_per_part: 6000

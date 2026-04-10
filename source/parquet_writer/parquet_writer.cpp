@@ -1632,6 +1632,12 @@ static void process_message(const char* topic, const char* payload) {
         row.ints.erase("project_id");
     }
 
+    // wide-pivot: partition value is already in the filename — drop it as a column.
+    if (!g_cfg->compound_field_name.empty()) {
+        row.strings.erase(g_cfg->partition_field);
+        row.ints.erase(g_cfg->partition_field);
+    }
+
     // Time window coalescing + last-write-wins dedup.
     // Statics are safe here — process_message is only called from parse_thread (single thread).
     static int64_t s_window_open_us = 0;
