@@ -360,6 +360,7 @@ output:
   partition_as_filename_prefix: true
   time_window_ms: 250
   wide_point_name: true
+  null_fill_unchanged: true
   store_mqtt_topic: false
   store_project_id: false
   store_sample_count: false

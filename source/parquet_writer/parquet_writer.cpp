@@ -114,6 +114,12 @@ struct Config {
     // Applied before compound field assembly — cheapest possible filter.
     std::unordered_set<std::string> drop_point_names {};
 
+    // null_fill_unchanged: wide-pivot COV — null out columns whose value has not
+    // changed since the last flush for this partition. Fast-moving signals still
+    // write every row; slow signals become mostly null (compresses extremely well).
+    // Only active when compound_field_name is set (wide-pivot mode).
+    bool null_fill_unchanged {false};
+
     // drop_columns: erase these columns from every row before writing.
     // Applied after compound_point_name / compound_field_name.
     std::vector<std::string> drop_columns {};
@@ -266,9 +272,10 @@ Config load_config(const std::string& path) {
             if (o["partition_as_filename_prefix"])    cfg.partition_as_filename_prefix    = o["partition_as_filename_prefix"].as<bool>();
             if (o["time_window_ms"])                  cfg.time_window_ms                  = o["time_window_ms"].as<int>();
             if (o["site_id"])                cfg.site_id                = o["site_id"].as<std::string>();
-            if (o["store_mqtt_topic"])   cfg.store_mqtt_topic   = o["store_mqtt_topic"].as<bool>();
-            if (o["store_project_id"])   cfg.store_project_id   = o["store_project_id"].as<bool>();
-            if (o["store_sample_count"]) cfg.store_sample_count = o["store_sample_count"].as<bool>();
+            if (o["store_mqtt_topic"])      cfg.store_mqtt_topic      = o["store_mqtt_topic"].as<bool>();
+            if (o["store_project_id"])      cfg.store_project_id      = o["store_project_id"].as<bool>();
+            if (o["store_sample_count"])    cfg.store_sample_count    = o["store_sample_count"].as<bool>();
+            if (o["null_fill_unchanged"])   cfg.null_fill_unchanged   = o["null_fill_unchanged"].as<bool>();
             if (o["wide_point_name"])    cfg.wide_point_name    = o["wide_point_name"].as<bool>();
             if (o["partitions"]) {
                 cfg.partitions.clear();
@@ -734,14 +741,53 @@ static std::vector<Row> merge_wide_rows(const std::vector<Row>& rows) {
 // Parquet flush  (production path only)
 // ---------------------------------------------------------------------------
 
+// Per-partition last-written values for null_fill_unchanged.
+// Key: partition_value  →  {column_name → last double value}
+static std::mutex s_nf_mtx;
+static std::unordered_map<std::string,
+       std::unordered_map<std::string, double>> s_nf_last;
+
 arrow::Status flush_partition(const std::string& path,
                                const std::vector<Row>& rows,
                                const std::string& compression,
-                               bool merge_wide = false) {
+                               bool merge_wide = false,
+                               const std::string& partition_key = "") {
     if (rows.empty()) return arrow::Status::OK();
     std::vector<Row> merged;
     const std::vector<Row>* rp = &rows;
     if (merge_wide) { merged = merge_wide_rows(rows); rp = &merged; }
+
+    // null_fill_unchanged: replace unchanged column values with null (absent key).
+    // Slow signals compress extremely well as runs of nulls in columnar format.
+    if (merge_wide && g_cfg->null_fill_unchanged && !partition_key.empty()) {
+        std::lock_guard<std::mutex> lk(s_nf_mtx);
+        auto& last = s_nf_last[partition_key];
+        for (auto& row : merged) {
+            // floats
+            for (auto it = row.floats.begin(); it != row.floats.end(); ) {
+                auto lit = last.find(it->first);
+                if (lit != last.end() && lit->second == it->second) {
+                    it = row.floats.erase(it);   // unchanged → null
+                } else {
+                    last[it->first] = it->second;
+                    ++it;
+                }
+            }
+            // ints (skip ts)
+            for (auto it = row.ints.begin(); it != row.ints.end(); ) {
+                if (it->first == "ts") { ++it; continue; }
+                auto lit = last.find(it->first);
+                double dv = static_cast<double>(it->second);
+                if (lit != last.end() && lit->second == dv) {
+                    it = row.ints.erase(it);     // unchanged → null
+                } else {
+                    last[it->first] = dv;
+                    ++it;
+                }
+            }
+        }
+    }
+
     ARROW_ASSIGN_OR_RAISE(auto table, build_table(*rp));
     auto props = parquet::WriterProperties::Builder()
         .compression(to_parquet_compression(compression))
@@ -1127,7 +1173,8 @@ static void do_flush(std::map<PartitionKey, Partition> to_flush,
                     std::chrono::seconds(g_cfg->flush_retry_base_seconds << (attempt - 1)));
             }
             status = flush_partition(path, part.rows, g_cfg->compression,
-                                         !g_cfg->compound_field_name.empty());
+                                         !g_cfg->compound_field_name.empty(),
+                                         key.partition_value);
             if (status.ok()) break;
             std::cerr << "[flush] attempt " << attempt + 1 << " failed: "
                       << status.ToString() << "\n" << std::flush;
@@ -1301,7 +1348,8 @@ static void replay_wal_files() {
             if (!collection_suffix.empty())
                 std::cout << "[wal] data timestamp: " << collection_suffix << "\n";
             auto status = flush_partition(path, part_rows, g_cfg->compression,
-                                              !g_cfg->compound_field_name.empty());
+                                              !g_cfg->compound_field_name.empty(),
+                                              key.partition_value);
             if (status.ok()) {
                 std::cout << "[wal] flushed " << part_rows.size() << " replayed rows → " << path << "\n" << std::flush;
             } else {
