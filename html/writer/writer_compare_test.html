@@ -287,8 +287,19 @@ or paste <code>results.json</code> content directly.</p>
   <input id="path-in" type="text" value="/mnt/tort-sdi/bench/results.json" placeholder="results path" style="width:300px">
   <button class="btn primary" onclick="fetchResults()">Fetch</button>
   <button class="btn" onclick="document.getElementById('paste-in').style.display='block'">Paste JSON</button>
+  <button class="btn" id="restart-btn" onclick="restartTest()" style="background:var(--orange);color:#000;border-color:var(--orange)">↺ Restart</button>
   <div class="status-dot" id="fetch-dot"></div>
   <span id="fetch-status" style="font-size:.75rem;color:var(--muted)">—</span>
+</div>
+<div id="run-status-bar" style="display:none;margin-top:6px;font-size:.75rem;font-family:monospace;
+     background:var(--code-bg);border:1px solid var(--border);border-radius:4px;padding:6px 10px;
+     display:flex;gap:16px;align-items:center">
+  <span id="run-state-dot" class="status-dot warn"></span>
+  <span id="run-state-label" style="color:var(--muted)">—</span>
+  <span id="run-elapsed" style="color:var(--teal)"></span>
+  <span id="run-number" style="color:var(--muted)"></span>
+  <span style="flex:1"></span>
+  <span id="run-sweep-est" style="color:var(--muted);font-size:.7rem"></span>
 </div>
 <textarea id="paste-in" placeholder="Paste results.json here and click Load"
   style="display:none;width:100%;height:100px;background:var(--bg);border:1px solid var(--border);
@@ -872,6 +883,112 @@ function renderCPU(d, unitScale, srcUnits) {
     tb.appendChild(tr);
   });
 }
+
+// ── restart & live status ─────────────────────────────────────────────────────
+let _pollTimer   = null;
+let _elapsedTimer= null;
+let _runStartTs  = null;   // ISO string from status.json
+let _lastStatus  = null;
+
+async function restartTest() {
+  const host = document.getElementById('host-in').value.trim();
+  const port = document.getElementById('port-in').value.trim();
+  const btn  = document.getElementById('restart-btn');
+  btn.disabled = true;
+  btn.textContent = '…restarting';
+
+  // Write a restart-request file the server can pick up, OR just tell user
+  // (we can't SSH from browser — generate the command and show it)
+  const sweeps   = document.getElementById('run-sweeps')?.value || '600';
+  const loop     = document.getElementById('run-loop')?.checked;
+  const interval = document.getElementById('run-interval')?.value || '30';
+
+  // Try to hit a /restart endpoint (not available by default),
+  // fall back to showing the command prominently
+  const cmd = `ssh phil@${host} 'echo phil | sudo -S systemctl restart writer-compare-test'`;
+  const stat = document.getElementById('fetch-status');
+  stat.innerHTML = `<span style="color:var(--orange)">Cannot SSH from browser — run:</span>
+    <code style="color:var(--teal);margin-left:6px">${cmd}</code>`;
+  btn.disabled = false;
+  btn.textContent = '↺ Restart';
+
+  // Start polling status immediately
+  startStatusPoll();
+}
+
+function startStatusPoll() {
+  if (_pollTimer) clearInterval(_pollTimer);
+  pollStatus();
+  _pollTimer = setInterval(pollStatus, 3000);
+}
+
+async function pollStatus() {
+  const host = document.getElementById('host-in').value.trim();
+  const port = document.getElementById('port-in').value.trim();
+  const bar  = document.getElementById('run-status-bar');
+  try {
+    const r = await fetch(`http://${host}:${port}/status.json`, {cache:'no-cache'});
+    if (!r.ok) { bar.style.display='none'; return; }
+    const s = await r.json();
+    _lastStatus = s;
+    bar.style.display = 'flex';
+
+    const dot   = document.getElementById('run-state-dot');
+    const label = document.getElementById('run-state-label');
+    const runN  = document.getElementById('run-number');
+    const est   = document.getElementById('run-sweep-est');
+
+    if (s.status === 'running') {
+      dot.className = 'status-dot warn';
+      label.textContent = 'running';
+      if (!_runStartTs || _runStartTs !== s.ts) {
+        _runStartTs = s.ts;
+        startElapsedClock(s.ts, s.sweeps);
+      }
+      runN.textContent = s.run ? `run #${s.run}` : '';
+    } else if (s.status === 'complete') {
+      dot.className = 'status-dot ok';
+      label.textContent = 'complete';
+      runN.textContent = s.run ? `run #${s.run}` : '';
+      est.textContent = '';
+      stopElapsedClock();
+      // auto-fetch results if we just completed
+      if (_lastStatus?.status !== 'complete') fetchResults();
+    } else if (s.status === 'failed') {
+      dot.className = 'status-dot error';
+      label.textContent = `failed (exit ${s.exit ?? '?'})`;
+      stopElapsedClock();
+    }
+  } catch(_) {
+    document.getElementById('run-status-bar').style.display = 'none';
+  }
+}
+
+function startElapsedClock(startIso, totalSweeps) {
+  stopElapsedClock();
+  const start = new Date(startIso);
+  const sweepSec = totalSweeps || 600;
+
+  function tick() {
+    const elapsed = (Date.now() - start) / 1000;
+    const mm = Math.floor(elapsed/60), ss = Math.floor(elapsed%60);
+    const pct = Math.min(100, Math.round(elapsed/sweepSec*100));
+    document.getElementById('run-elapsed').textContent =
+      `${mm}m ${ss.toString().padStart(2,'0')}s  (${pct}%)`;
+    const remain = sweepSec - elapsed;
+    document.getElementById('run-sweep-est').textContent =
+      remain > 0 ? `~${Math.ceil(remain/60)}m remaining` : 'finishing…';
+  }
+  tick();
+  _elapsedTimer = setInterval(tick, 1000);
+}
+
+function stopElapsedClock() {
+  if (_elapsedTimer) { clearInterval(_elapsedTimer); _elapsedTimer = null; }
+}
+
+// start polling as soon as the page loads
+document.addEventListener('DOMContentLoaded', startStatusPoll);
 
 // ── run command builder ───────────────────────────────────────────────────────
 function updateRunCmd() {
