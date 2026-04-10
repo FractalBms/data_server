@@ -67,6 +67,7 @@
 
 <div class="page-nav">
   <a href="projects.html">← Writer Projects</a>
+  <a href="parquet_writer_options.html">Parquet vs InfluxDB2 Cost</a>
   <a href="evelyn_real_time_data.html">Real-Time Data</a>
   <a href="evelyn_influx3_analysis.html">InfluxDB 3</a>
   <a href="evelyn_viz_comparison.html">Viz Comparison</a>
@@ -89,6 +90,8 @@
     <li><a href="#config">Config Examples</a></li>
     <li><a href="#placement-rec">Recommended Placement</a></li>
     <li><a href="#decision">Decision Matrix</a></li>
+    <li><a href="#awscost">AWS Kafka Costs</a></li>
+    <li><a href="#realtime">Kafka + Parquet/S3 Real-Time Architecture</a></li>
   </ol>
 </div>
 
@@ -96,7 +99,7 @@
 
 <!-- 1 -->
 <h2 id="summary">1. Executive Summary</h2>
-<p>Kafka is a distributed streaming platform built for high-durability multi-consumer message replay, decoupled producers/consumers, and stream processing at scale. The current stack (MQTT → FlashMQ → real_writer → Parquet) is fast, simple, and edge-deployable.</p>
+<p>Kafka is a distributed streaming platform built for high-durability multi-consumer message replay, decoupled producers/consumers, and stream processing at scale. The current stack (MQTT → FlashMQ → parquet_writer → Parquet) is fast, simple, and edge-deployable.</p>
 <p>The question is not "replace MQTT with Kafka" — it is <strong>"where does Kafka add value in the overall EMS platform, if anywhere?"</strong></p>
 <p>Short answer: <strong>Kafka is compelling at the cloud aggregation tier</strong> (10+ sites feeding a central platform) and for message durability when writer restarts cannot lose data. It is <strong>not suitable at the edge ingest tier</strong> where the 1-binary deployment goal matters.</p>
 
@@ -136,14 +139,14 @@ EMS hardware / ems_site_simulator
         ▼
 FlashMQ :1883
         │
-        ├── real_writer  →  /data/parquet/   (PRIMARY)
+        ├── parquet_writer  →  /data/parquet/   (PRIMARY)
         │
         └── [FlashMQ bridge]  →  fractal-phil FlashMQ :1884
                                        │
                                  subscriber_api (DuckDB)
 </pre>
 
-<p><strong>Single consumer model.</strong> real_writer is the only persistent consumer. If real_writer restarts, QoS-0 messages during that window are lost. The bridge to fractal-phil is a second consumer but also ephemeral — if it drops, messages are lost on that path too.</p>
+<p><strong>Single consumer model.</strong> parquet_writer is the only persistent consumer. If parquet_writer restarts, QoS-0 messages during that window are lost. The bridge to fractal-phil is a second consumer but also ephemeral — if it drops, messages are lost on that path too.</p>
 
 <hr>
 
@@ -157,7 +160,7 @@ EMS hardware → [MQTT broker] → Kafka topic: ems.raw
                                       │
                     ┌─────────────────┼──────────────┐
                     │                 │              │
-               real_writer       alert_service   analytics
+               parquet_writer       alert_service   analytics
                (Kafka consumer)
   </pre>
   <p>Replace FlashMQ with Kafka as the central broker. EMS devices still speak MQTT, but an MQTT-Kafka bridge converts to Kafka topics (e.g., Confluent MQTT proxy or EMQX with Kafka bridge).</p>
@@ -169,9 +172,9 @@ EMS hardware → [MQTT broker] → Kafka topic: ems.raw
 <div class="option-card">
   <h3>Option B — Kafka at the cloud aggregation tier only</h3>
   <pre>
-Edge Site A:  FlashMQ → real_writer → parquet → push_agent ──→ Cloud Kafka :9092
-Edge Site B:  FlashMQ → real_writer → parquet → push_agent ──→   (topic: site-{id}.raw)
-Edge Site C:  FlashMQ → real_writer → parquet → push_agent ──→
+Edge Site A:  FlashMQ → parquet_writer → parquet → push_agent ──→ Cloud Kafka :9092
+Edge Site B:  FlashMQ → parquet_writer → parquet → push_agent ──→   (topic: site-{id}.raw)
+Edge Site C:  FlashMQ → parquet_writer → parquet → push_agent ──→
 
                                     Cloud Kafka
                                          │
@@ -180,7 +183,7 @@ Edge Site C:  FlashMQ → real_writer → parquet → push_agent ──→
                    cloud-writer     alert_service   ML pipeline
                    (parquet S3)
   </pre>
-  <p>Edge stays unchanged (FlashMQ + real_writer). Cloud Kafka receives from multiple sites, fan-out to cloud consumers.</p>
+  <p>Edge stays unchanged (FlashMQ + parquet_writer). Cloud Kafka receives from multiple sites, fan-out to cloud consumers.</p>
   <p><strong>Gains:</strong> site isolation (one slow site doesn't affect others), multi-consumer cloud fan-out, replay for re-processing.</p>
   <p><strong>Costs:</strong> cloud Kafka cluster to operate (or Confluent/MSK/Redpanda Cloud); parquet files already provide durable storage so Kafka retention duplicates.</p>
   <span class="verdict good">Best placement option for multi-site deployments</span>
@@ -211,7 +214,7 @@ EMS hardware → MQTT → Redpanda (supports MQTT + Kafka protocol)
                           │
            ┌──────────────┴──────────────┐
            │                             │
-      real_writer                  cloud replication
+      parquet_writer                  cloud replication
       (Kafka consumer)             (Redpanda MirrorMaker)
   </pre>
   <p><strong>Gains vs plain Kafka:</strong> single C++ binary, no JVM, much lower memory (~500 MB RAM vs 2+ GB), ZooKeeper-free.</p>
@@ -226,7 +229,7 @@ EMS hardware → MQTT → Redpanda (supports MQTT + Kafka protocol)
 <h2 id="solves">5. What Kafka Genuinely Solves That the Current Stack Doesn't</h2>
 
 <h3>5a. Message Durability on Writer Restart</h3>
-<p>Current pain: real_writer restart = lost messages (QoS-0, no buffer between broker and writer). With Kafka as the transport, the writer is a Kafka consumer with a committed offset. Restart from exactly where it left off — zero message loss, regardless of downtime duration (within retention window).</p>
+<p>Current pain: parquet_writer restart = lost messages (QoS-0, no buffer between broker and writer). With Kafka as the transport, the writer is a Kafka consumer with a committed offset. Restart from exactly where it left off — zero message loss, regardless of downtime duration (within retention window).</p>
 <div class="note">This is the single biggest operational improvement Kafka would bring to this stack.</div>
 
 <h3>5b. Independent Multi-Consumer Fan-out</h3>
@@ -244,9 +247,9 @@ EMS hardware → MQTT → Redpanda (supports MQTT + Kafka protocol)
 <h2 id="doesnt">6. What Kafka Does NOT Solve Here</h2>
 
 <div class="bad"><strong>Live browser streaming:</strong> Kafka is not a WebSocket server. FlashMQ + mqtt.js is still required for live display regardless of Kafka adoption. Kafka does not help here at all.</div>
-<div class="bad"><strong>Parquet schema:</strong> Kafka's S3 sink connector writes Kafka's own file layout, not our custom schema (mqtt_topic column, custom partitions). real_writer's Parquet cannot be replicated with a generic Kafka connector.</div>
+<div class="bad"><strong>Parquet schema:</strong> Kafka's S3 sink connector writes Kafka's own file layout, not our custom schema (mqtt_topic column, custom partitions). parquet_writer's Parquet cannot be replicated with a generic Kafka connector.</div>
 <div class="bad"><strong>Edge simplicity:</strong> Kafka (even Redpanda) is heavier than FlashMQ. For the 1-binary edge deployment goal, any Kafka solution is a regression.</div>
-<div class="warn"><strong>Sub-ms ingest latency:</strong> Kafka batches writes (linger.ms, typically 5ms). FlashMQ delivers MQTT to real_writer in sub-ms. For edge EMS, 5ms is usually acceptable — but it's a measurable trade.</div>
+<div class="warn"><strong>Sub-ms ingest latency:</strong> Kafka batches writes (linger.ms, typically 5ms). FlashMQ delivers MQTT to parquet_writer in sub-ms. For edge EMS, 5ms is usually acceptable — but it's a measurable trade.</div>
 <div class="warn"><strong>MQTT protocol:</strong> Kafka is not natively MQTT. EMS hardware speaks MQTT. A bridge layer is always required between hardware and Kafka.</div>
 
 <hr>
@@ -359,7 +362,7 @@ consumer.<span class="fn">subscribe</span>([<span class="str">'ems.raw'</span>])
 <h2 id="placement-rec">9. Recommended Placement in the Planned Scheme</h2>
 
 <h3>Short term — single-site edge box</h3>
-<p>Keep FlashMQ + real_writer. Add <strong>QoS-1 on the FlashMQ bridge connection to cloud</strong> (already supported in FlashMQ bridge config). QoS-1 ensures cloud receives all messages even if the bridge drops briefly, solving message durability without Kafka.</p>
+<p>Keep FlashMQ + parquet_writer. Add <strong>QoS-1 on the FlashMQ bridge connection to cloud</strong> (already supported in FlashMQ bridge config). QoS-1 ensures cloud receives all messages even if the bridge drops briefly, solving message durability without Kafka.</p>
 <pre>
 <span class="cm"># flashmq.conf bridge — change QoS from 0 to 1</span>
 bridge {
@@ -382,7 +385,7 @@ Site C FlashMQ bridge ─→
             (Kafka consumer  (Kafka consumer)  (Kafka consumer)
              → parquet S3)
 </pre>
-<p>Each site's FlashMQ bridges directly to cloud Kafka. Cloud real_writer is a Kafka consumer instead of MQTT subscriber. Independent consumer groups for alerting and analytics.</p>
+<p>Each site's FlashMQ bridges directly to cloud Kafka. Cloud parquet_writer is a Kafka consumer instead of MQTT subscriber. Independent consumer groups for alerting and analytics.</p>
 
 <h3>Long term — stream processing at scale</h3>
 <p>Add ksqlDB or Kafka Streams for the Filter A+B logic as site count grows. Replace Telegraf dedup config with a proper versioned stream processing job. This is only justified when the number of filter rules and edge cases exceeds what Telegraf config can cleanly express.</p>
@@ -408,7 +411,121 @@ Site C FlashMQ bridge ─→
   <tr><td><span class="cross">✗</span></td><td>MQTT protocol at the broker is required — EMS hardware speaks MQTT natively, Kafka always needs a bridge</td></tr>
 </table>
 
-<div class="note" style="margin-top:20px"><strong>Bottom line:</strong> Kafka belongs at the cloud aggregation tier for multi-site deployments. The edge box stays as FlashMQ + real_writer. If durability at the edge is the only concern, try QoS-1 bridge first, then NATS JetStream, before reaching for Kafka.</div>
+<div class="note" style="margin-top:20px"><strong>Bottom line:</strong> Kafka belongs at the cloud aggregation tier for multi-site deployments. The edge box stays as FlashMQ + parquet_writer. If durability at the edge is the only concern, try QoS-1 bridge first, then NATS JetStream, before reaching for Kafka.</div>
+
+<hr>
+
+<!-- 11 -->
+<h2 id="awscost">11. AWS Kafka Costs</h2>
+
+<p>Site baseline: <strong>12 units × 34 signals = 408 msg/s</strong>, ~150 bytes/msg, 7-day retention.</p>
+<p>Ingestion rate: 408 × 150 B = 61 KB/s → <strong>5.3 GB/day → 37 GB at 7-day retention</strong>.</p>
+
+<h3>MSK Serverless</h3>
+<p>No brokers to manage, auto-scales. High fixed cluster fee dominates at low throughput.</p>
+<table>
+  <tr><th>Component</th><th>Rate</th><th>Per month</th><th>Per year</th></tr>
+  <tr><td>Cluster fee</td><td>$0.75 / cluster-hour</td><td class="half">$540</td><td class="half">$6,480</td></tr>
+  <tr><td>Ingestion (159 GB/mo)</td><td>$0.10 / GB</td><td>$16</td><td>$192</td></tr>
+  <tr><td>Storage (37 GB)</td><td>$0.10 / GB-month</td><td>$4</td><td>$44</td></tr>
+  <tr><td><strong>Total per site</strong></td><td></td><td class="half"><strong>~$560</strong></td><td class="half"><strong>~$6,716</strong></td></tr>
+</table>
+<div class="bad">MSK Serverless is cost-prohibitive for a single low-throughput site — the cluster fee alone is $6,480/year regardless of usage. Only viable when multiple sites share one cluster and the per-cluster fixed cost is amortised.</div>
+
+<h3>MSK Provisioned</h3>
+<p>You choose broker instance type and count. Minimum 2 brokers for production (3 for HA).</p>
+<table>
+  <tr><th>Config</th><th>Brokers</th><th>Broker cost/yr</th><th>EBS (37 GB × 3)</th><th>Total/yr</th><th>Use case</th></tr>
+  <tr><td>kafka.t3.small × 2</td><td>2</td><td class="check">$368</td><td>$32</td><td class="check"><strong>~$400</strong></td><td>Dev / low-HA single site</td></tr>
+  <tr><td>kafka.m5.large × 2</td><td>2</td><td class="half">$3,786</td><td>$32</td><td class="half"><strong>~$3,818</strong></td><td>Production single site</td></tr>
+  <tr><td>kafka.m5.large × 3</td><td>3</td><td class="half">$5,679</td><td>$48</td><td class="half"><strong>~$5,727</strong></td><td>Production HA</td></tr>
+</table>
+<div class="warn">MSK Provisioned (t3.small) is the cheapest managed option at ~$400/year. But t3.small brokers have limited throughput — acceptable at 408 msg/s, not suitable for 10+ sites on one cluster.</div>
+
+<h3>Self-managed Kafka on EC2</h3>
+<p>You run Kafka yourself (KRaft mode — no ZooKeeper since Kafka 3.x). No MSK management fee.</p>
+<table>
+  <tr><th>Config</th><th>EC2 cost/yr</th><th>EBS (37 GB)</th><th>Total/yr</th><th>Notes</th></tr>
+  <tr><td>t3.medium × 1 (KRaft single node)</td><td class="check">$365</td><td>$36</td><td class="check"><strong>~$401</strong></td><td>No HA — broker restart = brief outage</td></tr>
+  <tr><td>t3.small × 3 (KRaft cluster)</td><td class="check">$547</td><td>$107</td><td class="check"><strong>~$654</strong></td><td>HA, survives 1 broker loss</td></tr>
+  <tr><td>t3.medium × 3 (KRaft cluster)</td><td class="half">$1,095</td><td>$107</td><td class="half"><strong>~$1,202</strong></td><td>Production HA with headroom</td></tr>
+</table>
+<div class="note">Self-managed t3.medium single-node at ~$400/year matches MSK t3.small pricing but with no management overhead fee. For a proof-of-concept or single site, this is the starting point. KRaft (no ZooKeeper) makes single-node Kafka genuinely operationally simple.</div>
+
+<h3>Redpanda Cloud (managed)</h3>
+<table>
+  <tr><th>Tier</th><th>Cost/yr</th><th>Notes</th></tr>
+  <tr><td>Free (developer)</td><td class="check">$0</td><td>Limited throughput, no SLA — sufficient for 408 msg/s dev/test</td></tr>
+  <tr><td>Dedicated (BYOC)</td><td class="half">~$1,800+</td><td>Bring-your-own-cloud, runs in your AWS account</td></tr>
+</table>
+
+<h3>Cost comparison summary — per site per year</h3>
+<table>
+  <tr><th>Option</th><th>Annual cost</th><th>HA</th><th>Ops burden</th></tr>
+  <tr><td>MSK Serverless</td><td class="cross">~$6,716</td><td><span class="check">✓</span></td><td>None</td></tr>
+  <tr><td>MSK Provisioned (m5.large × 2)</td><td class="half">~$3,818</td><td><span class="check">✓</span></td><td>Low</td></tr>
+  <tr><td>MSK Provisioned (t3.small × 2)</td><td class="check">~$400</td><td><span class="half">⚠</span></td><td>Low</td></tr>
+  <tr><td>Self-managed t3.medium × 1 (KRaft)</td><td class="check">~$401</td><td><span class="cross">✗</span></td><td>Medium</td></tr>
+  <tr><td>Self-managed t3.small × 3 (KRaft)</td><td class="check">~$654</td><td><span class="check">✓</span></td><td>Medium</td></tr>
+  <tr><td>Redpanda Cloud free tier</td><td class="check">$0</td><td><span class="cross">✗</span></td><td>None</td></tr>
+</table>
+<div class="note"><strong>Practical choice for a single Evelyn site:</strong> self-managed Kafka on a t3.medium (~$400/year) or Redpanda free tier for prototyping. Add Kafka cost to the parquet/S3 path and you're still well under the InfluxDB2 total. At 10 sites sharing one MSK Provisioned cluster, per-site cost drops to ~$400 shared = ~$40/site/year.</div>
+
+<hr>
+
+<!-- 12 -->
+<h2 id="realtime">12. Kafka + Parquet/S3 — What Kafka Actually Covers</h2>
+
+<p>The <a href="parquet_writer_options.html">Parquet vs InfluxDB2 cost analysis</a> shows parquet/S3 is 20× cheaper for long-term storage but leaves a real-time question open. Kafka solves <strong>some</strong> of that — specifically recent history and gap recovery — but <strong>not live display</strong>.</p>
+
+<div class="bad"><strong>Kafka does not solve live browser display.</strong> Kafka is a message bus, not a WebSocket server. A browser dashboard still needs either a direct MQTT subscription (FlashMQ already provides this) or a separate WebSocket bridge process. Adding Kafka does not change this requirement at all.</div>
+
+<h3>What Kafka does and doesn't cover</h3>
+<table>
+  <tr><th>Need</th><th>Kafka helps?</th><th>What actually solves it</th></tr>
+  <tr><td>Live needle / gauge (&lt; 1s)</td><td><span class="cross">✗ No</span></td><td>Direct MQTT subscription from browser (FlashMQ, already works)</td></tr>
+  <tr><td>Current value on page load</td><td><span class="half">⚠ Partial</span></td><td>Log-compacted Kafka topic gives latest-per-signal, but latency is seconds not ms. Better: <code>current_state_path</code> from parquet_writer.</td></tr>
+  <tr><td>Last 5–60 minutes trend</td><td><span class="cross">✗</span></td><td>parquet_writer fast-flush (5–10s) + DuckDB on local files via subscriber_api</td></tr>
+  <tr><td>Last 7 days history</td><td><span class="check">✓ Yes</span></td><td>Kafka consumer seeks to offset N days ago, replays into parquet or answers queries directly</td></tr>
+  <tr><td>Gap recovery on writer restart</td><td><span class="check">✓ Yes</span></td><td>parquet_writer commits Kafka offset after each flush — restarts from exactly where it left off</td></tr>
+  <tr><td>Multi-consumer fan-out</td><td><span class="check">✓ Yes</span></td><td>Alerting, parquet_writer, analytics all read independently from same topic</td></tr>
+  <tr><td>Long-term archive (&gt; 7 days)</td><td><span class="cross">✗</span></td><td>Parquet/S3 — Kafka retention is days, not years</td></tr>
+  <tr><td>Alerting on live stream</td><td><span class="check">✓ Yes</span></td><td>Kafka consumer with threshold rules, reads same topic as parquet_writer</td></tr>
+</table>
+
+<h3>The architecture with Kafka in its correct role</h3>
+<pre>
+Edge site
+  MQTT hardware → FlashMQ :1883
+       │                  │
+       │ (live display)   │ (bridge to cloud)
+       ▼                  ▼
+  browser MQTT       Kafka topic: ems.{site_id}.raw   ← 7-day retention
+  subscription            │
+  (no change)    ┌────────┼──────────────┐
+                 │        │              │
+          parquet_writer  alerting   analytics
+          (offset-tracked  consumer   consumer
+           → S3 archive)
+</pre>
+
+<h3>What Kafka adds to the parquet/S3 path specifically</h3>
+<ul>
+  <li><strong>Gap recovery:</strong> parquet_writer commits its Kafka offset after each flush. Restart from exactly where it left off — no lost messages within the 7-day retention window. This is the single biggest operational gain.</li>
+  <li><strong>Recent history replay:</strong> if a dashboard needs "last 3 days" without querying S3, a Kafka consumer can seek to that offset. Useful for backfill on reconnect or re-processing with new filter logic.</li>
+  <li><strong>Multi-consumer without MQTT load:</strong> alerting and analytics consume from Kafka disk, not from FlashMQ live stream — broker load stays constant regardless of consumer count.</li>
+  <li><strong>Live display is unchanged:</strong> browser still subscribes to FlashMQ directly via MQTT/WebSocket. Kafka is not involved in this path.</li>
+</ul>
+
+<h3>Combined 10-year cost (parquet/S3 + Kafka) vs InfluxDB2</h3>
+<table>
+  <tr><th>Path</th><th>Storage (10yr)</th><th>Kafka/Compute (10yr)</th><th>Total (10yr)</th></tr>
+  <tr><td>InfluxDB2 on EC2/EBS</td><td class="cross">~$36,250</td><td class="cross">~$9,120 EC2</td><td class="cross"><strong>~$45,370</strong></td></tr>
+  <tr><td>Parquet/S3 + Kafka self-managed (t3.small × 3)</td><td class="check">~$1,561</td><td class="check">~$6,540 Kafka</td><td class="check"><strong>~$8,101</strong></td></tr>
+  <tr><td>Parquet/S3 + Kafka MSK t3.small (shared, 10 sites)</td><td class="check">~$1,561</td><td class="check">~$400 shared</td><td class="check"><strong>~$1,961</strong></td></tr>
+  <tr><td>Parquet/S3, on-prem writer (no live dashboard)</td><td class="check">~$1,561</td><td class="check">~$640 S3 requests</td><td class="check"><strong>~$2,201</strong></td></tr>
+</table>
+<div class="note"><strong>Even with self-managed Kafka added, the 10-year total is ~$8,100 vs ~$45,400 for InfluxDB2 — an 82% reduction.</strong> The live dashboard requirement adds ~$6,500 in Kafka over 10 years. At fleet scale (10+ sites sharing one Kafka cluster) the cost difference widens further.</div>
 
 </div>
 </body>

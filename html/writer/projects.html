@@ -53,6 +53,21 @@
 <h2>Live Tools</h2>
 <div class="card-grid">
 
+  <a class="card" href="ems_physics_proposal.html">
+    <div class="card-title">EMS Physics Generator</div>
+    <div class="card-desc">Proposal to replace uniform-random signal pools with a physics-based charge/discharge state machine: OCV curve, RC thermal model, Poisson fault events, and realistic binary states.</div>
+    <span class="card-tag">proposal</span>
+    <span class="card-tag">simulation</span>
+  </a>
+
+  <a class="card" href="writer_compare_test.html">
+    <div class="card-title">Writer Schema Comparison</div>
+    <div class="card-desc">Benchmarks norm-long, long+compound, and wide-pivot parquet schemas against the same MQTT stream. Live results viewer, file browser, schema dropdowns, and 24-hr storage estimates.</div>
+    <span class="card-tag tag-live">live</span>
+    <span class="card-tag">benchmark</span>
+    <span class="card-tag">parquet</span>
+  </a>
+
   <a class="card" href="evelyn_docker_34.html">
     <div class="card-title">Evelyn .34 Live</div>
     <div class="card-desc">Evelyn EMS demo on phil-256g (.34) — Docker broker + parquet writer, bridge config, storage stats, compactor countdown.</div>
@@ -84,6 +99,14 @@
 
 <h2>Architecture &amp; Design Docs</h2>
 <div class="card-grid">
+
+  <a class="card" href="aws_sim_stack.html">
+    <div class="card-title">AWS Simulation Stack</div>
+    <div class="card-desc">Docker stack mirroring the cloud ingest path — FlashMQ → Telegraf → InfluxDB2 — alongside the parquet edge path. Includes rsync plan, subscriber_api query routing, and 5-phase implementation roadmap.</div>
+    <span class="card-tag">docker</span>
+    <span class="card-tag">influxdb</span>
+    <span class="card-tag">parquet</span>
+  </a>
 
   <a class="card" href="evelyn_container_design.html">
     <div class="card-title">Container Design (Option C)</div>
@@ -174,6 +197,13 @@
     <div class="card-title">Parquet Column Schema</div>
     <div class="card-desc">How MQTT topic segments and payload fields become parquet columns — positional vs KV parsers, compound_point_name, drop_columns, and DuckDB query examples for each schema mode.</div>
     <span class="card-tag">reference</span>
+  </a>
+
+  <a class="card" href="parquet_writer_options.html">
+    <div class="card-title">Parquet Writer vs InfluxDB2 — Cost Comparison</div>
+    <div class="card-desc">Wide Pivot Parquet on S3 vs FlashMQ→Telegraf→InfluxDB2. Storage cost at 1, 2, 5, 10 year retention. 20× cheaper at 10 years. Real-time recovery path TBD.</div>
+    <span class="card-tag">cost</span>
+    <span class="card-tag">aws</span>
   </a>
 
   <a class="card" href="wide_parquet_writer.html">
