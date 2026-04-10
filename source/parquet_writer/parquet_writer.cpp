@@ -1017,6 +1017,12 @@ static int compact_directory(const fs::path& dir,
         return 0;
     }
 
+    // Sum source sizes before deletion for log.
+    long source_bytes = 0;
+    for (const auto& f : files) {
+        struct stat st3{}; if (::stat(f.string().c_str(), &st3) == 0) source_bytes += st3.st_size;
+    }
+
     int deleted = 0;
     for (const auto& f : files) {
         fs::remove(f, ec);
@@ -1053,6 +1059,7 @@ static int compact_directory(const fs::path& dir,
                << ",\"schema\":\"" << cfg.mqtt_client_id << "\""
                << ",\"dir\":\"" << rel_dir << "\""
                << ",\"sources\":" << deleted
+               << ",\"source_bytes\":" << source_bytes
                << ",\"rows\":" << merged->num_rows()
                << ",\"size_bytes\":" << out_sz
                << ",\"null_pct\":" << std::fixed << std::setprecision(1) << null_pct
