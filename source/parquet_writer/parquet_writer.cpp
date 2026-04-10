@@ -54,7 +54,9 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <fcntl.h>
+#include <iomanip>
 #include <poll.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -190,6 +192,7 @@ struct Config {
     int         compact_interval_seconds{600};   // how often to scan (default: 10 min)
     int         compact_min_files       {3};     // min files in a dir to trigger compaction
     int         compact_min_age_seconds {0};     // 0 = 2 × flush_interval_seconds
+    std::string compact_log_path        {};      // JSON-lines log; default = base_path/compact.log
 };
 
 Config load_config(const std::string& path) {
@@ -296,6 +299,7 @@ Config load_config(const std::string& path) {
             if (c["interval_seconds"])  cfg.compact_interval_seconds  = c["interval_seconds"].as<int>();
             if (c["min_files"])         cfg.compact_min_files         = c["min_files"].as<int>();
             if (c["min_age_seconds"])   cfg.compact_min_age_seconds   = c["min_age_seconds"].as<int>();
+            if (c["log_path"])          cfg.compact_log_path          = c["log_path"].as<std::string>();
         }
         if (auto g = y["guard"]) {
             if (g["min_free_gb"])
@@ -987,6 +991,13 @@ static int compact_directory(const fs::path& dir,
     }
     auto merged = *r_merged;
 
+    // Compute null density for log.
+    int64_t total_cells = merged->num_rows() * merged->num_columns();
+    int64_t null_count  = 0;
+    for (int ci = 0; ci < merged->num_columns(); ++ci)
+        null_count += merged->column(ci)->null_count();
+    double null_pct = total_cells > 0 ? 100.0 * null_count / total_cells : 0.0;
+
     auto ts       = time_suffix();
     auto tmp_path = (dir / ("compact_" + ts + ".parquet.tmp")).string();
     auto out_path = (dir / ("compact_" + ts + ".parquet")).string();
@@ -1015,7 +1026,41 @@ static int compact_directory(const fs::path& dir,
     }
 
     std::cout << "[compact] " << deleted << " → " << out_path
-              << " (" << merged->num_rows() << " rows)\n";
+              << " (" << merged->num_rows() << " rows, "
+              << std::fixed << std::setprecision(1) << null_pct << "% null)\n"
+              << std::flush;
+
+    // Append JSON line to compact log.
+    {
+        std::string log_path = cfg.compact_log_path.empty()
+            ? cfg.base_path + "/compact.log"
+            : cfg.compact_log_path;
+        // ensure parent dir exists
+        std::error_code ec2;
+        fs::create_directories(fs::path(log_path).parent_path(), ec2);
+        std::ofstream lf(log_path, std::ios::app);
+        if (lf) {
+            // derive relative dir for readability
+            std::string rel_dir = dir.string();
+            if (rel_dir.rfind(cfg.base_path, 0) == 0)
+                rel_dir = rel_dir.substr(cfg.base_path.size());
+            if (!rel_dir.empty() && rel_dir[0] == '/') rel_dir = rel_dir.substr(1);
+
+            long out_sz = 0;
+            struct stat st2{}; if (::stat(out_path.c_str(), &st2) == 0) out_sz = st2.st_size;
+
+            lf << "{\"ts\":\"" << ts << "Z\""
+               << ",\"schema\":\"" << cfg.mqtt_client_id << "\""
+               << ",\"dir\":\"" << rel_dir << "\""
+               << ",\"sources\":" << deleted
+               << ",\"rows\":" << merged->num_rows()
+               << ",\"size_bytes\":" << out_sz
+               << ",\"null_pct\":" << std::fixed << std::setprecision(1) << null_pct
+               << ",\"out\":\"" << fs::path(out_path).filename().string() << "\""
+               << "}\n";
+        }
+    }
+
     return deleted;
 }
 

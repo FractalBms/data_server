@@ -606,6 +606,16 @@ or paste <code>results.json</code> content directly.</p>
        color:var(--muted)">Click a .parquet file to view its contents.</div>
 </div>
 
+<!-- ── COMPACTOR LOG ── -->
+<h2>Compactor Log</h2>
+<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+  <button class="btn primary" onclick="loadCompactLog()" style="font-size:.75rem">⟳ Refresh</button>
+  <span id="clog-status" style="font-size:.75rem;color:var(--muted)">not loaded</span>
+</div>
+<div id="clog-table" style="overflow-x:auto;font-size:.75rem;font-family:monospace">
+  <span style="color:var(--muted)">Click Refresh to load.</span>
+</div>
+
 <style>
 .fb-row { display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;
           border-bottom:1px solid transparent; }
@@ -1157,6 +1167,61 @@ function fmtSize(b) {
 
 // load file tree on page load (after host field is set)
 document.addEventListener('DOMContentLoaded', () => setTimeout(()=>loadDir(''), 200));
+
+// ── compactor log ─────────────────────────────────────────────────────────────
+async function loadCompactLog() {
+  const base   = apiBase();
+  const status = document.getElementById('clog-status');
+  const table  = document.getElementById('clog-table');
+  status.textContent = 'loading…';
+  try {
+    const r = await fetch(`${base}/compact.log`, {cache:'no-cache'});
+    if (!r.ok) { status.textContent = 'compact.log not found — run not started yet'; return; }
+    const text = await r.text();
+    const lines = text.trim().split('\n').filter(l => l.trim());
+    if (!lines.length) { status.textContent = 'log empty'; table.innerHTML = ''; return; }
+
+    const entries = lines.map(l => { try { return JSON.parse(l); } catch(_){ return null; } })
+                         .filter(Boolean)
+                         .reverse();  // newest first
+
+    status.textContent = `${entries.length} compaction${entries.length===1?'':'s'}`;
+
+    let html = `<table style="border-collapse:collapse;width:100%">
+      <thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:4px 8px">Time</th>
+        <th style="text-align:left;padding:4px 8px">Schema</th>
+        <th style="text-align:left;padding:4px 8px">Dir</th>
+        <th style="text-align:right;padding:4px 8px">Sources</th>
+        <th style="text-align:right;padding:4px 8px">Rows</th>
+        <th style="text-align:right;padding:4px 8px">Size</th>
+        <th style="text-align:right;padding:4px 8px">Null%</th>
+        <th style="text-align:left;padding:4px 8px">Output</th>
+      </tr></thead><tbody>`;
+
+    entries.forEach(e => {
+      const t = e.ts ? e.ts.replace('T',' ').replace('Z','') : '';
+      const sz = e.size_bytes ? fmtSize(e.size_bytes) : '?';
+      const schema = (e.schema||'').replace('pw-bench-','');
+      const nullPct = e.null_pct != null ? e.null_pct.toFixed(1)+'%' : '?';
+      const nullColor = e.null_pct > 50 ? 'var(--green)' : e.null_pct > 20 ? 'var(--yellow)' : 'var(--muted)';
+      html += `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:3px 8px;color:var(--muted)">${t}</td>
+        <td style="padding:3px 8px;color:var(--teal)">${schema}</td>
+        <td style="padding:3px 8px;color:var(--muted)">${e.dir||''}</td>
+        <td style="padding:3px 8px;text-align:right">${e.sources||0}</td>
+        <td style="padding:3px 8px;text-align:right">${(e.rows||0).toLocaleString()}</td>
+        <td style="padding:3px 8px;text-align:right;color:var(--accent)">${sz}</td>
+        <td style="padding:3px 8px;text-align:right;color:${nullColor}">${nullPct}</td>
+        <td style="padding:3px 8px;color:var(--muted);font-size:.65rem">${e.out||''}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    table.innerHTML = html;
+  } catch(e) {
+    status.textContent = 'error: ' + e.message;
+  }
+}
 
 // ── restart & live status ─────────────────────────────────────────────────────
 let _pollTimer   = null;

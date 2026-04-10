@@ -226,6 +226,7 @@ compact:
   enabled: true
   interval_seconds: ${COMPACT_INTERVAL}
   min_files: 3
+  log_path: $OUTDIR/compact.log
 health:
   enabled: false
 wal:
@@ -301,6 +302,7 @@ compact:
   enabled: true
   interval_seconds: ${COMPACT_INTERVAL}
   min_files: 3
+  log_path: $OUTDIR/compact.log
 health:
   enabled: false
 wal:
@@ -378,6 +380,7 @@ compact:
   enabled: true
   interval_seconds: ${COMPACT_INTERVAL}
   min_files: 3
+  log_path: $OUTDIR/compact.log
 health:
   enabled: false
 wal:
