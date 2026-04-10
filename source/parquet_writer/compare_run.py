@@ -162,6 +162,20 @@ procs = {
 }
 time.sleep(1.2)
 
+# ── CPU sampling setup ────────────────────────────────────────────────────────
+try:
+    import psutil as _psutil
+    _cpu_procs = {name: _psutil.Process(p.pid) for name, p in procs.items()}
+    # prime cpu_percent (first call always returns 0.0)
+    for cp in _cpu_procs.values():
+        try: cp.cpu_percent(interval=None)
+        except: pass
+    _cpu_samples = {name: [] for name in procs}
+    _psutil_ok = True
+except ImportError:
+    _psutil_ok = False
+    _cpu_samples = {name: [] for name in procs}
+
 print(f"[2] Publishing {TOTAL_MSGS:,} messages...")
 client = mqtt.Client(client_id="bench2-publisher")
 client.connect(MQTT_HOST, MQTT_PORT)
@@ -224,6 +238,12 @@ for sweep in range(SWEEPS):
     remainder = SWEEP_PERIOD - elapsed_sweep
     if remainder > 0:
         time.sleep(remainder)
+
+    # sample CPU every 10 sweeps
+    if _psutil_ok and sweep % 10 == 0 and sweep > 0:
+        for name, cp in _cpu_procs.items():
+            try: _cpu_samples[name].append(cp.cpu_percent(interval=None))
+            except: pass
 
     if sweep % 60 == 0:
         elapsed = time.time() - t0
@@ -338,23 +358,35 @@ for label in SCHEMA_KEYS:
 
 # Save raw results for HTML generation
 import json as _json
+def cpu_stats(samples):
+    if not samples: return {"avg_pct": None, "peak_pct": None}
+    return {"avg_pct": round(sum(samples)/len(samples), 1),
+            "peak_pct": round(max(samples), 1)}
+
+import multiprocessing as _mp
+_ncores = _mp.cpu_count()
+
 result = {
     "topology": {"units": len(UNITS), "signals": len(ALL_SIGNALS),
                  "float_signals": len(FLOAT_SIGNALS), "int_signals": len(INT_SIGNALS),
-                 "sweeps": SWEEPS, "sim_seconds": SIM_DURATION, "total_msgs": TOTAL_MSGS},
+                 "sweeps": SWEEPS, "sim_seconds": SIM_DURATION, "total_msgs": TOTAL_MSGS,
+                 "cpu_cores": _ncores},
     "norm_long": {
         "size_bytes": sizes[0], "files": nfiles[0], "rows": nrows[0], "cols": ncols[0],
         "flush_ms": ftimes[0],
+        "cpu": cpu_stats(_cpu_samples["norm-long"]),
         "schema": [{"name": f.name, "type": str(f.type)} for f in list(stats["norm-long"][3])] if stats["norm-long"][3] else []
     },
     "long_cmp": {
         "size_bytes": sizes[1], "files": nfiles[1], "rows": nrows[1], "cols": ncols[1],
         "flush_ms": ftimes[1],
+        "cpu": cpu_stats(_cpu_samples["long+cmp"]),
         "schema": [{"name": f.name, "type": str(f.type)} for f in list(stats["long+cmp"][3])] if stats["long+cmp"][3] else []
     },
     "wide_pivot": {
         "size_bytes": sizes[2], "files": nfiles[2], "rows": nrows[2], "cols": ncols[2],
         "flush_ms": ftimes[2],
+        "cpu": cpu_stats(_cpu_samples["wide-pivot"]),
         "schema": [{"name": f.name, "type": str(f.type)} for f in list(stats["wide-pivot"][3])[:40]] if stats["wide-pivot"][3] else []
     },
 }

@@ -353,6 +353,77 @@ or paste <code>results.json</code> content directly.</p>
 
 </div>
 
+<!-- ── 24-HR ESTIMATES ── -->
+<div id="estimates-section" style="display:none">
+<h2>24-Hour Estimates</h2>
+<p style="font-size:.8rem;color:var(--muted);margin:0 0 10px">
+  Extrapolated from the benchmark run. Units input scales to fleet size.
+  <label style="margin-left:16px">Units: <input id="est-units" type="number" value="12" min="1"
+    style="width:60px;background:var(--bg);border:1px solid var(--border);color:var(--text);
+    border-radius:3px;padding:2px 4px" oninput="updateEstimates()"></label>
+</p>
+
+<div id="est-cards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px"></div>
+
+<table class="cmp-table" id="est-table">
+  <thead><tr><th>Metric</th><th>norm-long</th><th>long+cmp</th><th>wide-pivot</th></tr></thead>
+  <tbody id="est-body"></tbody>
+</table>
+
+<h3 style="margin-top:20px">AWS S3 Storage Cost
+  <span style="font-size:.72rem;font-weight:400;color:var(--muted)">— us-east-1 pricing</span>
+</h3>
+<div id="s3-cards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px"></div>
+<p style="font-size:.7rem;color:var(--muted)">
+  S3 Standard $0.023/GB·mo &nbsp;·&nbsp; S3-IA $0.0125/GB·mo &nbsp;·&nbsp;
+  Glacier Instant $0.004/GB·mo &nbsp;·&nbsp; Prices excl. PUT/GET requests
+</p>
+
+<h3 style="margin-top:16px">CPU Usage &amp; EC2 Cost Estimate
+  <span style="font-size:.72rem;font-weight:400;color:var(--muted)">— per writer process</span>
+</h3>
+<div id="cpu-cards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px"></div>
+<table class="cmp-table" id="cpu-table">
+  <thead><tr><th>Instance</th><th>vCPU</th><th>RAM</th><th>$/hr</th><th>$/mo</th><th>Fits writers</th></tr></thead>
+  <tbody id="cpu-body"></tbody>
+</table>
+<p style="font-size:.7rem;color:var(--muted);margin-top:4px">
+  On-demand Linux us-east-1. CPU% shown is per-core (100% = 1 full core).
+  Writers are single-threaded — one core each.
+</p>
+</div><!-- end estimates-section -->
+
+<!-- ── RUN THE TEST ── -->
+<h2>Run the Test</h2>
+<div style="background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:14px 16px;margin-bottom:16px">
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+    <label style="font-size:.8rem;color:var(--muted)">Host
+      <input id="run-host" type="text" value="192.168.86.34"
+        style="margin-left:6px;width:140px;background:var(--bg);border:1px solid var(--border);
+        color:var(--text);border-radius:3px;padding:3px 6px;font-size:.8rem">
+    </label>
+    <label style="font-size:.8rem;color:var(--muted)">Sweeps
+      <input id="run-sweeps" type="number" value="600" min="60"
+        style="margin-left:6px;width:70px;background:var(--bg);border:1px solid var(--border);
+        color:var(--text);border-radius:3px;padding:3px 6px;font-size:.8rem">
+    </label>
+    <label style="font-size:.8rem;color:var(--muted)">
+      <input id="run-loop" type="checkbox">
+      <span style="margin-left:4px">Loop</span>
+    </label>
+    <label style="font-size:.8rem;color:var(--muted)">Interval (s)
+      <input id="run-interval" type="number" value="30" min="5"
+        style="margin-left:6px;width:55px;background:var(--bg);border:1px solid var(--border);
+        color:var(--text);border-radius:3px;padding:3px 6px;font-size:.8rem">
+    </label>
+  </div>
+  <pre id="run-cmd" style="margin:0;font-size:.75rem;color:var(--teal);white-space:pre-wrap;word-break:break-all"></pre>
+  <div style="margin-top:8px;font-size:.72rem;color:var(--muted)">
+    To follow live: <code style="color:var(--text)">journalctl -u writer-compare-test -f</code>
+    &nbsp;·&nbsp; Results auto-update each run — just hit Fetch again above.
+  </div>
+</div>
+
 <!-- ── WHAT TO LOOK FOR ── -->
 <h2>What to Look For</h2>
 <table class="cmp-table">
@@ -459,6 +530,8 @@ function tryLoadPasted() {
 function renderResults(d) {
   _lastResults = d;
   document.getElementById('results-section').style.display = 'block';
+  document.getElementById('estimates-section').style.display = 'block';
+  setTimeout(updateEstimates, 0);
 
   const topo = d.topology || {};
   document.getElementById('summary-cards').innerHTML = `
@@ -630,6 +703,153 @@ function positionTT(tt) {
 
 function kb(v)  { return v ? Math.round(v/1024).toLocaleString()+' KB' : '—'; }
 function pct(v,base) { const p=100*(v-base)/base; return (p>=0?'+':'')+p.toFixed(1)+'%'; }
+function gbFmt(gb) { return gb < 1 ? (gb*1000).toFixed(0)+' MB' : gb.toFixed(2)+' GB'; }
+
+// ── 24-hour estimates ─────────────────────────────────────────────────────────
+function updateEstimates() {
+  const d = _lastResults; if (!d) return;
+  const unitScale = parseInt(document.getElementById('est-units').value) || 12;
+  const srcUnits  = d.topology?.units || 12;
+  const simSec    = d.topology?.sim_seconds || 600;
+  const scale     = (86400 / simSec) * (unitScale / srcUnits);
+
+  const KEYS   = ['norm_long','long_cmp','wide_pivot'];
+  const LABELS = ['norm-long','long+cmp','wide-pivot'];
+  const COLORS = ['var(--accent)','var(--green)','var(--orange)'];
+
+  const sizes24 = KEYS.map(k => (d[k]?.size_bytes || 0) * scale);
+  const rows24  = KEYS.map(k => Math.round((d[k]?.rows || 0) * scale));
+  const gb24    = sizes24.map(b => b / 1e9);
+
+  // summary cards
+  document.getElementById('est-cards').innerHTML = KEYS.map((k,i) =>
+    `<div class="card" style="border-top:3px solid ${COLORS[i]};min-width:160px">
+      <div class="card-label">${LABELS[i]} / 24 hr</div>
+      <div class="card-val" style="font-size:1.4rem">${gbFmt(gb24[i])}</div>
+      <div class="card-sub">${rows24[i].toLocaleString()} rows · ${unitScale} units</div>
+    </div>`).join('');
+
+  // estimates table
+  const eb = document.getElementById('est-body'); eb.innerHTML = '';
+  const addE = (label, vals, fmt) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="metric">${label}</td>` + vals.map(v=>`<td>${fmt(v)}</td>`).join('');
+    eb.appendChild(tr);
+  };
+  addE('Data / 24 hr', gb24, v => gbFmt(v));
+  addE('Data / month', gb24.map(g=>g*30), v => gbFmt(v));
+  addE('Data / year',  gb24.map(g=>g*365), v => gbFmt(v));
+  addE('Rows / 24 hr', rows24, v => v.toLocaleString());
+
+  // S3 pricing  ($/GB/month)
+  const S3 = {Standard:0.023, 'S3-IA':0.0125, 'Glacier':0.004};
+  const sc = document.getElementById('s3-cards'); sc.innerHTML = '';
+  Object.entries(S3).forEach(([tier, pricePerGBmo]) => {
+    const costs = gb24.map(g => g * 30 * pricePerGBmo);   // monthly cost
+    const best  = costs.indexOf(Math.min(...costs));
+    sc.innerHTML += `<div style="background:var(--code-bg);border:1px solid var(--border);
+      border-radius:6px;padding:10px 14px;min-width:200px">
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:6px">${tier} · $${pricePerGBmo}/GB·mo</div>
+      ${KEYS.map((k,i) =>
+        `<div style="display:flex;justify-content:space-between;font-size:.8rem;
+          ${i===best?'color:var(--green)':'color:var(--text)'}">
+          <span>${LABELS[i]}</span>
+          <span>$${(costs[i]).toFixed(4)}/mo · $${(costs[i]*12).toFixed(2)}/yr</span>
+        </div>`).join('')}
+    </div>`;
+  });
+
+  // CPU
+  renderCPU(d, unitScale, srcUnits);
+}
+
+const EC2 = [
+  {name:'t3.micro',  vcpu:2,  ram:'1 GB',  usd:0.0104},
+  {name:'t3.small',  vcpu:2,  ram:'2 GB',  usd:0.0208},
+  {name:'t3.medium', vcpu:2,  ram:'4 GB',  usd:0.0416},
+  {name:'t3.large',  vcpu:2,  ram:'8 GB',  usd:0.0832},
+  {name:'c5.large',  vcpu:2,  ram:'4 GB',  usd:0.085},
+  {name:'c5.xlarge', vcpu:4,  ram:'8 GB',  usd:0.170},
+  {name:'c5.2xlarge',vcpu:8,  ram:'16 GB', usd:0.340},
+];
+
+function renderCPU(d, unitScale, srcUnits) {
+  const KEYS   = ['norm_long','long_cmp','wide_pivot'];
+  const LABELS = ['norm-long','long+cmp','wide-pivot'];
+  const COLORS = ['var(--accent)','var(--green)','var(--orange)'];
+
+  const cpus = KEYS.map(k => d[k]?.cpu || {});
+  const hasCPU = cpus.some(c => c.avg_pct != null);
+
+  const cc = document.getElementById('cpu-cards');
+  if (!hasCPU) {
+    cc.innerHTML = '<span style="color:var(--muted);font-size:.8rem">CPU data not available — re-run test with psutil installed</span>';
+    document.getElementById('cpu-table').style.display = 'none';
+    return;
+  }
+  document.getElementById('cpu-table').style.display = '';
+
+  cc.innerHTML = KEYS.map((k,i) => {
+    const c = cpus[i];
+    const avg = c.avg_pct ?? 0, peak = c.peak_pct ?? 0;
+    const pctBar = Math.min(100, avg);
+    return `<div class="card" style="border-top:3px solid ${COLORS[i]};min-width:170px">
+      <div class="card-label">${LABELS[i]} CPU</div>
+      <div class="card-val" style="font-size:1.3rem">${avg}%</div>
+      <div class="card-sub">peak ${peak}% · 1 core = 100%</div>
+      <div style="height:4px;background:var(--border);border-radius:2px;margin-top:6px">
+        <div style="height:4px;width:${pctBar}%;background:${COLORS[i]};border-radius:2px"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // for each writer, how many fit on each instance?
+  const writerCores = cpus.map(c => (c.avg_pct ?? 0) / 100);  // fraction of 1 core
+  // scale to unitScale writers (one writer per N src-units worth)
+  const writerCount = Math.ceil(unitScale / srcUnits);
+
+  const tb = document.getElementById('cpu-body'); tb.innerHTML = '';
+  EC2.forEach(inst => {
+    const totalCores = inst.vcpu;
+    // max writers that fit (CPU-bound): floor(totalCores / max_writer_core_fraction)
+    const fits = writerCores.map(wc => wc > 0 ? Math.floor(totalCores / wc) : '∞');
+    const needed = writerCores.map(wc => wc > 0 ? Math.ceil(writerCount * wc / totalCores) : 1);
+    const instNeeded = Math.max(...needed.filter(n=>isFinite(n)));
+    const moCost = inst.usd * 24 * 30 * instNeeded;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="metric">${inst.name}</td>
+      <td>${inst.vcpu}</td><td>${inst.ram}</td>
+      <td>$${inst.usd}</td><td>$${(inst.usd*24*30).toFixed(0)}</td>
+      <td style="font-size:.72rem">${LABELS.map((l,i)=>
+        `<span style="color:${writerCount<=fits[i]?'var(--green)':'var(--muted)'}">${l}: ${fits[i]} writers</span>`
+      ).join(' · ')}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+// ── run command builder ───────────────────────────────────────────────────────
+function updateRunCmd() {
+  const host     = document.getElementById('run-host').value.trim() || '192.168.86.34';
+  const sweeps   = document.getElementById('run-sweeps').value || '600';
+  const loop     = document.getElementById('run-loop').checked;
+  const interval = document.getElementById('run-interval').value || '30';
+  const loopEnv  = loop
+    ? `sudo systemctl set-environment LOOP=1 INTERVAL=${interval}\n` : '';
+  document.getElementById('run-cmd').textContent =
+    `# on ${host}:\n` +
+    `cd ~/data_server && git pull\n` +
+    `sudo cp scripts/writer-compare-test.service /etc/systemd/system/\n` +
+    `sudo systemctl daemon-reload\n` +
+    `sudo systemctl set-environment SWEEPS=${sweeps}\n` +
+    loopEnv +
+    `sudo systemctl restart writer-compare-test`;
+}
+['run-host','run-sweeps','run-loop','run-interval'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', updateRunCmd);
+  document.getElementById(id)?.addEventListener('change', updateRunCmd);
+});
+// initialise on load
+document.addEventListener('DOMContentLoaded', updateRunCmd);
 </script>
 </body>
 </html>

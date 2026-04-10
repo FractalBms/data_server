@@ -112,7 +112,7 @@ fi
 PY="$VENV/bin/python3"
 PIP="$VENV/bin/pip"
 
-for pkg in paho-mqtt pyarrow pyyaml; do
+for pkg in paho-mqtt pyarrow pyyaml psutil; do
   if ! "$PY" -c "import ${pkg//-/_}" 2>/dev/null; then
     echo "  Installing $pkg..."
     "$PIP" install --quiet "$pkg"
