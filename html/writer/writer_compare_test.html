@@ -438,6 +438,7 @@ function tryLoadPasted() {
 }
 
 function renderResults(d) {
+  _lastResults = d;
   document.getElementById('results-section').style.display = 'block';
 
   const topo = d.topology || {};
@@ -550,14 +551,8 @@ function renderResults(d) {
   }
 }
 
-// store last loaded results for column preview
+// cache for column preview
 let _lastResults = null;
-const _origRender = renderResults;
-// patch renderResults to cache data
-function renderResults(d) {
-  _lastResults = d;
-  _origRender(d);
-}
 
 function previewCol(name, type) {
   const pv  = document.getElementById('col-preview');
