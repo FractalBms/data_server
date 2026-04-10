@@ -374,8 +374,9 @@ async function fetchResults() {
   const fname = path.split('/').pop();
 
   // ── try results.json first ────────────────────────────────────────────────
+  let resultsErr = '';
   try {
-    const r = await fetch(`${base}/${fname}`);
+    const r = await fetch(`${base}/${fname}`, {cache: 'no-cache'});
     if (r.ok) {
       const data = await r.json();
       dot.className = 'status-dot ok';
@@ -383,9 +384,9 @@ async function fetchResults() {
       renderResults(data);
       return;
     }
-    // HTTP error — fall through to status check
-  } catch(_) {
-    // network error — fall through to status check
+    resultsErr = `HTTP ${r.status}`;
+  } catch(e) {
+    resultsErr = e.message;
   }
 
   // ── try status.json to distinguish running vs not-started ─────────────────
@@ -398,7 +399,7 @@ async function fetchResults() {
         stat.textContent = `test still running — started ${s.ts || ''}. Try again in a moment.`;
       } else if (s.status === 'complete') {
         dot.className = 'status-dot error';
-        stat.textContent = `test complete but results.json fetch failed — CORS headers missing? Check server on ${base}`;
+        stat.textContent = `test complete but results.json fetch failed: ${resultsErr} — check server on ${base}`;
       } else if (s.status === 'failed') {
         dot.className = 'status-dot error';
         stat.textContent = `test failed (exit ${s.exit ?? '?'}) — check log on host`;
