@@ -301,7 +301,15 @@ or paste <code>results.json</code> content directly.</p>
   <h3>Summary</h3>
   <div class="card-row" id="summary-cards"></div>
 
-  <h3>Comparison</h3>
+  <h3>Comparison
+    <span style="float:right;display:flex;gap:4px">
+      <button id="btn-raw"      class="btn primary" onclick="setView('raw')"      style="font-size:.7rem;padding:3px 10px">Raw flushes</button>
+      <button id="btn-compacted" class="btn"        onclick="setView('compacted')" style="font-size:.7rem;padding:3px 10px">Compacted</button>
+    </span>
+  </h3>
+  <p id="compact-note" style="display:none;font-size:.72rem;color:var(--teal);margin:0 0 6px">
+    One file per leaf partition directory — all flush files merged. Same rows, fewer files, marginally smaller size (better column encoding across larger batches).
+  </p>
   <table class="cmp-table" id="cmp-table">
     <thead>
       <tr>
@@ -552,54 +560,13 @@ function renderResults(d) {
   const nl = d.norm_long  || {};
   const lc = d.long_cmp   || {};
   const wp = d.wide_pivot || {};
-  const sizes = [nl.size_bytes||0, lc.size_bytes||0, wp.size_bytes||0];
-  const rows  = [nl.rows||0,       lc.rows||0,       wp.rows||0];
-  const files = [nl.files||0,      lc.files||0,      wp.files||0];
-  const cols  = [nl.cols||0,       lc.cols||0,       wp.cols||0];
-  const bpr   = sizes.map((s,i)=>rows[i]?Math.round(s/rows[i]):0);
+
+  // build table — called by setView()
+  window._cmpData = d;
+  setView('raw');
+
   const fmax  = [nl,lc,wp].map(x=>(x.flush_ms||[]).length ? Math.max(...x.flush_ms) : 0);
   const favg  = [nl,lc,wp].map(x=>(x.flush_ms||[]).length ? Math.round(x.flush_ms.reduce((a,b)=>a+b,0)/x.flush_ms.length) : 0);
-
-  const tbody = document.getElementById('cmp-body');
-  tbody.innerHTML = '';
-  const addRow = (label, vals, fmtFn, lowerBetter=true) => {
-    const nums = vals.map(v => typeof v === 'string' ? parseFloat(v)||0 : v);
-    const best = lowerBetter ? Math.min(...nums) : Math.max(...nums);
-    const worst= lowerBetter ? Math.max(...nums) : Math.min(...nums);
-    const cls  = v => v===best?'best':v===worst?'worst':'mid';
-    const tr   = document.createElement('tr');
-    tr.innerHTML = `<td class="metric">${label}</td>`+
-      vals.map((v,i)=>`<td class="${cls(nums[i])}">${fmtFn(v)}</td>`).join('');
-    tbody.appendChild(tr);
-  };
-  const addBarRow = (label, vals, max) => {
-    const tr = document.createElement('tr');
-    const bars = ['bar-norm','bar-cmp','bar-wide'];
-    tr.innerHTML = `<td class="metric">${label}</td>` +
-      vals.map((v,i)=>`<td class="bar-cell">
-        <div class="bar-wrap"><div class="bar-fill ${bars[i]}" style="width:${max?v/max*100:0}%"></div></div>
-        <span style="font-size:.7rem;color:var(--muted)">${v.toLocaleString()}</span></td>`).join('');
-    tbody.appendChild(tr);
-  };
-
-  addRow('Parquet files',        files, v=>v.toLocaleString());
-  addRow('Rows written',         rows,  v=>v.toLocaleString());
-  addBarRow('Size (bytes)',       sizes, Math.max(...sizes));
-  addRow('Size (KB)',             sizes.map(s=>Math.round(s/1024)), v=>v.toLocaleString()+'  KB');
-  addRow('Columns',              cols,  v=>String(v), false);
-  addRow('Bytes / row',          bpr,   v=>v+' B');
-  addRow('Flush max (ms)',       fmax,  v=>v+'ms');
-  addRow('Flush avg (ms)',       favg,  v=>v+'ms');
-
-  // size delta vs norm-long
-  if (sizes[0]) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="metric">vs norm-long</td>
-      <td class="best">baseline</td>
-      <td class="${sizes[1]>sizes[0]?'worst':'best'}">${pct(sizes[1],sizes[0])}</td>
-      <td class="${sizes[2]>sizes[0]?'worst':'best'}">${pct(sizes[2],sizes[0])}</td>`;
-    tbody.appendChild(tr);
-  }
 
   // flush sparklines
   const fc = document.getElementById('flush-charts');
@@ -689,6 +656,85 @@ function buildColList(ws, metacols, sigcols, samples) {
 
 // cache for column data (set in renderResults)
 let _lastResults = null;
+
+function setView(mode) {
+  const d = window._cmpData; if (!d) return;
+  document.getElementById('btn-raw').className       = mode==='raw'       ? 'btn primary' : 'btn';
+  document.getElementById('btn-compacted').className  = mode==='compacted'  ? 'btn primary' : 'btn';
+  document.getElementById('compact-note').style.display = mode==='compacted' ? 'block' : 'none';
+
+  const nl = d.norm_long  || {}, lc = d.long_cmp || {}, wp = d.wide_pivot || {};
+  const src = mode==='compacted'
+    ? [nl.compacted||{}, lc.compacted||{}, wp.compacted||{}]
+    : [nl, lc, wp];
+
+  const hasCompacted = nl.compacted || lc.compacted || wp.compacted;
+  if (mode==='compacted' && !hasCompacted) {
+    document.getElementById('cmp-body').innerHTML =
+      `<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:12px">
+        Compacted stats not available — re-run test to generate them.</td></tr>`;
+    return;
+  }
+
+  const sizes = src.map(s => s.size_bytes||0);
+  const rows  = src.map(s => s.rows||0);
+  const files = src.map(s => s.files||0);
+  const cols  = [nl.cols||0, lc.cols||0, wp.cols||0];
+  const bpr   = sizes.map((s,i) => rows[i] ? Math.round(s/rows[i]) : 0);
+  const fmax  = [nl,lc,wp].map(x=>(x.flush_ms||[]).length ? Math.max(...x.flush_ms) : 0);
+  const favg  = [nl,lc,wp].map(x=>(x.flush_ms||[]).length ? Math.round(x.flush_ms.reduce((a,b)=>a+b,0)/x.flush_ms.length) : 0);
+
+  const tbody = document.getElementById('cmp-body');
+  tbody.innerHTML = '';
+  const addRow = (label, vals, fmtFn, lowerBetter=true) => {
+    const nums = vals.map(v => typeof v==='string' ? parseFloat(v)||0 : v);
+    const best = lowerBetter ? Math.min(...nums) : Math.max(...nums);
+    const worst= lowerBetter ? Math.max(...nums) : Math.min(...nums);
+    const cls  = v => v===best?'best':v===worst?'worst':'mid';
+    const tr   = document.createElement('tr');
+    tr.innerHTML = `<td class="metric">${label}</td>`+
+      vals.map((v,i)=>`<td class="${cls(nums[i])}">${fmtFn(v)}</td>`).join('');
+    tbody.appendChild(tr);
+  };
+  const addBarRow = (label, vals, max) => {
+    const tr = document.createElement('tr');
+    const bars = ['bar-norm','bar-cmp','bar-wide'];
+    tr.innerHTML = `<td class="metric">${label}</td>` +
+      vals.map((v,i)=>`<td class="bar-cell">
+        <div class="bar-wrap"><div class="bar-fill ${bars[i]}" style="width:${max?v/max*100:0}%"></div></div>
+        <span style="font-size:.7rem;color:var(--muted)">${v.toLocaleString()}</span></td>`).join('');
+    tbody.appendChild(tr);
+  };
+
+  if (mode==='compacted') {
+    // show raw vs compacted file delta
+    const rawFiles = [nl.files||0, lc.files||0, wp.files||0];
+    addRow('Files (raw)',       rawFiles, v=>v.toLocaleString());
+    addRow('Files (compacted)', files,   v=>v.toLocaleString());
+    addRow('File reduction',    rawFiles.map((r,i)=>files[i]?Math.round(100*(1-files[i]/r)):0),
+           v=>v+'%', false);
+  } else {
+    addRow('Parquet files', files, v=>v.toLocaleString());
+  }
+
+  addRow('Rows',          rows,  v=>v.toLocaleString());
+  addBarRow('Size (bytes)', sizes, Math.max(...sizes));
+  addRow('Size (KB)',      sizes.map(s=>Math.round(s/1024)), v=>v.toLocaleString()+' KB');
+  addRow('Columns',        cols,  v=>String(v), false);
+  addRow('Bytes / row',    bpr,   v=>v+' B');
+  if (mode==='raw') {
+    addRow('Flush max (ms)', fmax, v=>v+'ms');
+    addRow('Flush avg (ms)', favg, v=>v+'ms');
+  }
+  if (sizes[0]) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="metric">vs norm-long</td>
+      <td class="best">baseline</td>
+      <td class="${sizes[1]>sizes[0]?'worst':'best'}">${pct(sizes[1],sizes[0])}</td>
+      <td class="${sizes[2]>sizes[0]?'worst':'best'}">${pct(sizes[2],sizes[0])}</td>`;
+    tbody.appendChild(tr);
+  }
+}
 
 // position tooltip near the hovered row, keeping it on-screen
 function positionTT(tt) {

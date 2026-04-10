@@ -282,6 +282,44 @@ def dir_stats(path):
         schema = None
     return total, len(files), rows, schema
 
+def compact_stats(path, chunk_minutes=10):
+    """Merge all parquet files in each leaf directory into one file per leaf.
+    Returns (total_bytes, file_count, row_count) of compacted output."""
+    import tempfile, collections
+    leaf_dirs = collections.defaultdict(list)
+    for root, dirs, fnames in os.walk(path):
+        if not dirs:  # leaf directory
+            for f in fnames:
+                if f.endswith(".parquet"):
+                    leaf_dirs[root].append(os.path.join(root, f))
+    if not leaf_dirs:
+        return 0, 0, 0
+    total_bytes, total_files, total_rows = 0, 0, 0
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for leaf, files in leaf_dirs.items():
+            if not files:
+                continue
+            try:
+                tables = [pq.read_table(f) for f in files]
+                merged = pa.concat_tables(tables)
+                out = os.path.join(tmpdir, f"compact_{os.path.basename(leaf)}.parquet")
+                pq.write_table(merged, out, compression='snappy')
+                total_bytes += os.path.getsize(out)
+                total_files += 1
+                total_rows  += merged.num_rows
+            except Exception as e:
+                print(f"  compact_stats warning: {leaf}: {e}")
+    return total_bytes, total_files, total_rows
+
+print("[4] Computing compacted stats...")
+compact = {
+    "norm-long":  compact_stats(OUT_NORM_LONG),
+    "long+cmp":   compact_stats(OUT_LONG_CMP),
+    "wide-pivot": compact_stats(OUT_WIDE_PIVOT),
+}
+for k, (sz, nf, nr) in compact.items():
+    print(f"  {k}: {nf} files → {sz//1024} KB  ({nr:,} rows)")
+
 SCHEMA_KEYS = ["norm-long", "long+cmp", "wide-pivot"]
 
 stats = {
@@ -373,20 +411,20 @@ result = {
                  "cpu_cores": _ncores},
     "norm_long": {
         "size_bytes": sizes[0], "files": nfiles[0], "rows": nrows[0], "cols": ncols[0],
-        "flush_ms": ftimes[0],
-        "cpu": cpu_stats(_cpu_samples["norm-long"]),
+        "flush_ms": ftimes[0], "cpu": cpu_stats(_cpu_samples["norm-long"]),
+        "compacted": {"size_bytes": compact["norm-long"][0], "files": compact["norm-long"][1], "rows": compact["norm-long"][2]},
         "schema": [{"name": f.name, "type": str(f.type)} for f in list(stats["norm-long"][3])] if stats["norm-long"][3] else []
     },
     "long_cmp": {
         "size_bytes": sizes[1], "files": nfiles[1], "rows": nrows[1], "cols": ncols[1],
-        "flush_ms": ftimes[1],
-        "cpu": cpu_stats(_cpu_samples["long+cmp"]),
+        "flush_ms": ftimes[1], "cpu": cpu_stats(_cpu_samples["long+cmp"]),
+        "compacted": {"size_bytes": compact["long+cmp"][0], "files": compact["long+cmp"][1], "rows": compact["long+cmp"][2]},
         "schema": [{"name": f.name, "type": str(f.type)} for f in list(stats["long+cmp"][3])] if stats["long+cmp"][3] else []
     },
     "wide_pivot": {
         "size_bytes": sizes[2], "files": nfiles[2], "rows": nrows[2], "cols": ncols[2],
-        "flush_ms": ftimes[2],
-        "cpu": cpu_stats(_cpu_samples["wide-pivot"]),
+        "flush_ms": ftimes[2], "cpu": cpu_stats(_cpu_samples["wide-pivot"]),
+        "compacted": {"size_bytes": compact["wide-pivot"][0], "files": compact["wide-pivot"][1], "rows": compact["wide-pivot"][2]},
         "schema": [{"name": f.name, "type": str(f.type)} for f in list(stats["wide-pivot"][3])[:40]] if stats["wide-pivot"][3] else []
     },
 }
