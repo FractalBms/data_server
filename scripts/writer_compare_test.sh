@@ -19,6 +19,7 @@ CFGDIR="/tmp/writer-compare-cfg"
 LOGDIR=""
 LOOP=0
 INTERVAL=30   # seconds between loop iterations
+CSV_FLAG=""
 
 # ── arg parse ─────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -30,6 +31,7 @@ while [[ $# -gt 0 ]]; do
     --logdir)    LOGDIR="$2";    shift 2 ;;
     --loop)      LOOP=1;         shift ;;
     --interval)  INTERVAL="$2";  shift 2 ;;
+    --csv)       CSV_FLAG="--csv $2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -301,6 +303,7 @@ JSON
     --sweeps   "$SWEEPS" \
     --site     "$SITE" \
     $COV_FLAG \
+    $CSV_FLAG \
     2>&1 | tee "$RUN_LOG"
 
   EXIT=${PIPESTATUS[0]}
