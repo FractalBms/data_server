@@ -952,7 +952,26 @@ static int compact_directory(const fs::path& dir,
                       << ": " << r.status().ToString() << "\n" << std::flush;
             return 0;  // bail — don't delete anything if any read fails
         }
-        tables.push_back(*r);
+        auto tbl = *r;
+
+        // wide-pivot: inject unit_id from filename prefix (e.g. "0215D1D8_20260410T…")
+        // Skip files that already have the column (re-compaction) or compact_ files.
+        if (!cfg.compound_field_name.empty() &&
+            tbl->schema()->GetFieldIndex("unit_id") < 0) {
+            std::string stem = f.stem().string();
+            auto sep = stem.find('_');
+            if (sep != std::string::npos && stem.substr(0, 7) != "compact") {
+                std::string uid = stem.substr(0, sep);
+                auto scalar = std::make_shared<arrow::StringScalar>(uid);
+                auto arr_r  = arrow::MakeArrayFromScalar(*scalar, tbl->num_rows());
+                if (arr_r.ok()) {
+                    auto fld   = arrow::field("unit_id", arrow::utf8());
+                    auto add_r = tbl->AddColumn(1, fld, *arr_r);  // slot after ts
+                    if (add_r.ok()) tbl = *add_r;
+                }
+            }
+        }
+        tables.push_back(tbl);
     }
 
     // Unify schemas across partitions that may have different column sets.
@@ -1698,8 +1717,12 @@ static void process_message(const char* topic, const char* payload) {
         row.ints.erase("project_id");
     }
 
-    // wide-pivot: keep partition_field (unit_id) as a column so compacted files
-    // that merge multiple units remain queryable by unit.
+    // wide-pivot: partition value is in the filename; drop it from per-flush rows.
+    // The compactor re-injects unit_id from the filename when merging.
+    if (!g_cfg->compound_field_name.empty()) {
+        row.strings.erase(g_cfg->partition_field);
+        row.ints.erase(g_cfg->partition_field);
+    }
 
     // Time window coalescing + last-write-wins dedup.
     // Statics are safe here — process_message is only called from parse_thread (single thread).
