@@ -318,7 +318,11 @@ or paste <code>results.json</code> content directly.</p>
   <div id="flush-charts" style="display:flex;gap:24px;flex-wrap:wrap;margin:10px 0"></div>
 
   <h3>Wide schema columns <span id="wide-col-count" style="color:var(--muted);font-size:.75rem;font-weight:400"></span></h3>
-  <p style="font-size:.75rem;color:var(--muted);margin:0 0 8px">Hover a column to see sample values.</p>
+  <p style="font-size:.75rem;color:var(--muted);margin:0 0 4px">Hover a column to see sample values.</p>
+  <p id="wide-ts-range" style="font-size:.72rem;font-family:monospace;color:var(--teal);margin:0 0 8px;display:none">
+    <span style="color:var(--muted)">first:</span> <span id="wide-first-ts">—</span>
+    &nbsp;&nbsp;<span style="color:var(--muted)">last:</span> <span id="wide-last-ts">—</span>
+  </p>
   <div id="wide-schema" style="background:var(--code-bg);border:1px solid var(--border);
        border-radius:4px;padding:10px 14px;columns:2;column-gap:24px;
        font-size:.75rem;font-family:monospace"></div>
@@ -559,7 +563,14 @@ function renderResults(d) {
   fetch(`http://${host}:${port}/column_samples.json`, {cache:'no-cache'})
     .then(r => r.ok ? r.json() : {})
     .catch(() => ({}))
-    .then(samples => buildColList(ws, metacols, sigcols, samples));
+    .then(samples => {
+      if (samples._first_ts) {
+        document.getElementById('wide-first-ts').textContent = samples._first_ts;
+        document.getElementById('wide-last-ts').textContent  = samples._last_ts || '—';
+        document.getElementById('wide-ts-range').style.display = 'block';
+      }
+      buildColList(ws, metacols, sigcols, samples);
+    });
 }
 
 function ttContent(name, type, vals) {

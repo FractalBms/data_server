@@ -380,10 +380,19 @@ try:
             arr = tbl.column(col.name).drop_null()
             vals = arr[:80].to_pylist()
             samples[col.name] = [round(v, 6) if isinstance(v, float) else v for v in vals]
+        # add first/last timestamp
+        all_files = sorted(pq_files)
+        first_tbl = _pq.read_table(all_files[0],  columns=["ts"])
+        last_tbl  = _pq.read_table(all_files[-1], columns=["ts"])
+        ts_f = first_tbl.column("ts").drop_null()
+        ts_l = last_tbl.column("ts").drop_null()
+        samples["_first_ts"] = str(ts_f[0].as_py())  if len(ts_f) else None
+        samples["_last_ts"]  = str(ts_l[-1].as_py()) if len(ts_l) else None
+
         samples_file = os.path.join(OUTDIR, "column_samples.json")
         with open(samples_file, "w") as fh:
             _json.dump(samples, fh)
-        print(f"  Column samples saved to {samples_file} ({len(samples)} columns)")
+        print(f"  Column samples saved to {samples_file} ({len(samples)-2} columns + timestamps)")
     else:
         print("  No wide parquet files found for column samples")
 except Exception as e:
