@@ -33,6 +33,8 @@ parser.add_argument("--mqtt-host", default="localhost",
                     help="MQTT broker host (default localhost)")
 parser.add_argument("--mqtt-port", type=int, default=1883,
                     help="MQTT broker port (default 1883)")
+parser.add_argument("--csv", default=None,
+                    help="Path to SBESS3 zip for CSV replay (default: use physics model)")
 args = parser.parse_args()
 
 # Resolve paths — support both /home/phil/work/gen-ai/data_server (dev)
@@ -87,32 +89,91 @@ if os.path.isfile(CFG_WIDE_PIVOT):
                {'base_path': OUT_WIDE_PIVOT, 'site_id': SITE_ID})
 
 UNITS = [f"{0x0215D1D8 + i:08X}" for i in range(12)]
-FLOAT_SIGNALS = (
-    [("bms", "bms_1", f"Batt1_Cell{c}_Voltage",    "float") for c in range(1, 11)] +
-    [("bms", "bms_1", f"Batt1_Cell{c}_Temperature", "float") for c in range(1, 6)]  +
-    [("bms", "bms_1", "Pack_Current",                "float"),
-     ("bms", "bms_1", "Pack_Voltage",                "float"),
-     ("bms", "bms_1", "Pack_SOC",                    "float"),
-     ("bms", "bms_1", "Pack_SOH",                    "float"),
-     ("pcs", "pcs_1", "GridFrequency",               "float"),
-     ("pcs", "pcs_1", "ActivePower",                 "float"),
-     ("pcs", "pcs_1", "ReactivePower",               "float"),
-     ("pcs", "pcs_1", "DCBusVoltage",                "float"),
-     ("pcs", "pcs_1", "OutputCurrent",               "float")]
-)
-INT_SIGNALS = [
-    ("bms", "bms_1", "Pack_ContactorState",  "integer"),
-    ("bms", "bms_1", "Batt1_CellBalancing",  "integer"),
-    ("bms", "bms_1", "BMS_FaultCode",        "integer"),
-    ("bms", "bms_1", "BMS_WarningCode",      "integer"),
-    ("pcs", "pcs_1", "PCS_State",            "integer"),
-    ("pcs", "pcs_1", "PCS_FaultCode",        "integer"),
-    ("pcs", "pcs_1", "GridConnected",        "integer"),
-    ("pcs", "pcs_1", "AlarmActive",          "integer"),
-    ("rack","rack_1","Rack_FanState",        "integer"),
-    ("rack","rack_1","Rack_DoorOpen",        "integer"),
-]
-ALL_SIGNALS  = FLOAT_SIGNALS + INT_SIGNALS
+
+# ── CSV replay loader ─────────────────────────────────────────────────────────
+def load_csv_replay(zip_path):
+    """Parse InfluxDB Flux CSV from SBESS3 zip.
+    Returns (signals, values) where:
+      signals: list of (device, instance, point_name, dtype) tuples
+      values:  dict {(device, instance, point_name, dtype): [float, ...]}
+    Only loads bms_1 and pcs_1 device data; skips log- prefixed signals.
+    """
+    import zipfile, io, csv as _csv
+    print(f"[csv] Loading real data from {zip_path} ...")
+    # files to load (bms and pcs for UC 61B5 — smallest complete pair)
+    TARGET_FILES = [
+        "SBESS3 bms data - UC 61B5.csv",
+        "SBESS3 pcs data - UC 61B5.csv",
+    ]
+    TARGET_DEVICES = {'bms_1', 'pcs_1'}
+    values = {}   # (device, instance, point_name, dtype) -> [val, ...]
+    with zipfile.ZipFile(zip_path) as zf:
+        available = zf.namelist()
+        for target in TARGET_FILES:
+            if target not in available:
+                print(f"[csv] WARNING: {target!r} not found in zip, skipping")
+                continue
+            print(f"[csv]   reading {target} ...", flush=True)
+            with zf.open(target) as raw:
+                reader = _csv.reader(io.TextIOWrapper(raw, encoding='utf-8'))
+                for i, row in enumerate(reader):
+                    if i < 4: continue   # skip Flux annotation header
+                    if len(row) < 14: continue
+                    dtype    = row[7]    # _field: float / integer / string
+                    if dtype not in ('float', 'integer'): continue
+                    meas     = row[8]    # _measurement: bms / pcs
+                    point    = row[9]    # point_name
+                    instance = row[11]   # source_device_id: bms_1, pcs_1, ...
+                    val_str  = row[6]    # _value
+                    if point.startswith('log-'): continue
+                    if instance not in TARGET_DEVICES: continue
+                    try:
+                        val = float(val_str)
+                    except ValueError:
+                        continue
+                    key = (meas, instance, point, dtype)
+                    if key not in values:
+                        values[key] = []
+                    values[key].append(val)
+    # build sorted signal list (float first, then integer)
+    float_sigs   = sorted(k for k in values if k[3] == 'float')
+    integer_sigs = sorted(k for k in values if k[3] == 'integer')
+    signals = float_sigs + integer_sigs
+    n_steps = min(len(v) for v in values.values()) if values else 0
+    print(f"[csv] Loaded {len(signals)} signals, {n_steps} time steps each")
+    return signals, values
+
+if args.csv:
+    ALL_SIGNALS, _csv_values = load_csv_replay(args.csv)
+    FLOAT_SIGNALS = [s for s in ALL_SIGNALS if s[3] == 'float']
+    INT_SIGNALS   = [s for s in ALL_SIGNALS if s[3] == 'integer']
+else:
+    FLOAT_SIGNALS = (
+        [("bms", "bms_1", f"Batt1_Cell{c}_Voltage",    "float") for c in range(1, 11)] +
+        [("bms", "bms_1", f"Batt1_Cell{c}_Temperature", "float") for c in range(1, 6)]  +
+        [("bms", "bms_1", "Pack_Current",                "float"),
+         ("bms", "bms_1", "Pack_Voltage",                "float"),
+         ("bms", "bms_1", "Pack_SOC",                    "float"),
+         ("bms", "bms_1", "Pack_SOH",                    "float"),
+         ("pcs", "pcs_1", "GridFrequency",               "float"),
+         ("pcs", "pcs_1", "ActivePower",                 "float"),
+         ("pcs", "pcs_1", "ReactivePower",               "float"),
+         ("pcs", "pcs_1", "DCBusVoltage",                "float"),
+         ("pcs", "pcs_1", "OutputCurrent",               "float")]
+    )
+    INT_SIGNALS = [
+        ("bms", "bms_1", "Pack_ContactorState",  "integer"),
+        ("bms", "bms_1", "Batt1_CellBalancing",  "integer"),
+        ("bms", "bms_1", "BMS_FaultCode",        "integer"),
+        ("bms", "bms_1", "BMS_WarningCode",      "integer"),
+        ("pcs", "pcs_1", "PCS_State",            "integer"),
+        ("pcs", "pcs_1", "PCS_FaultCode",        "integer"),
+        ("pcs", "pcs_1", "GridConnected",        "integer"),
+        ("pcs", "pcs_1", "AlarmActive",          "integer"),
+        ("rack","rack_1","Rack_FanState",        "integer"),
+        ("rack","rack_1","Rack_DoorOpen",        "integer"),
+    ]
+    ALL_SIGNALS = FLOAT_SIGNALS + INT_SIGNALS
 SWEEPS       = args.sweeps
 SIGNALS_PS   = len(UNITS) * len(ALL_SIGNALS)
 TOTAL_MSGS   = SWEEPS * SIGNALS_PS
@@ -364,8 +425,35 @@ class UnitPhysics:
             if signame == "Rack_DoorOpen":        return self._door_open
             return 0
 
-# One physics instance per unit — seeded by unit index for repeatability
-_physics = {unit: UnitPhysics(seed=i) for i, unit in enumerate(UNITS)}
+# ── CSV replay class ──────────────────────────────────────────────────────────
+class CsvReplay:
+    """Plays back real SBESS3 CSV values for one benchmark unit.
+    Each unit gets a different starting offset so they are not synchronised."""
+
+    def __init__(self, csv_values, offset=0):
+        self._values = csv_values   # {(device, instance, point, dtype): [vals]}
+        self._idx    = offset
+        self._lens   = {k: len(v) for k, v in csv_values.items()}
+
+    def step(self, dt=1.0):
+        self._idx += 1
+
+    def get(self, device, instance, signame, dtype):
+        key  = (device, instance, signame, dtype)
+        vals = self._values.get(key)
+        if not vals:
+            return 0.0 if dtype == 'float' else 0
+        return vals[self._idx % self._lens[key]]
+
+# One physics/replay instance per unit — seeded by unit index for repeatability
+if args.csv:
+    # stagger each unit's start by ~90 s so they are not all in lock-step
+    _n_steps = min(len(v) for v in _csv_values.values())
+    _step_sz = max(1, _n_steps // len(UNITS))
+    _physics = {unit: CsvReplay(_csv_values, offset=i * _step_sz)
+                for i, unit in enumerate(UNITS)}
+else:
+    _physics = {unit: UnitPhysics(seed=i) for i, unit in enumerate(UNITS)}
 
 for sweep in range(SWEEPS):
     sweep_wall_start = time.time()
