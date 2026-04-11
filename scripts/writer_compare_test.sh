@@ -14,6 +14,7 @@ set -euo pipefail
 SWEEPS=600
 COV_FLAG=""
 OUTDIR=""
+MACHINE=""       # e.g. "34" or "48" — appended to OUTDIR so runs are distinguishable
 SITE="SITE_A"
 CFGDIR="/tmp/writer-compare-cfg"
 LOGDIR=""
@@ -28,6 +29,7 @@ while [[ $# -gt 0 ]]; do
     --sweeps)    SWEEPS="$2";    shift 2 ;;
     --cov)       COV_FLAG="--cov"; shift ;;
     --outdir)    OUTDIR="$2";    shift 2 ;;
+    --machine)   MACHINE="$2";  shift 2 ;;
     --site)      SITE="$2";      shift 2 ;;
     --logdir)    LOGDIR="$2";    shift 2 ;;
     --loop)      LOOP=1;         shift ;;
@@ -43,15 +45,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WRITER="$REPO_ROOT/source/parquet_writer/parquet_writer"
 
-# ── resolve output / log dirs ─────────────────────────────────────────────────
+# ── resolve machine tag and output / log dirs ─────────────────────────────────
+if [[ -z "$MACHINE" ]]; then
+  # derive from last octet of primary IP
+  _IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+  MACHINE=$(echo "$_IP" | awk -F. '{print $4}')
+  [[ -z "$MACHINE" ]] && MACHINE=$(hostname -s)
+fi
+
 if [[ -z "$OUTDIR" ]]; then
-  # auto-detect: use mounted torture drive on .34, /tmp on others
+  # auto-detect base: use mounted torture drive on .34, /data on .48, /tmp otherwise
   if mountpoint -q /mnt/tort-sdi 2>/dev/null; then
-    OUTDIR="/mnt/tort-sdi/bench"
+    OUTDIR="/mnt/tort-sdi/bench/${MACHINE}"
   elif mountpoint -q /data 2>/dev/null; then
-    OUTDIR="/data/bench"
+    OUTDIR="/data/bench/${MACHINE}"
   else
-    OUTDIR="/tmp/bench-compare"
+    OUTDIR="/tmp/bench-compare/${MACHINE}"
   fi
 fi
 
@@ -76,6 +85,7 @@ echo "  outdir  : $OUTDIR"
 echo "  cfgdir  : $CFGDIR"
 echo "  results : $RESULTS_FILE"
 echo "  log     : $LOG_FILE"
+echo "  machine : $MACHINE"
 echo "  sweeps  : $SWEEPS  cov: ${COV_FLAG:-off}  compact: ${COMPACT_INTERVAL}s"
 echo "=================================================="
 

@@ -670,10 +670,10 @@ or paste <code>results.json</code> content directly.</p>
 // On .34: python3 scripts/bench_server.py --port 8780 --directory /mnt/tort-sdi/bench
 // On .48: python3 scripts/bench_server.py --port 8780 --directory /data
 const PRESETS = {
-  '34-bench': { host:'192.168.86.34', port:'8780', path:'/mnt/tort-sdi/bench/results.json',
-                rootDir:'/mnt/tort-sdi/bench', healthPort: null, label:'.34 bench compare' },
-  '48-bench': { host:'192.168.86.48', port:'8780', path:'bench/results.json',
-                rootDir:'bench',               healthPort: null, label:'.48 bench compare' },
+  '34-bench': { host:'192.168.86.34', port:'8780', path:'bench/34/results.json',
+                rootDir:'bench/34', healthPort: null, label:'.34 bench compare' },
+  '48-bench': { host:'192.168.86.48', port:'8780', path:'bench/48/results.json',
+                rootDir:'bench/48',            healthPort: null, label:'.48 bench compare' },
   '48-a':     { host:'192.168.86.48', port:'8780', path:'parquet-evelyn/a',
                 rootDir:'parquet-evelyn/a', healthPort:8771, label:'.48 slice A (units 0-11)'  },
   '48-b':     { host:'192.168.86.48', port:'8780', path:'parquet-evelyn/b',
