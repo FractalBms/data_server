@@ -113,7 +113,7 @@ all: check-deps parquet_writer real_writer
 parquet_writer: check-deps parquet_writer.cpp mqtt_ring.h
 	$(CXX) $(ALL_CFLAGS) -std=c++20 parquet_writer.cpp -o $@ $(ALL_LIBS)
 
-real_writer: check-deps real_writer.cpp
+real_writer: real_writer.cpp check-deps
 	$(CXX) $(ALL_CFLAGS) -std=c++20 $< -o $@ $(ALL_LIBS)
 
 tests/test_writer: tests/test_writer.cpp writer.cpp tests/test_runner.h
