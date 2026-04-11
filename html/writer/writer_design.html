@@ -376,15 +376,46 @@ compact_20260411T140658Z.parquet       ← compactor merges flush files every 5 
     </tbody>
   </table>
 
-  <h3>How to use real data in a benchmark run</h3>
-  <pre># Pass the SBESS3 zip to compare_run.py:
-python3 source/parquet_writer/compare_run.py     --csv /path/to/SBESS3_UC61B5.zip     --sweeps 600
+  <h3>Dataset analysis &amp; signal characterisation</h3>
+  <p>Two reference documents cover the real-site data in depth:</p>
+  <table>
+    <thead><tr><th>Document</th><th>Contents</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><a href="evelyn_data_analysis.html" style="color:var(--accent)">evelyn_data_analysis.html ↗</a></td>
+        <td>Full noise analysis of the real SBESS3 recording — 2.7M rows, 3-hour window (2026-03-23 14:23–17:44 UTC).
+            Sections: Coefficient of Variation ranking, delta percentiles for deadband sizing,
+            frozen/stuck sensor detection, Z-score outlier scan, physics consistency (rack voltage vs SOC residual).
+            Use this to understand actual signal volatility before tuning <code>null_fill_unchanged</code> or COV thresholds.</td>
+      </tr>
+      <tr>
+        <td><a href="ems_physics_proposal.html" style="color:var(--accent)">ems_physics_proposal.html ↗</a></td>
+        <td>Physics model proposal — per-signal specs calibrated from SBESS3 (UC 61B5 &amp; 63A1).
+            Signal range table, noise characterisation, comparison of random synthetic vs
+            physics-model vs real data. Source for all range/noise values in the
+            <code>UnitPhysics</code> class used by the continuous publisher.</td>
+      </tr>
+    </tbody>
+  </table>
 
-# The loader:
-#  1. Reads both CSV files from the ZIP
-#  2. Strips log- prefixed signals and the exclusion list
+  <h3>How to use real data in a benchmark run</h3>
+  <pre># Canonical zip location on both phil-dev and .34:
+# /home/phil/fractal/zip/SBESS3 Influx Data.zip
+
+# Benchmark run with real data:
+python3 source/parquet_writer/compare_run.py \
+    --csv "/home/phil/fractal/zip/SBESS3 Influx Data.zip" \
+    --sweeps 600
+
+# Continuous replay (current run on 192.168.86.34):
+python3 scripts/continuous_publisher.py \
+    --csv "/home/phil/fractal/zip/SBESS3 Influx Data.zip"
+
+# The CSV loader:
+#  1. Reads SBESS3 bms data - UC 61B5.csv and pcs data - UC 61B5.csv from the ZIP
+#  2. Strips log- prefixed signals and the monotonic/constant exclusion list
 #  3. Assigns each of the 12 bench units a different time-offset into the recording
-#     so units are not all synchronised (stagger = N_steps / N_units)
+#     so units are not synchronised (stagger = N_steps / N_units)
 #  4. Loops the recording — when end of data is reached, wraps to start</pre>
 
   <h3>Physics model (synthetic, used in continuous mode)</h3>
