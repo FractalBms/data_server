@@ -292,6 +292,7 @@ output:
   time_window_ms: 250
   wide_point_name: true
   null_fill_unchanged: true
+  null_fill_reset_interval_seconds: 3600
   store_mqtt_topic: false
   store_project_id: false
   store_sample_count: false

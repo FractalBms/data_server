@@ -120,7 +120,8 @@ struct Config {
     // changed since the last flush for this partition. Fast-moving signals still
     // write every row; slow signals become mostly null (compresses extremely well).
     // Only active when compound_field_name is set (wide-pivot mode).
-    bool null_fill_unchanged {false};
+    bool null_fill_unchanged           {false};
+    int  null_fill_reset_interval_seconds {3600}; // force full write every N seconds; 0=off
 
     // drop_columns: erase these columns from every row before writing.
     // Applied after compound_point_name / compound_field_name.
@@ -278,7 +279,8 @@ Config load_config(const std::string& path) {
             if (o["store_mqtt_topic"])      cfg.store_mqtt_topic      = o["store_mqtt_topic"].as<bool>();
             if (o["store_project_id"])      cfg.store_project_id      = o["store_project_id"].as<bool>();
             if (o["store_sample_count"])    cfg.store_sample_count    = o["store_sample_count"].as<bool>();
-            if (o["null_fill_unchanged"])   cfg.null_fill_unchanged   = o["null_fill_unchanged"].as<bool>();
+            if (o["null_fill_unchanged"])             cfg.null_fill_unchanged             = o["null_fill_unchanged"].as<bool>();
+            if (o["null_fill_reset_interval_seconds"]) cfg.null_fill_reset_interval_seconds = o["null_fill_reset_interval_seconds"].as<int>();
             if (o["wide_point_name"])    cfg.wide_point_name    = o["wide_point_name"].as<bool>();
             if (o["partitions"]) {
                 cfg.partitions.clear();
@@ -746,27 +748,46 @@ static std::vector<Row> merge_wide_rows(const std::vector<Row>& rows) {
 // ---------------------------------------------------------------------------
 
 // Per-partition last-written values for null_fill_unchanged.
-// Key: partition_value  →  {column_name → last double value}
+// State key = partition_value + "|" + parent_dir so it resets automatically
+// at day boundaries (new date → new parent dir → fresh state).
 static std::mutex s_nf_mtx;
 static std::unordered_map<std::string,
        std::unordered_map<std::string, double>> s_nf_last;
+static std::unordered_map<std::string, int64_t> s_nf_reset_time; // epoch seconds
 
 arrow::Status flush_partition(const std::string& path,
                                const std::vector<Row>& rows,
                                const std::string& compression,
                                bool merge_wide = false,
                                const std::string& partition_key = "",
-                               bool null_fill = false) {
+                               bool null_fill = false,
+                               int  null_fill_reset_interval = 3600) {
     if (rows.empty()) return arrow::Status::OK();
     std::vector<Row> merged;
     const std::vector<Row>* rp = &rows;
     if (merge_wide) { merged = merge_wide_rows(rows); rp = &merged; }
 
-    // null_fill_unchanged: replace unchanged column values with null (absent key).
-    // Slow signals compress extremely well as runs of nulls in columnar format.
+    // null_fill_unchanged: replace unchanged column values with null.
+    // Day boundary reset: state key includes parent dir so a new date dir = fresh state.
+    // Periodic reset: every null_fill_reset_interval seconds force a full write so
+    //   each compact window is self-contained (no need to look back at previous files).
     if (merge_wide && null_fill && !partition_key.empty()) {
+        std::string parent_dir = fs::path(path).parent_path().string();
+        std::string state_key  = partition_key + "|" + parent_dir;
+
         std::lock_guard<std::mutex> lk(s_nf_mtx);
-        auto& last = s_nf_last[partition_key];
+
+        // Periodic reset check.
+        auto now_s = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        auto& reset_t = s_nf_reset_time[state_key];
+        if (reset_t == 0) reset_t = now_s;  // initialise on first flush
+        if (null_fill_reset_interval > 0 && (now_s - reset_t) >= null_fill_reset_interval) {
+            s_nf_last.erase(state_key);     // drop state → next flush writes all values
+            reset_t = now_s;
+        }
+
+        auto& last = s_nf_last[state_key];
         for (auto& row : merged) {
             // floats
             for (auto it = row.floats.begin(); it != row.floats.end(); ) {
@@ -1249,7 +1270,8 @@ static void do_flush(std::map<PartitionKey, Partition> to_flush,
             status = flush_partition(path, part.rows, g_cfg->compression,
                                          !g_cfg->compound_field_name.empty(),
                                          key.partition_value,
-                                         g_cfg->null_fill_unchanged);
+                                         g_cfg->null_fill_unchanged,
+                                         g_cfg->null_fill_reset_interval_seconds);
             if (status.ok()) break;
             std::cerr << "[flush] attempt " << attempt + 1 << " failed: "
                       << status.ToString() << "\n" << std::flush;
@@ -1425,7 +1447,8 @@ static void replay_wal_files() {
             auto status = flush_partition(path, part_rows, g_cfg->compression,
                                               !g_cfg->compound_field_name.empty(),
                                               key.partition_value,
-                                              g_cfg->null_fill_unchanged);
+                                              g_cfg->null_fill_unchanged,
+                                              g_cfg->null_fill_reset_interval_seconds);
             if (status.ok()) {
                 std::cout << "[wal] flushed " << part_rows.size() << " replayed rows → " << path << "\n" << std::flush;
             } else {
