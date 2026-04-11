@@ -750,6 +750,20 @@ async function fetchResults() {
   stat.textContent = 'fetching…';
 
   const base  = `http://${host}:${port}`;
+
+  // ── for live writer presets (.48 A/B/C/D) — poll health, skip results.json ─
+  const preset = _activePreset ? PRESETS[_activePreset] : null;
+  if (preset?.healthPort) {
+    await pollHealth(preset.host, preset.healthPort);
+    const tile = document.getElementById('health-tile');
+    const ok   = tile.querySelector('.health-dot').classList.contains('ok');
+    dot.className = ok ? 'status-dot ok' : 'status-dot error';
+    stat.textContent = ok
+      ? `writer running on ${preset.host}:${preset.healthPort} — use file browser to view parquet files`
+      : `cannot reach health endpoint ${preset.host}:${preset.healthPort}`;
+    return;
+  }
+
   const fname = path.split('/').pop();
 
   // ── try results.json first ────────────────────────────────────────────────
@@ -770,13 +784,13 @@ async function fetchResults() {
 
   // ── try status.json to distinguish running vs not-started ─────────────────
   try {
-    const rs = await fetch(`${base}/status.json`);
+    const rs = await fetch(`${base}/status.json`, {cache:'no-cache'});
     if (rs.ok) {
       const s = await rs.json();
       if (s.status === 'running' || s.status === 'started') {
         dot.className = 'status-dot warn';
         const run = s.run ? ` (run #${s.run})` : '';
-        stat.textContent = `test running${run} — started ${s.ts || ''}. Try again in a moment.`;
+        stat.textContent = `★ test running${run} — started ${s.ts || ''}. Try again in a moment.`;
       } else if (s.status === 'complete') {
         dot.className = 'status-dot error';
         stat.textContent = `test complete but results.json fetch failed: ${resultsErr} — check server on ${base}`;
@@ -791,19 +805,19 @@ async function fetchResults() {
     }
   } catch(_) {}
 
-  // ── check if the bench dir is at least reachable (any file present) ───────
+  // ── check if bench dir is at least reachable ──────────────────────────────
   try {
-    const rp = await fetch(`${base}/`);
+    const rp = await fetch(`${base}/`, {cache:'no-cache'});
     if (rp.ok) {
       dot.className = 'status-dot warn';
-      stat.textContent = `server reachable but test still running — results.json not written yet. Try again shortly.`;
+      stat.textContent = `server reachable — no status.json yet (test may not have started)`;
       return;
     }
   } catch(_) {}
 
-  // ── nothing reachable — server not started ────────────────────────────────
+  // ── nothing reachable ─────────────────────────────────────────────────────
   dot.className = 'status-dot error';
-  stat.textContent = `cannot reach ${base} — on .34 run: python3 -m http.server ${port} --directory /mnt/tort-sdi/bench`;
+  stat.textContent = `cannot reach ${base} — start bench_server: python3 scripts/bench_server.py --port ${port} --directory /mnt/tort-sdi/bench`;
 }
 
 function tryLoadPasted() {
@@ -1420,6 +1434,30 @@ async function pollStatus() {
   const host = document.getElementById('host-in').value.trim();
   const port = document.getElementById('port-in').value.trim();
   const bar  = document.getElementById('run-status-bar');
+
+  // ── live writer preset (.48 A/B/C/D) — show health in status bar ──────────
+  const preset = _activePreset ? PRESETS[_activePreset] : null;
+  if (preset?.healthPort) {
+    try {
+      const r = await fetch(`http://${preset.host}:${preset.healthPort}/health`, {cache:'no-cache'});
+      if (!r.ok) { bar.style.display='none'; return; }
+      const j = await r.json();
+      bar.style.display = 'flex';
+      const dot   = document.getElementById('run-state-dot');
+      const label = document.getElementById('run-state-label');
+      const runN  = document.getElementById('run-number');
+      const est   = document.getElementById('run-sweep-est');
+      dot.className = 'status-dot ok';
+      label.textContent = `★ writer running — ${(j.msgs_received||0).toLocaleString()} msgs`;
+      runN.textContent  = `${(j.total_rows_written||0).toLocaleString()} rows written`;
+      est.textContent   = j.flush_count != null ? `${j.flush_count} flushes` : '';
+    } catch(_) {
+      bar.style.display = 'none';
+    }
+    return;
+  }
+
+  // ── bench compare test — poll status.json ─────────────────────────────────
   try {
     const r = await fetch(`http://${host}:${port}/status.json`, {cache:'no-cache'});
     if (!r.ok) { bar.style.display='none'; return; }
@@ -1434,7 +1472,7 @@ async function pollStatus() {
 
     if (s.status === 'running') {
       dot.className = 'status-dot warn';
-      label.textContent = 'running';
+      label.textContent = '★ running';
       if (!_runStartTs || _runStartTs !== s.ts) {
         _runStartTs = s.ts;
         startElapsedClock(s.ts, s.sweeps);
