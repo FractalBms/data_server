@@ -147,7 +147,7 @@
 
 <h1>Parquet Writer — Design Document</h1>
 <div class="subtitle">
-  <code>source/parquet_writer_cpp/writer.cpp</code> &nbsp;·&nbsp;
+  <code>source/parquet_writer/parquet_writer.cpp</code> &nbsp;·&nbsp;
   Branch: <code>03202026_run_with_real_data</code> &nbsp;·&nbsp;
   Audience: BMS Team Members &nbsp;·&nbsp;
   Updated: 2026-03-29
@@ -515,139 +515,273 @@ EMS Devices / BMS Publishers
 <h2 id="config">6 · Configuration</h2>
 
 <div class="section">
-  <p>All settings live in a YAML file (default: <code>writer_config.yaml</code>).
-     Individual values can be overridden with CLI flags without creating a new file.</p>
+  <p>All settings live in a YAML file (default: <code>writer_config.yaml</code>, or any path via <code>--config</code>).
+     The six top-level sections are <code>mqtt</code>, <code>output</code>, <code>wal</code>,
+     <code>health</code>, <code>compact</code>, and <code>guard</code>.</p>
 
+  <h3>Minimal example</h3>
   <pre>mqtt:
-  host:      localhost       # FlashMQ broker
-  port:      1883
-  client_id: parquet-writer  # ★ must be unique per instance
-  topic:     "#"             # subscribe to all topics
-  qos:       0               # QoS-0 for max throughput
+  host:      localhost
+  client_id: parquet-writer   # ★ unique per instance
+  topic:     "unit/#"
 
 output:
-  base_path:              /srv/data/parquet   # ★ must be unique per instance
-  compression:            snappy             # snappy | zstd | gzip | none
-  flush_interval_seconds: 60
-  max_messages_per_part:  5000000
-  max_total_buffer_rows:  2000000            # OOM guard (~25s at 80k msg/s)
-  topic_partition_segments: 0               # 0=off · 2=per-unit · 3=per-unit/subsystem
+  base_path: /srv/data/parquet   # ★ unique per instance
+  site_id:   site-001
 
 health:
-  enabled: true
-  port: 8771                                 # ★ must be unique per instance
-
-wal:
-  enabled: true                              # write-ahead log — ON by default in real_writer
-  path:    ""                                # default: {base_path}/.wal/
-
-compact:
-  enabled:          false                    # background file compactor (see §11)
-  interval_seconds: 600                      # how often to scan (default: 10 min)
-  min_files:        3                        # min files in a dir to trigger
-  min_age_seconds:  0                        # 0 = 2 × flush_interval_seconds
-
-guard:
-  min_free_gb: 1.0                           # skip flush if disk nearly full</pre>
+  port: 8771                     # ★ unique per instance</pre>
 
   <h3>CLI overrides</h3>
-  <p>Useful for launching multiple instances without multiple config files:</p>
-  <pre>./parquet_writer --client-id parquet-writer-2 --output /srv/data/parquet-2 --health-port 8772</pre>
+  <pre>./parquet_writer --config writer_config.yaml --client-id pw-b --output /srv/data/b --health-port 8772</pre>
 
-  <h3>Configuration gotchas</h3>
+  <!-- ═══════════════ MQTT section ═══════════════ -->
+  <h3 id="cfg-mqtt">mqtt: — Connection &amp; Topic Parsing</h3>
+
+  <h4>Connection</h4>
   <table>
-    <thead><tr><th>Setting</th><th>Must be unique per instance?</th><th>Why</th></tr></thead>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>mqtt.client_id</code></td><td class="err">Yes</td><td>Broker kicks whichever client connects second with a duplicate ID</td></tr>
-      <tr><td><code>output.base_path</code></td><td class="err">Yes</td><td>Two writers in the same directory race on filenames</td></tr>
-      <tr><td><code>health.port</code></td><td class="err">Yes (if enabled)</td><td>Two processes cannot bind the same TCP port</td></tr>
-      <tr><td><code>mqtt.topic</code></td><td class="ok">No</td><td>Broker fans out each message to every subscriber independently</td></tr>
-      <tr><td><code>output.compression</code></td><td class="ok">No</td><td>Can differ between instances (trade CPU vs file size)</td></tr>
+      <tr><td><code>host</code></td><td><code>localhost</code></td><td>MQTT broker hostname or IP</td></tr>
+      <tr><td><code>port</code></td><td><code>1883</code></td><td>Broker port</td></tr>
+      <tr><td><code>client_id</code></td><td><code>parquet-writer</code></td><td>MQTT client ID — <span class="err">must be unique per instance</span>; duplicate ID causes broker to disconnect the earlier connection</td></tr>
+      <tr><td><code>topic</code></td><td><code>unit/#</code></td><td>MQTT subscription topic filter; <code>#</code> matches any sub-path</td></tr>
+      <tr><td><code>qos</code></td><td><code>0</code></td><td>Quality of service: 0 = at-most-once (maximum throughput), 1 = at-least-once</td></tr>
+      <tr><td><code>keepalive_seconds</code></td><td><code>60</code></td><td>MQTT PINGREQ interval when idle</td></tr>
+      <tr><td><code>reconnect_min_seconds</code></td><td><code>2</code></td><td>Minimum reconnect backoff after broker disconnect</td></tr>
+      <tr><td><code>reconnect_max_seconds</code></td><td><code>30</code></td><td>Maximum reconnect backoff (exponential cap)</td></tr>
+      <tr><td><code>connect_retry_seconds</code></td><td><code>5</code></td><td>Retry interval for initial connection attempts at startup</td></tr>
     </tbody>
   </table>
 
-  <h3 id="topic-partition">Topic-based file partitioning <span class="tag tag-blue">Config-selectable</span></h3>
-  <p>
-    By default the writer places all messages for a given source type into a single daily
-    Parquet file regardless of which device or subsystem sent them. The
-    <code>output.topic_partition_segments</code> option instructs the writer to fold the
-    first <em>N</em> segments of the MQTT topic into the output path, creating one file (or
-    subtree) per unique topic prefix. This makes per-device queries dramatically faster
-    because the query engine can prune entire files by path before reading a single byte.
-  </p>
-
-  <pre>output:
-  topic_partition_segments: 0   # 0 = disabled (current default)
-                                # 1 = first segment  → one dir per source type
-                                # 2 = first 2 segs   → one dir per unit/device
-                                # 3 = first 3 segs   → one dir per unit/subsystem</pre>
-
-  <h4>Path examples — Longbow EMS topic <code>unit/02281660/bms/bms_1/…/float</code></h4>
+  <h4>Topic parsing — mode selection</h4>
+  <p>The writer supports two topic-parsing modes, selected by <code>topic_parser</code>:</p>
   <table>
-    <thead><tr><th><code>topic_partition_segments</code></th><th>Output path</th></tr></thead>
+    <thead><tr><th>Mode</th><th>How it works</th><th>Use when</th></tr></thead>
     <tbody>
       <tr>
-        <td class="dim">0 (disabled)</td>
-        <td><code>base/unit/2026/03/23/20260323T142001Z.parquet</code></td>
+        <td><code>positional</code> <span class="tag tag-green">default</span></td>
+        <td>Splits topic on <code>/</code> and maps each segment to a column name by position, using <code>topic_segments</code> list. Segment 0 becomes <code>topic_segments[0]</code>, etc.</td>
+        <td>Fixed-depth topics like <code>unit/{id}/bms/{inst}/{point}/{dtype}</code></td>
       </tr>
       <tr>
-        <td>1</td>
-        <td><code>base/unit/2026/03/23/20260323T142001Z.parquet</code>
-            <span class="dim"> — same as default (source type is already seg 0)</span></td>
-      </tr>
-      <tr>
-        <td>2</td>
-        <td><code>base/unit/02281660/2026/03/23/20260323T142001Z.parquet</code>
-            <span class="dim"> — one daily file per physical unit</span></td>
-      </tr>
-      <tr>
-        <td>3</td>
-        <td><code>base/unit/02281660/bms/2026/03/23/20260323T142001Z.parquet</code>
-            <span class="dim"> — one daily file per unit × subsystem (bms / pcs / rack)</span></td>
-      </tr>
-      <tr>
-        <td>4</td>
-        <td><code>base/unit/02281660/bms/bms_1/2026/03/23/20260323T142001Z.parquet</code>
-            <span class="dim"> — one daily file per unit × instance</span></td>
+        <td><code>kv</code></td>
+        <td>Each topic segment is expected to contain <code>key=value</code>. The <code>topic_kv_map</code> maps known keys to column names. Segments not in the map are ignored.</td>
+        <td>Self-describing topics like <code>site=0/rack=1/module=2/cell=3/voltage</code></td>
       </tr>
     </tbody>
   </table>
 
-  <h4>Stress-test topic <code>batteries_a/site=0/rack=1/module=2/cell=3/voltage</code></h4>
+  <h4>topic_segments (positional mode)</h4>
+  <p>Ordered list of column names, one per topic segment. Special reserved values:</p>
   <table>
-    <thead><tr><th><code>topic_partition_segments</code></th><th>Output path</th></tr></thead>
+    <thead><tr><th>Reserved name</th><th>Behaviour</th></tr></thead>
     <tbody>
-      <tr>
-        <td>2</td>
-        <td><code>base/batteries_a/site=0/2026/03/23/20260323T142001Z.parquet</code></td>
-      </tr>
-      <tr>
-        <td>3</td>
-        <td><code>base/batteries_a/site=0/rack=1/2026/03/23/20260323T142001Z.parquet</code></td>
-      </tr>
+      <tr><td><code>dtype_hint</code></td><td>Consumed for type-casting (int64 vs float64); <em>not</em> stored as a column</td></tr>
+      <tr><td><code>field_name</code></td><td>Renames the <code>value</code> float column to the segment value (wide-sparse schema)</td></tr>
+      <tr><td><em>anything else</em></td><td>Stored as a string column with that name</td></tr>
+    </tbody>
+  </table>
+  <pre>mqtt:
+  topic_parser: positional
+  topic_segments: [source_type, unit_id, device, instance, point_name, dtype_hint]
+  # topic: unit/02281660/bms/bms_1/voltage/float
+  # → source_type=unit, unit_id=02281660, device=bms, instance=bms_1,
+  #   point_name=voltage, dtype_hint=float (consumed, not stored)</pre>
+
+  <h4>topic_kv_map (kv mode)</h4>
+  <p>Map from segment key to column name. Only listed keys are extracted.</p>
+  <pre>mqtt:
+  topic_parser: kv
+  topic_kv_map:
+    site:   site_id
+    rack:   rack_id
+    module: module_id
+    cell:   cell_id
+  # topic: site=0/rack=1/module=2/cell=3/voltage
+  # → site_id=0, rack_id=1, module_id=2, cell_id=3  (point_name from payload or compound)</pre>
+
+  <h4>compound_point_name</h4>
+  <p>Join these segment columns with <code>/</code> and store the result as <code>point_name</code>.
+     The named columns are consumed (removed from the row after joining).</p>
+  <pre>mqtt:
+  topic_segments: [source_type, unit_id, device, instance, point_name, dtype_hint]
+  compound_point_name: [device, instance, point_name]
+  # device=bms, instance=bms_1, point_name=voltage → point_name = "bms/bms_1/voltage"</pre>
+
+  <h4>compound_field_name <span class="tag tag-blue">wide/pivot mode</span></h4>
+  <p>Join these segment columns with <code>/</code> and use the result as the <strong>value column name</strong>.
+     Each unique signal path becomes its own Parquet column; a row only writes to one column, all
+     others are null. Works best with <code>null_fill_unchanged: true</code> for COV compression.</p>
+  <pre>mqtt:
+  compound_field_name: [device, instance, point_name]
+  # Creates columns like "bms/bms_1/voltage", "bms/bms_1/temperature", …
+  # One row has exactly one non-null value column.</pre>
+
+  <h4>topic_patterns — multi-depth pattern matching</h4>
+  <p>Defines a list of match/segment rules (like Telegraf <code>topic_parsing</code>).
+     The first matching pattern wins. Ignored when <code>topic_segments</code> is non-empty.
+     <code>+</code> matches any single segment; <code>#</code> matches the remainder.</p>
+  <table>
+    <thead><tr><th>Field</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>match</code></td><td>Topic pattern string split on <code>/</code>. Use <code>+</code> for wildcard segments.</td></tr>
+      <tr><td><code>segments</code></td><td>Column names for each captured segment (same length as non-wildcard positions)</td></tr>
+      <tr><td><code>reverse</code></td><td>If true, <code>segments[0]</code> maps to the <em>last</em> topic segment (right-aligned)</td></tr>
+    </tbody>
+  </table>
+  <pre>mqtt:
+  topic_patterns:
+    - match: "unit/+/bms/#"
+      segments: [source_type, unit_id, device]
+    - match: "pcs/+/+/#"
+      segments: [source_type, unit_id, subsystem]</pre>
+
+  <h4>Filtering &amp; column control</h4>
+  <table>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>drop_point_names</code></td><td><code>[]</code></td><td>Discard any message whose parsed <code>point_name</code> matches an entry. Applied before compound field assembly — cheapest possible filter.</td></tr>
+      <tr><td><code>drop_columns</code></td><td><code>[]</code></td><td>Remove these column names from every row after parsing (applied after compound_point_name / compound_field_name).</td></tr>
+      <tr><td><code>partition_field</code></td><td><code>site_id</code></td><td>Column whose value is used as the partition key for directory grouping and filename prefix.</td></tr>
+      <tr><td><code>timestamp_field</code></td><td><code>ts</code></td><td>JSON payload field name for the event timestamp.</td></tr>
+      <tr><td><code>timestamp_format</code></td><td><code>iso8601</code></td><td>Timestamp parsing format. Currently only <code>iso8601</code> is supported.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══════════════ OUTPUT section ═══════════════ -->
+<div class="section">
+  <h3 id="cfg-output">output: — Storage, Flush &amp; Partitioning</h3>
+
+  <h4>Paths &amp; identity</h4>
+  <table>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>base_path</code></td><td><code>/srv/data/parquet-ems</code></td><td>Root directory for all Parquet output. <span class="err">Must be unique per instance.</span></td></tr>
+      <tr><td><code>site_id</code></td><td><code>""</code></td><td>Site identifier injected into every row from config (not from topic). Required — writer fails to start if empty.</td></tr>
+      <tr><td><code>project_id</code></td><td><code>0</code></td><td>Integer project ID stored as a column in every row.</td></tr>
+      <tr><td><code>partitions</code></td><td><code>["site={site_id}", "{year}", "{month}", "{day}"]</code></td><td>List of directory path components. Supports <code>{site_id}</code>, <code>{year}</code>, <code>{month}</code>, <code>{day}</code> substitutions. Determines the directory tree under <code>base_path</code>.</td></tr>
+      <tr><td><code>filename_prefix</code></td><td><code>""</code></td><td>If set, prepended to the timestamp-based filename: <code>{prefix}_{ts}.parquet</code></td></tr>
+      <tr><td><code>partition_as_filename_prefix</code></td><td><code>false</code></td><td>If true, prepends the partition field value to the filename: <code>{unit_id}_{ts}.parquet</code></td></tr>
     </tbody>
   </table>
 
-  <h4>Trade-offs</h4>
+  <h4>Flush control</h4>
   <table>
-    <thead><tr><th>Segments</th><th>Files per day (Longbow, 47 units)</th><th>Query speedup</th><th>Flush overhead</th></tr></thead>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td>0</td><td>1 per source type</td><td class="dim">—</td><td class="ok">minimal (one writer)</td></tr>
-      <tr><td>2 (unit)</td><td>47</td><td class="ok">DuckDB prunes 46/47 files for single-unit queries</td><td class="ok">low — 47 active partitions</td></tr>
-      <tr><td>3 (unit+device)</td><td>~141 (47 × 3 subsystems)</td><td class="ok">further pruning by subsystem</td><td class="warn">moderate — more Arrow builders in memory</td></tr>
-      <tr><td>4 (unit+device+instance)</td><td>~280+</td><td class="ok">finest granularity</td><td class="warn">many small files; diminishing returns</td></tr>
+      <tr><td><code>compression</code></td><td><code>snappy</code></td><td>Parquet compression codec: <code>snappy</code> (fast, moderate ratio) | <code>zstd</code> (best ratio) | <code>gzip</code> | <code>none</code></td></tr>
+      <tr><td><code>flush_interval_seconds</code></td><td><code>60</code></td><td>How often the flush thread wakes and writes buffered rows to Parquet. Lower = more files, less data loss window.</td></tr>
+      <tr><td><code>max_messages_per_part</code></td><td><code>5000000</code></td><td>Force a flush for a partition when its row count reaches this limit, even mid-interval.</td></tr>
+      <tr><td><code>max_total_buffer_rows</code></td><td><code>2000000</code></td><td>OOM guard: trigger immediate flush if total in-memory rows across all partitions exceeds this (~25 s at 80k msg/s).</td></tr>
+      <tr><td><code>flush_max_retries</code></td><td><code>3</code></td><td>Number of retry attempts if a Parquet write fails (e.g. transient I/O error).</td></tr>
+      <tr><td><code>flush_retry_base_seconds</code></td><td><code>1</code></td><td>Base backoff seconds between flush retries (doubles each attempt).</td></tr>
+      <tr><td><code>time_window_ms</code></td><td><code>0</code></td><td>If &gt;0, coalesce all messages received within this wall-clock window under one shared timestamp. Useful for sources that burst-publish with identical timestamps. 0 = disabled, each message keeps its own timestamp.</td></tr>
     </tbody>
   </table>
 
-  <div class="alert alert-info">
-    <strong>Implementation note:</strong> <code>topic_partition_segments</code> affects only
-    the <em>PartitionKey</em> construction in <code>parse_topic()</code> — the first N raw
-    segments are appended to the directory path before the date components. No changes are
-    needed to the ring, JSON parser, Arrow schema, or flush thread. The existing
-    <code>max_messages_per_part</code> guard still applies per partition, so a very active
-    unit/subsystem will still roll to a new file within a flush interval if it exceeds the
-    row threshold.
-  </div>
+  <h4>Auxiliary outputs</h4>
+  <table>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>hot_file_path</code></td><td><code>""</code></td><td>If set, always overwrite this file with the latest flush data (the "hot" window). Useful as a live feed for dashboards without scanning the full archive.</td></tr>
+      <tr><td><code>current_state_path</code></td><td><code>""</code></td><td>If set, atomically (tmp+rename) writes a single-row-per-sensor snapshot on every flush. Seed for dashboards and on-call views after a restart. Also used by the <code>null_fill_unchanged</code> COV comparison.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Column flags</h4>
+  <table>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>store_mqtt_topic</code></td><td><code>true</code></td><td>Write the raw MQTT topic string as a dictionary-encoded string column. Set false to reduce schema width.</td></tr>
+      <tr><td><code>store_project_id</code></td><td><code>true</code></td><td>Include <code>project_id</code> column in output. Set false for schemas where project context is in the path.</td></tr>
+      <tr><td><code>store_sample_count</code></td><td><code>true</code></td><td>Include <code>sample_count</code> int64 column (always 1 unless flush_dedup is active). Useful for <code>SUM(sample_count)</code> to recover original message count after dedup.</td></tr>
+      <tr><td><code>wide_point_name</code></td><td><code>false</code></td><td>After capturing the partition key, drop <code>site_id</code> and <code>project_id</code> columns from each row. Use with <code>compound_point_name</code> or <code>compound_field_name</code> — those already encode the identity in the filename/path.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Wide-pivot COV compression <span class="tag tag-blue">compound_field_name mode</span></h4>
+  <table>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>null_fill_unchanged</code></td><td><code>false</code></td><td>In wide-pivot mode: null out value columns whose reading has not changed since the last flush for this partition. Signals that don't change compress to near-zero; active signals still write every row. Only active when <code>compound_field_name</code> is set.</td></tr>
+      <tr><td><code>null_fill_reset_interval_seconds</code></td><td><code>3600</code></td><td>Force a full (non-null) write for all columns every N seconds regardless of change. Prevents gaps longer than this duration in archived data. Set to 0 to disable periodic reset.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══════════════ WAL/HEALTH/COMPACT/GUARD ═══════════════ -->
+<div class="section">
+  <h3 id="cfg-wal">wal: — Write-Ahead Log</h3>
+  <p>The WAL guarantees no data loss across a writer crash. See <a href="#wal-detail">§16 WAL Detail</a> for the full design.</p>
+  <table>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>enabled</code></td><td><code>true</code></td><td>Enable WAL. Strongly recommended in production. Disable only for transient test writers where data loss is acceptable.</td></tr>
+      <tr><td><code>path</code></td><td><code>{base_path}/.wal/</code></td><td>Directory for WAL files. Arrow IPC format, one file per partition per flush cycle. Auto-created if missing.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="cfg-health">health: — HTTP Metrics Endpoint</h3>
+  <p>GET <code>http://host:{port}/health</code> returns a JSON object with live counters.</p>
+  <table>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>enabled</code></td><td><code>true</code></td><td>Enable the health HTTP endpoint.</td></tr>
+      <tr><td><code>port</code></td><td><code>8771</code></td><td>TCP port to listen on. <span class="err">Must be unique per instance.</span></td></tr>
+    </tbody>
+  </table>
+  <pre>$ curl http://localhost:8771/health
+{
+  "msgs_received":       1217551,   // total MQTT messages received
+  "buffer_rows":         42318,     // rows currently in memory buffer
+  "overflow_drops":      0,         // rows dropped when buffer was full
+  "ring_used":           12,        // SPSC ring slots currently occupied
+  "ring_cap":            262144,    // ring capacity (slots)
+  "ring_drops":          0,         // messages dropped due to full ring
+  "flush_count":         14,        // number of completed flush cycles
+  "flush_avg_ms":        68,        // average flush duration (ms)
+  "flush_max_ms":        151,       // worst-case flush duration (ms)
+  "last_wal_ms":         12,        // WAL write portion of last flush
+  "wal_replay_rows":     0,         // rows recovered from WAL on startup
+  "topic_truncations":   0,         // MQTT topics truncated (> 256 bytes)
+  "payload_truncations": 0,         // payloads truncated (> 256 bytes)
+  "disk_free_gb":        245.3      // filesystem free space at base_path
+}</pre>
+
+  <h3 id="cfg-compact">compact: — Background File Compactor</h3>
+  <p>Merges many small flush files into one larger file per directory. See <a href="#compactor">§11 Compactor</a> for design details.</p>
+  <table>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>enabled</code></td><td><code>false</code></td><td>Enable the compactor background thread. Recommended when flush interval is short or many partitions are active.</td></tr>
+      <tr><td><code>interval_seconds</code></td><td><code>600</code></td><td>How often the compactor scans for eligible directories (default: 10 minutes).</td></tr>
+      <tr><td><code>min_files</code></td><td><code>3</code></td><td>Minimum number of eligible files in a directory before compaction is triggered.</td></tr>
+      <tr><td><code>min_age_seconds</code></td><td><code>0</code></td><td>Only compact files older than this. <code>0</code> = automatically use <code>2 × flush_interval_seconds</code> to avoid racing with the active flush file.</td></tr>
+      <tr><td><code>log_path</code></td><td><code>{base_path}/compact.log</code></td><td>Path for compactor JSON-lines activity log. Each line records a compaction event: directory, file count, row count, duration.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="cfg-guard">guard: — Disk Space Protection</h3>
+  <table>
+    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>min_free_gb</code></td><td><code>1.0</code></td><td>Check free space before every flush. If <code>disk_free_gb</code> falls below this threshold, skip the flush and log a warning. Prevents the writer from filling the filesystem and crashing the host. Exposed in <code>/health</code> as <code>disk_free_gb</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Per-instance uniqueness requirements</h3>
+  <table>
+    <thead><tr><th>Setting</th><th>Unique per instance?</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td><code>mqtt.client_id</code></td><td class="err">Required</td><td>Broker kicks whichever client connects second with a duplicate ID</td></tr>
+      <tr><td><code>output.base_path</code></td><td class="err">Required</td><td>Two writers in the same directory race on filenames and WAL files</td></tr>
+      <tr><td><code>health.port</code></td><td class="err">Required</td><td>Two processes cannot bind the same TCP port</td></tr>
+      <tr><td><code>mqtt.topic</code></td><td class="ok">Optional</td><td>Broker fans out each message to every subscriber independently</td></tr>
+      <tr><td><code>output.compression</code></td><td class="ok">Optional</td><td>Can differ between instances (trade CPU vs file size)</td></tr>
+    </tbody>
+  </table>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════ -->
@@ -792,7 +926,7 @@ guard:
 
   <h3>Build</h3>
   <pre># Dependencies: libparquet-dev, libarrow-dev, libmosquitto-dev, libyaml-cpp-dev, libsimdjson-dev
-make -C source/parquet_writer_cpp parquet_writer
+make -C source/parquet_writer parquet_writer
 
 # ARM cross-compile (imx93 SoM via Yocto SDK)
 # see project notes — gumby/SDK target</pre>
@@ -946,8 +1080,8 @@ make -C source/parquet_writer_cpp parquet_writer
       <tr><td>Atomic write</td><td>Writes to <code>compact_{ts}.parquet.tmp</code>, then <code>rename()</code> to <code>compact_{ts}.parquet</code> before deleting source files. Crash at any point leaves data intact.</td></tr>
       <tr><td>Read-failure bail</td><td>If any source file fails to read, the whole directory is skipped — no partial compactions.</td></tr>
       <tr><td>Schema unification</td><td>Uses <code>arrow::ConcatenateTablesOptions{.unify_schemas=true}</code> — safe to merge files from different flush intervals that may have slightly different column sets (e.g. a new unit type appeared mid-day).</td></tr>
-      <tr><td>Eligible files only</td><td>Only processes files whose names start with a digit (flush files: <code>YYYYMMDDTHHMMSSZ.parquet</code>) or <code>compact_</code> (previous compact output). Skips <code>*.tmp</code>, <code>current_state.parquet</code>, <code>hot.parquet</code>.</td></tr>
-      <tr><td>Re-compactable</td><td><code>compact_*.parquet</code> files are themselves eligible in the next cycle — each round naturally produces larger files without manual intervention.</td></tr>
+      <tr><td>Eligible files only</td><td>Only processes files whose names start with a digit (flush files: <code>YYYYMMDDTHHMMSSZ.parquet</code>). Skips <code>compact_*</code>, <code>*.tmp</code>, <code>current_state.parquet</code>, <code>hot.parquet</code>.</td></tr>
+      <tr><td>compact_ files are final</td><td><code>compact_*.parquet</code> files are the output of a compaction run and are <strong>not</strong> re-consumed as inputs. Each compaction cycle merges only the original flush files (digit-prefixed), preventing compact files from being re-processed and their rows doubled on every cycle. <span class="ok">Bug fix: commit 6ad3bf0</span></td></tr>
     </tbody>
   </table>
 
@@ -1701,9 +1835,9 @@ if (def_mode == "absolute") cfg.dedup_default.mode = DeadbandMode::Absolute;</pr
 </div>
 
 <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--border);font-size:0.78rem;color:var(--muted)">
-  Document updated 2026-03-29 &nbsp;·&nbsp; Branch: <code>03202026_run_with_real_data</code>
-  &nbsp;·&nbsp; Source: <code>source/parquet_writer_cpp/real_writer.cpp</code> (EMS path),
-  <code>writer.cpp</code> (stress path), <code>mqtt_ring.h</code>, <code>writer_config.yaml</code>
+  Document updated 2026-04-11 &nbsp;·&nbsp; Branch: <code>03202026_run_with_real_data</code>
+  &nbsp;·&nbsp; Source: <code>source/parquet_writer/parquet_writer.cpp</code>,
+  <code>mqtt_ring.h</code>, <code>writer_config.yaml</code>
 </div>
 
 </body>
