@@ -410,10 +410,10 @@ or paste <code>results.json</code> content directly.</p>
 </div>
 <div id="health-tile" style="display:none;margin-top:6px;font-size:.75rem;font-family:monospace;
      background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:5px 10px;
-     display:none;align-items:center;gap:8px;flex-wrap:wrap">
-  <div class="status-dot health-dot"></div>
-  <span class="health-label" style="color:var(--orange);font-weight:600">Health</span>
-  <span class="health-body" style="color:var(--muted)">—</span>
+     align-items:center;gap:8px;flex-wrap:wrap">
+  <span id="health-dot" class="status-dot"></span>
+  <span id="health-label" style="color:var(--orange);font-weight:600">Health</span>
+  <span id="health-body" style="color:var(--muted)">—</span>
   <button class="btn" style="font-size:.7rem;padding:2px 8px;margin-left:auto"
           onclick="const p=PRESETS[_activePreset];if(p?.healthPort)pollHealth(p.host,p.healthPort)">↻</button>
 </div>
@@ -703,8 +703,8 @@ function applyPreset(key) {
   // show/hide health tile
   const ht = document.getElementById('health-tile');
   if (p.healthPort) {
-    ht.style.display = '';
-    ht.querySelector('.health-label').textContent = `Health :${p.healthPort}`;
+    ht.style.display = 'flex';
+    document.getElementById('health-label').textContent = `Health :${p.healthPort}`;
     pollHealth(p.host, p.healthPort);
   } else {
     ht.style.display = 'none';
@@ -716,27 +716,29 @@ function applyPreset(key) {
 }
 
 async function pollHealth(host, port) {
-  const tile = document.getElementById('health-tile');
-  const body = tile.querySelector('.health-body');
+  const dot  = document.getElementById('health-dot');
+  const body = document.getElementById('health-body');
+  if (!dot || !body) return;
   try {
     const r = await fetch(`http://${host}:${port}/health`, {cache:'no-cache'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const j = await r.json();
     const rows = [
-      ['msgs', j.msgs_received?.toLocaleString() ?? '—'],
-      ['buf rows', j.buffer_rows?.toLocaleString() ?? '—'],
-      ['written', j.total_rows_written?.toLocaleString() ?? '—'],
+      ['msgs', (j.msgs_received ?? 0).toLocaleString()],
+      ['buf rows', (j.buffer_rows ?? 0).toLocaleString()],
+      ['written', (j.total_rows_written ?? 0).toLocaleString()],
       ['flushes', j.flush_count ?? '—'],
       ['last flush', j.last_flush_ms != null ? `${j.last_flush_ms} ms` : '—'],
-      ['drops', j.overflow_drops ?? '—'],
+      ['drops', j.overflow_drops ?? 0],
       ['disk free', j.disk_free_gb != null ? `${j.disk_free_gb.toFixed(1)} GB` : '—'],
     ];
     body.innerHTML = rows.map(([k,v]) =>
       `<span style="color:var(--muted)">${k}:</span> <span style="color:var(--teal)">${v}</span>`
     ).join(' &nbsp;|&nbsp; ');
-    tile.querySelector('.health-dot').className = 'status-dot ok';
+    dot.className = 'status-dot ok';
   } catch(e) {
-    body.textContent = e.message;
-    tile.querySelector('.health-dot').className = 'status-dot error';
+    body.textContent = String(e.message || e);
+    dot.className = 'status-dot error';
   }
 }
 
@@ -755,8 +757,7 @@ async function fetchResults() {
   const preset = _activePreset ? PRESETS[_activePreset] : null;
   if (preset?.healthPort) {
     await pollHealth(preset.host, preset.healthPort);
-    const tile = document.getElementById('health-tile');
-    const ok   = tile.querySelector('.health-dot').classList.contains('ok');
+    const ok   = document.getElementById('health-dot')?.classList.contains('ok');
     dot.className = ok ? 'status-dot ok' : 'status-dot error';
     stat.textContent = ok
       ? `writer running on ${preset.host}:${preset.healthPort} — use file browser to view parquet files`
