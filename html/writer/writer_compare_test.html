@@ -389,6 +389,15 @@ bash scripts/writer_compare_test.sh --outdir /mnt/tort-sdf/bench
 <p>Load results from a completed run. Enter the host where the test ran and click Fetch,
 or paste <code>results.json</code> content directly.</p>
 
+<div class="conn-row" style="flex-wrap:wrap;gap:6px;margin-bottom:6px">
+  <span style="font-size:.75rem;color:var(--muted);margin-right:2px">Preset:</span>
+  <button class="btn preset-btn" onclick="applyPreset('34-bench')"   title="phil-256g .34 — bench compare test">.34 bench</button>
+  <button class="btn preset-btn" onclick="applyPreset('48-bench')"   title="gx10 .48 — bench compare test">.48 bench</button>
+  <button class="btn preset-btn" onclick="applyPreset('48-a')"       title="gx10 .48 slice A — health :8771, parquet /data/parquet-evelyn/a">.48 A</button>
+  <button class="btn preset-btn" onclick="applyPreset('48-b')"       title="gx10 .48 slice B — health :8772, parquet /data/parquet-evelyn/b">.48 B</button>
+  <button class="btn preset-btn" onclick="applyPreset('48-c')"       title="gx10 .48 slice C — health :8773, parquet /data/parquet-evelyn/c">.48 C</button>
+  <button class="btn preset-btn" onclick="applyPreset('48-d')"       title="gx10 .48 slice D — health :8774, parquet /data/parquet-evelyn/d">.48 D</button>
+</div>
 <div class="conn-row">
   <input id="host-in" type="text" value="192.168.86.34" placeholder="host">
   <input id="port-in" type="text" value="8780" placeholder="port" style="width:70px">
@@ -398,6 +407,15 @@ or paste <code>results.json</code> content directly.</p>
   <button class="btn" id="restart-btn" onclick="restartTest()" style="background:var(--orange);color:#000;border-color:var(--orange)">↺ Restart</button>
   <div class="status-dot" id="fetch-dot"></div>
   <span id="fetch-status" style="font-size:.75rem;color:var(--muted)">—</span>
+</div>
+<div id="health-tile" style="display:none;margin-top:6px;font-size:.75rem;font-family:monospace;
+     background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:5px 10px;
+     display:none;align-items:center;gap:8px;flex-wrap:wrap">
+  <div class="status-dot health-dot"></div>
+  <span class="health-label" style="color:var(--orange);font-weight:600">Health</span>
+  <span class="health-body" style="color:var(--muted)">—</span>
+  <button class="btn" style="font-size:.7rem;padding:2px 8px;margin-left:auto"
+          onclick="const p=PRESETS[_activePreset];if(p?.healthPort)pollHealth(p.host,p.healthPort)">↻</button>
 </div>
 <div id="run-status-bar" style="display:none;margin-top:6px;font-size:.75rem;font-family:monospace;
      background:var(--code-bg);border:1px solid var(--border);border-radius:4px;padding:6px 10px;
@@ -646,6 +664,81 @@ or paste <code>results.json</code> content directly.</p>
 </style>
 
 <script>
+// ── host presets ──────────────────────────────────────────────────────────────
+// File browser (api/ls, api/parquet) requires bench_server.py on port 8780.
+// Health-only endpoints (8771-8774) serve /health but not the file API.
+// On .48 run:  python3 scripts/bench_server.py --port 8780 --directory /data/parquet-evelyn
+const PRESETS = {
+  '34-bench': { host:'192.168.86.34', port:'8780', path:'/mnt/tort-sdi/bench/results.json',
+                rootDir:'/mnt/tort-sdi/bench', healthPort: null, label:'.34 bench compare' },
+  '48-bench': { host:'192.168.86.48', port:'8780', path:'/data/bench/results.json',
+                rootDir:'/data/bench',          healthPort: null, label:'.48 bench compare' },
+  '48-a':     { host:'192.168.86.48', port:'8780', path:'a',
+                rootDir:'a', healthPort:8771, label:'.48 slice A (units 0-11)'  },
+  '48-b':     { host:'192.168.86.48', port:'8780', path:'b',
+                rootDir:'b', healthPort:8772, label:'.48 slice B (units 12-23)' },
+  '48-c':     { host:'192.168.86.48', port:'8780', path:'c',
+                rootDir:'c', healthPort:8773, label:'.48 slice C (units 24-34)' },
+  '48-d':     { host:'192.168.86.48', port:'8780', path:'d',
+                rootDir:'d', healthPort:8774, label:'.48 slice D (units 35-45)' },
+};
+
+let _activePreset = null;
+
+function applyPreset(key) {
+  const p = PRESETS[key];
+  if (!p) return;
+  _activePreset = key;
+  document.getElementById('host-in').value = p.host;
+  document.getElementById('port-in').value = p.port;
+  document.getElementById('path-in').value = p.path;
+  // sync the "How to Run" host field too
+  const rh = document.getElementById('run-host');
+  if (rh) rh.value = p.host;
+  // highlight active preset button
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('go'));
+  event.target.classList.add('go');
+  document.getElementById('fetch-status').textContent = p.label;
+  // show/hide health tile
+  const ht = document.getElementById('health-tile');
+  if (p.healthPort) {
+    ht.style.display = '';
+    ht.querySelector('.health-label').textContent = `Health :${p.healthPort}`;
+    pollHealth(p.host, p.healthPort);
+  } else {
+    ht.style.display = 'none';
+  }
+  // reload file browser for the new root
+  _fbExpanded = new Set();
+  loadDir(p.rootDir);
+  loadCompactLog();
+}
+
+async function pollHealth(host, port) {
+  const tile = document.getElementById('health-tile');
+  const body = tile.querySelector('.health-body');
+  try {
+    const r = await fetch(`http://${host}:${port}/health`, {cache:'no-cache'});
+    const j = await r.json();
+    const rows = [
+      ['msgs', j.msgs_received?.toLocaleString() ?? '—'],
+      ['buf rows', j.buffer_rows?.toLocaleString() ?? '—'],
+      ['written', j.total_rows_written?.toLocaleString() ?? '—'],
+      ['flushes', j.flush_count ?? '—'],
+      ['last flush', j.last_flush_ms != null ? `${j.last_flush_ms} ms` : '—'],
+      ['drops', j.overflow_drops ?? '—'],
+      ['disk free', j.disk_free_gb != null ? `${j.disk_free_gb.toFixed(1)} GB` : '—'],
+    ];
+    body.innerHTML = rows.map(([k,v]) =>
+      `<span style="color:var(--muted)">${k}:</span> <span style="color:var(--teal)">${v}</span>`
+    ).join(' &nbsp;|&nbsp; ');
+    tile.querySelector('.health-dot').className = 'status-dot ok';
+  } catch(e) {
+    body.textContent = e.message;
+    tile.querySelector('.health-dot').className = 'status-dot error';
+  }
+}
+
 async function fetchResults() {
   const host = document.getElementById('host-in').value.trim();
   const port = document.getElementById('port-in').value.trim();
