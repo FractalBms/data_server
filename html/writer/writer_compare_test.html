@@ -1304,8 +1304,22 @@ async function loadCompactLog() {
   const table  = document.getElementById('clog-table');
   status.textContent = 'loading…';
   try {
-    const r = await fetch(`${base}/compact.log`, {cache:'no-cache'});
-    if (!r.ok) { status.textContent = 'compact.log not found — run not started yet'; return; }
+    // Try rootDir/compact.log first, then legacy bare compact.log
+    const preset   = _activePreset ? PRESETS[_activePreset] : null;
+    const rootDir  = preset?.rootDir ?? '';
+    const tryUrls  = rootDir
+      ? [`${base}/${rootDir}/compact.log`, `${base}/compact.log`]
+      : [`${base}/compact.log`];
+    // also try fallbackPath dir (legacy bench/ on .34)
+    if (preset?.fallbackPath) {
+      const fbDir = preset.fallbackPath.split('/').slice(0,-1).join('/');
+      if (fbDir) tryUrls.push(`${base}/${fbDir}/compact.log`);
+    }
+    let r = null;
+    for (const url of tryUrls) {
+      try { const res = await fetch(url, {cache:'no-cache'}); if (res.ok) { r = res; break; } } catch(_) {}
+    }
+    if (!r) { status.textContent = 'compact.log not found — run not started yet'; return; }
     const text = await r.text();
     const lines = text.trim().split('\n').filter(l => l.trim());
     if (!lines.length) { status.textContent = 'log empty'; table.innerHTML = ''; return; }
