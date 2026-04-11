@@ -671,9 +671,9 @@ or paste <code>results.json</code> content directly.</p>
 // On .48: python3 scripts/bench_server.py --port 8780 --directory /data
 const PRESETS = {
   '34-bench': { host:'192.168.86.34', port:'8780', path:'bench/34/results.json',
-                rootDir:'bench/34', healthPort: null, label:'.34 bench compare' },
+                rootDir:'bench/34', fallbackPath:'bench/results.json', healthPort: null, label:'.34 bench compare' },
   '48-bench': { host:'192.168.86.48', port:'8780', path:'bench/48/results.json',
-                rootDir:'bench/48',            healthPort: null, label:'.48 bench compare' },
+                rootDir:'bench/48', fallbackPath:'bench/results.json', healthPort: null, label:'.48 bench compare' },
   '48-a':     { host:'192.168.86.48', port:'8780', path:'parquet-evelyn/a',
                 rootDir:'parquet-evelyn/a', healthPort:8771, label:'.48 slice A (units 0-11)'  },
   '48-b':     { host:'192.168.86.48', port:'8780', path:'parquet-evelyn/b',
@@ -765,27 +765,39 @@ async function fetchResults() {
     return;
   }
 
-  const fname = path.split('/').pop();
+  // ── try results.json (primary path, then fallback) ───────────────────────
+  const tryPaths = [path];
+  if (preset?.fallbackPath) tryPaths.push(preset.fallbackPath);
 
-  // ── try results.json first ────────────────────────────────────────────────
   let resultsErr = '';
-  try {
-    const r = await fetch(`${base}/${fname}`, {cache: 'no-cache'});
-    if (r.ok) {
-      const data = await r.json();
-      dot.className = 'status-dot ok';
-      stat.textContent = `loaded from ${base}/${fname}`;
-      renderResults(data);
-      return;
+  for (const tryPath of tryPaths) {
+    try {
+      const r = await fetch(`${base}/${tryPath}`, {cache: 'no-cache'});
+      if (r.ok) {
+        const data = await r.json();
+        dot.className = 'status-dot ok';
+        const tag = tryPath === path ? '' : ' (legacy path)';
+        stat.textContent = `loaded from ${base}/${tryPath}${tag}`;
+        renderResults(data);
+        return;
+      }
+      resultsErr = `HTTP ${r.status}`;
+    } catch(e) {
+      resultsErr = e.message;
     }
-    resultsErr = `HTTP ${r.status}`;
-  } catch(e) {
-    resultsErr = e.message;
   }
 
-  // ── try status.json to distinguish running vs not-started ─────────────────
+  // ── also check status.json at both locations ──────────────────────────────
+  const statusPaths = [path.replace('results.json','status.json')];
+  if (preset?.fallbackPath) statusPaths.push(preset.fallbackPath.replace('results.json','status.json'));
+
+  // ── try status.json at all candidate paths ───────────────────────────────
+  let statusResp = null;
+  for (const sp of statusPaths) {
+    try { const r = await fetch(`${base}/${sp}`, {cache:'no-cache'}); if (r.ok) { statusResp = r; break; } } catch(_) {}
+  }
   try {
-    const rs = await fetch(`${base}/status.json`, {cache:'no-cache'});
+    const rs = statusResp || await fetch(`${base}/status.json`, {cache:'no-cache'});
     if (rs.ok) {
       const s = await rs.json();
       if (s.status === 'running' || s.status === 'started') {
@@ -811,7 +823,7 @@ async function fetchResults() {
     const rp = await fetch(`${base}/`, {cache:'no-cache'});
     if (rp.ok) {
       dot.className = 'status-dot warn';
-      stat.textContent = `server reachable — no status.json yet (test may not have started)`;
+      stat.textContent = `server reachable but no results.json at ${tryPaths.join(' or ')} — run the test first`;
       return;
     }
   } catch(_) {}
@@ -1458,10 +1470,19 @@ async function pollStatus() {
     return;
   }
 
-  // ── bench compare test — poll status.json ─────────────────────────────────
+  // ── bench compare test — poll status.json (try machine-tagged path first) ──
+  const sPaths = preset?.fallbackPath
+    ? [preset.path.replace('results.json','status.json'),
+       preset.fallbackPath.replace('results.json','status.json'),
+       'status.json']
+    : [`${host}:${port}/status.json`];
+  let statusR = null;
+  for (const sp of sPaths) {
+    try { const r = await fetch(`http://${host}:${port}/${sp}`, {cache:'no-cache'}); if (r.ok) { statusR = r; break; } } catch(_) {}
+  }
   try {
-    const r = await fetch(`http://${host}:${port}/status.json`, {cache:'no-cache'});
-    if (!r.ok) { bar.style.display='none'; return; }
+    const r = statusR;
+    if (!r) { bar.style.display='none'; return; }
     const s = await r.json();
     _lastStatus = s;
     bar.style.display = 'flex';
