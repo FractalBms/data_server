@@ -667,13 +667,13 @@ or paste <code>results.json</code> content directly.</p>
 // ── host presets ──────────────────────────────────────────────────────────────
 // File browser (api/ls, api/parquet) requires bench_server.py on port 8780.
 // Health-only endpoints (8771-8774) serve /health but not the file API.
-// On .34: python3 scripts/bench_server.py --port 8780 --directory /mnt/tort-sdi/bench
+// On .34: python3 scripts/bench_server.py --port 8780 --directory /mnt/tort-sdi
 // On .48: python3 scripts/bench_server.py --port 8780 --directory /data
 const PRESETS = {
   '34-bench': { host:'192.168.86.34', port:'8780', path:'bench/34/results.json',
-                rootDir:'bench/34', fallbackPath:'bench/results.json', healthPort: null, label:'.34 bench compare' },
+                rootDir:'bench/34', fallbackRootDir:'bench', fallbackPath:'bench/results.json', healthPort: null, label:'.34 bench compare' },
   '48-bench': { host:'192.168.86.48', port:'8780', path:'bench/48/results.json',
-                rootDir:'bench/48', fallbackPath:'bench/results.json', healthPort: null, label:'.48 bench compare' },
+                rootDir:'bench/48', fallbackRootDir:'bench', fallbackPath:'bench/results.json', healthPort: null, label:'.48 bench compare' },
   '48-a':     { host:'192.168.86.48', port:'8780', path:'parquet-evelyn/a',
                 rootDir:'parquet-evelyn/a', healthPort:8771, label:'.48 slice A (units 0-11)'  },
   '48-b':     { host:'192.168.86.48', port:'8780', path:'parquet-evelyn/b',
@@ -709,9 +709,9 @@ function applyPreset(key) {
   } else {
     ht.style.display = 'none';
   }
-  // reload file browser for the new root
+  // reload file browser for the new root — fall back if primary rootDir missing
   _fbExpanded = new Set();
-  loadDir(p.rootDir);
+  loadDirWithFallback(p.rootDir, p.fallbackRootDir);
   loadCompactLog();
 }
 
@@ -1165,7 +1165,7 @@ async function loadDir(path, depth=0) {
   const base = apiBase();
   try {
     const r = await fetch(`${base}/api/ls?path=${encodeURIComponent(path)}`, {cache:'no-cache'});
-    if (!r.ok) return;
+    if (!r.ok) return false;
     const entries = await r.json();
     if (depth === 0) {
       // full rebuild
@@ -1173,9 +1173,19 @@ async function loadDir(path, depth=0) {
       document.getElementById('fb-path').textContent = '/';
     }
     renderDir(path, entries, depth);
+    return entries.length > 0;
   } catch(e) {
     document.getElementById('fb-tree').innerHTML =
       `<div style="padding:10px;color:var(--muted)">Cannot reach server — is bench_server.py running?</div>`;
+    return false;
+  }
+}
+
+// Try primary rootDir; if it returns nothing, fall back to fallbackRootDir.
+async function loadDirWithFallback(rootDir, fallbackRootDir) {
+  const found = await loadDir(rootDir);
+  if (!found && fallbackRootDir && fallbackRootDir !== rootDir) {
+    await loadDir(fallbackRootDir);
   }
 }
 
