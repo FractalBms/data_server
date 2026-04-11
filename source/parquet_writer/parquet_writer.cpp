@@ -1145,10 +1145,9 @@ static void compact_thread_fn() {
             auto fname = p.filename().string();
             // Skip temp files
             if (fname.size() > 4 && fname.substr(fname.size() - 4) == ".tmp") continue;
-            // Only compact flush files (start with digit) or previous compact files
-            bool is_flush   = !fname.empty() && std::isdigit((unsigned char)fname[0]);
-            bool is_compact = fname.size() > 8 && fname.substr(0, 8) == "compact_";
-            if (!is_flush && !is_compact) continue;
+            // Only compact flush files (start with digit); compact_ files are final
+            bool is_flush = !fname.empty() && std::isdigit((unsigned char)fname[0]);
+            if (!is_flush) continue;
 
             auto mtime = entry.last_write_time(ec);
             if (ec || mtime > cutoff) continue;
