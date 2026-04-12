@@ -51,6 +51,7 @@
 #include <yaml-cpp/yaml.h>
 
 // POSIX socket for health endpoint
+#include <fnmatch.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <fcntl.h>
@@ -94,14 +95,22 @@ enum class TopicParser { KV, POSITIONAL };
 struct NullFillCfg {
     bool   enabled          {false};
     double global_pct       {0.0};   // 0 = exact equality; 0.01 = suppress if change < 1%
-    std::unordered_map<std::string, double> per_point {}; // column → threshold (overrides global)
+    // Ordered list of (pattern, threshold). Supports shell-style wildcards via fnmatch():
+    //   *   matches any sequence of characters within a path segment
+    //   **  matches across '/' boundaries (with FNM_PATHNAME cleared)
+    //   ?   matches any single character
+    // First matching pattern wins — list order controls priority.
+    std::vector<std::pair<std::string, double>> per_point {};
     int    reset_interval   {3600};  // force full write every N seconds; 0 = off
 
     // Return the effective threshold for a given column name.
-    // per_point entry wins over global_pct; 0.0 means exact-equality test.
+    // Scans per_point patterns in order; first fnmatch hit wins.
+    // Falls back to global_pct if no pattern matches.
     double threshold_for(const std::string& col) const {
-        auto it = per_point.find(col);
-        return (it != per_point.end()) ? it->second : global_pct;
+        for (const auto& [pattern, thresh] : per_point)
+            if (fnmatch(pattern.c_str(), col.c_str(), 0) == 0)
+                return thresh;
+        return global_pct;
     }
 
     // True if value 'val' is "unchanged" relative to 'prev' for column 'col'.
@@ -309,8 +318,8 @@ Config load_config(const std::string& path) {
             if (o["null_fill_cov_pct"])                cfg.null_fill.global_pct      = o["null_fill_cov_pct"].as<double>();
             if (o["null_fill_per_point"]) {
                 for (const auto& item : o["null_fill_per_point"])
-                    cfg.null_fill.per_point[item.first.as<std::string>()] =
-                        item.second.as<double>();
+                    cfg.null_fill.per_point.emplace_back(
+                        item.first.as<std::string>(), item.second.as<double>());
             }
             if (o["wide_point_name"])    cfg.wide_point_name    = o["wide_point_name"].as<bool>();
             if (o["partitions"]) {
