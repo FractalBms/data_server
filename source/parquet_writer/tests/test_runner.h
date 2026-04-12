@@ -71,12 +71,12 @@ struct _TestReg {
 } while(0)
 
 #define EXPECT_NEAR(a, b, eps) do { \
-    double _a = (a), _b = (b); \
-    if (std::fabs(_a - _b) > (eps)) { \
+    double _nr_a = (a); double _nr_b = (b); \
+    if (std::fabs(_nr_a - _nr_b) > (eps)) { \
         std::ostringstream _s; \
         _s << "    EXPECT_NEAR(" #a ", " #b ", " #eps ") failed\n" \
-           << "      got:      " << _a << "\n" \
-           << "      expected: " << _b << " ± " << (eps) << "\n" \
+           << "      got:      " << _nr_a << "\n" \
+           << "      expected: " << _nr_b << " ± " << (eps) << "\n" \
            << "      at " __FILE__ ":" << __LINE__; \
         throw std::runtime_error(_s.str()); \
     } \

@@ -56,9 +56,11 @@ static const std::vector<std::string> g_ems_segments {
 // Default config for positional parsing with EMS segments
 static Config make_ems_config() {
     Config cfg;
-    cfg.topic_parser   = TopicParser::POSITIONAL;
-    cfg.topic_segments = g_ems_segments;
-    cfg.site_id        = "site-A";
+    cfg.topic_parser      = TopicParser::POSITIONAL;
+    cfg.topic_segments    = g_ems_segments;
+    cfg.site_id           = "site-A";
+    cfg.timestamp_field   = "ts";          // parse "ts" key as timestamp
+    cfg.timestamp_format  = "iso8601";     // expect ISO 8601 string
     return cfg;
 }
 
@@ -151,11 +153,12 @@ TEST("parse_iso8601: basic datetime no fractional seconds") {
 }
 
 TEST("parse_iso8601: datetime with milliseconds") {
-    double t = parse_iso8601("2024-11-15T21:27:52.775Z");
-    EXPECT_TRUE(t > 0.0);
-    // .775 → 0.775 extra seconds
-    double t_base = parse_iso8601("2024-11-15T21:27:52Z");
-    EXPECT_NEAR(t - t_base, 0.775, 0.001);
+    // Returns microseconds since epoch
+    int64_t t      = parse_iso8601("2024-11-15T21:27:52.775Z");
+    int64_t t_base = parse_iso8601("2024-11-15T21:27:52Z");
+    EXPECT_TRUE(t > 0);
+    // .775s → 775000 µs difference
+    EXPECT_NEAR(static_cast<double>(t - t_base), 775000.0, 1000.0);
 }
 
 TEST("parse_iso8601: too-short string returns -1") {
@@ -174,7 +177,7 @@ TEST("parse_iso8601: non-datetime garbage returns -1") {
 // parse_payload  (EMS schema)
 // ---------------------------------------------------------------------------
 
-TEST("parse_payload: EMS iso8601 timestamp parsed to float ts column") {
+TEST("parse_payload: EMS iso8601 timestamp stored as int64 microseconds in ints[ts]") {
     Config cfg = make_ems_config();
     TopicInfo topic;
     topic.source_type = "unit";
@@ -182,10 +185,13 @@ TEST("parse_payload: EMS iso8601 timestamp parsed to float ts column") {
 
     auto r = parse_payload(
         R"({"ts":"2024-11-15T21:27:52.775Z","value":0.999})",
-        topic, 0, cfg);
+        topic, cfg);
 
-    EXPECT_TRUE(r.floats.count("ts") > 0u);
-    EXPECT_TRUE(r.floats.at("ts") > 0.0);
+    // ts goes to ints[], not floats[] — stored as µs since epoch
+    EXPECT_TRUE(r.ints.count("ts") > 0u);
+    EXPECT_TRUE(r.ints.at("ts") > 0);
+    // value goes to floats[]
+    EXPECT_NEAR(r.floats.at("value"), 0.999, 1e-9);
 }
 
 TEST("parse_payload: value field stored as float") {
@@ -195,7 +201,7 @@ TEST("parse_payload: value field stored as float") {
 
     auto r = parse_payload(
         R"({"ts":"2024-11-15T21:27:52.000Z","value":42.5})",
-        topic, 0, cfg);
+        topic, cfg);
 
     EXPECT_NEAR(r.floats.at("value"), 42.5, 1e-9);
 }
@@ -209,22 +215,25 @@ TEST("parse_payload: string columns from topic copied to row") {
     topic.strings["point_name"] = "current";
 
     auto r = parse_payload(R"({"ts":"2024-01-01T00:00:00.000Z","value":1.5})",
-                           topic, 0, cfg);
+                           topic, cfg);
 
     EXPECT_EQ(r.strings.at("unit_id"),    std::string("u007"));
     EXPECT_EQ(r.strings.at("device"),     std::string("ems"));
     EXPECT_EQ(r.strings.at("point_name"), std::string("current"));
 }
 
-TEST("parse_payload: project_id injected as int column") {
+TEST("parse_payload: integer JSON value for non-ts field stored as double in floats") {
+    // parse_payload always stores non-ts scalars in floats (int JSON → cast to double).
+    // dtype_hint drives Arrow column type at flush time, not at parse time.
     Config cfg = make_ems_config();
     TopicInfo topic;
     topic.source_type = "unit";
 
-    auto r = parse_payload(R"({"ts":"2024-01-01T00:00:00.000Z","value":1.0})",
-                           topic, 99, cfg);
+    auto r = parse_payload(R"({"ts":"2024-01-01T00:00:00.000Z","value":7})",
+                           topic, cfg);
 
-    EXPECT_EQ(r.ints.at("project_id"), 99);
+    EXPECT_TRUE(r.floats.count("value") > 0u);
+    EXPECT_NEAR(r.floats.at("value"), 7.0, 1e-9);
 }
 
 TEST("parse_payload: bad JSON returns row with topic strings intact") {
@@ -233,7 +242,7 @@ TEST("parse_payload: bad JSON returns row with topic strings intact") {
     topic.source_type         = "unit";
     topic.strings["unit_id"]  = "u001";
 
-    auto r = parse_payload("{not valid json!!}", topic, 0, cfg);
+    auto r = parse_payload("{not valid json!!}", topic, cfg);
     EXPECT_EQ(r.strings.at("unit_id"), std::string("u001"));
     EXPECT_TRUE(r.floats.empty());
 }
@@ -245,7 +254,7 @@ TEST("parse_payload: field_name renames value column") {
     topic.field_name  = "voltage";  // rename value → voltage
 
     auto r = parse_payload(R"({"ts":"2024-01-01T00:00:00.000Z","value":3.7})",
-                           topic, 0, cfg);
+                           topic, cfg);
 
     EXPECT_TRUE(r.floats.count("voltage") > 0u);
     EXPECT_EQ(r.floats.count("value"), 0u);
