@@ -605,63 +605,140 @@ live 60s buffer requires only two changes:</p>
 <ol>
   <li>Writer exposes <code>GET /current</code> — serialises the in-memory buffer to parquet bytes
       on demand and returns them as <code>application/octet-stream</code></li>
-  <li>subscriber_api fetches <code>/current</code>, writes bytes to a temp file, and appends that
-      path to the DuckDB source list before running the query</li>
+  <li>subscriber_api adds the writer HTTP URL directly to the DuckDB source list — no temp file,
+      no separate fetch step. DuckDB's <code>httpfs</code> extension fetches it as part of the
+      same query execution</li>
 </ol>
 
-<p>DuckDB then sees one unified source covering all three layers:</p>
+<p>DuckDB sees one unified source covering all three layers — local files and live HTTP buffer
+in a single statement:</p>
 
 <pre><span class="cm">-- what DuckDB runs inside subscriber_api._query_history()</span>
 SELECT * FROM read_parquet([
-    <span class="str">'.../2026/04/12/*.parquet'</span>,   <span class="cm">-- compact + flush files on disk</span>
-    <span class="str">'.../2026/04/11/*.parquet'</span>,   <span class="cm">-- previous day if range spans midnight</span>
-    <span class="str">'/tmp/tmpXXXX.parquet'</span>        <span class="cm">-- live buffer fetched from writer /current</span>
+    <span class="str">'.../2026/04/12/*.parquet'</span>,          <span class="cm">-- compact + flush files on disk</span>
+    <span class="str">'.../2026/04/11/*.parquet'</span>,          <span class="cm">-- previous day if range spans midnight</span>
+    <span class="str">'http://192.168.86.34:8771/current'</span>, <span class="cm">-- live buffer: writer fetched by DuckDB httpfs</span>
+    <span class="str">'http://192.168.86.48:8771/current'</span>  <span class="cm">-- second writer if multi-writer deployment</span>
 ], union_by_name=<span class="kw">true</span>)
 WHERE timestamp BETWEEN from_ts AND to_ts
 ORDER BY timestamp
 LIMIT :limit</pre>
+
+<p>The subscriber_api just builds the sources list — HTTP URIs go in directly alongside local globs:</p>
+
+<pre><span class="cm"># subscriber_api._query_history() — full source list construction</span>
+<span class="kw">def</span> <span class="fn">_make_conn</span>(cfg):
+    conn = duckdb.<span class="fn">connect</span>()
+    conn.<span class="fn">execute</span>(<span class="str">"INSTALL httpfs; LOAD httpfs;"</span>)   <span class="cm"># once at startup</span>
+    <span class="cm"># S3 credentials if needed (omit for local HTTP)</span>
+    <span class="kw">return</span> conn
+
+<span class="kw">def</span> <span class="fn">_query_history</span>(cfg, site, instance, from_ts, to_ts, limit):
+    globs   = <span class="fn">_build_globs</span>(cfg, site, instance, from_ts, to_ts)
+    sources = globs + [
+        <span class="str">f"{url.rstrip('/')}/current?since={<span class="fn">_newest_row_ts</span>(globs):.3f}"</span>
+        <span class="kw">for</span> url <span class="kw">in</span> cfg.get(<span class="str">"writer_urls"</span>, [])
+    ]
+    src_str = <span class="str">", "</span>.<span class="fn">join</span>(<span class="str">f"'{s}'"</span> <span class="kw">for</span> s <span class="kw">in</span> sources)
+    <span class="kw">return</span> conn.<span class="fn">execute</span>(<span class="str">f"""
+        SELECT * FROM read_parquet([{src_str}], union_by_name=true)
+        WHERE timestamp BETWEEN {from_ts} AND {to_ts}
+        ORDER BY timestamp LIMIT {limit}
+    """</span>)</pre>
+
+<h4>HTTP Range requests — writer implementation detail</h4>
+
+<p>DuckDB's <code>httpfs</code> reads parquet files efficiently using HTTP Range requests. Rather
+than fetching the entire file, it issues two requests:</p>
+
+<ol>
+  <li><strong>Footer fetch</strong> — <code>Range: bytes=-8</code> then
+      <code>Range: bytes=N-M</code> to read the Parquet footer (schema + row group metadata).
+      This tells DuckDB the column layout and row group offsets without reading any data.</li>
+  <li><strong>Column page fetch</strong> — <code>Range: bytes=A-B</code> per column page
+      actually needed by the query's projection and predicate pushdown. Columns not referenced
+      in the <code>SELECT</code> or <code>WHERE</code> are never fetched.</li>
+</ol>
+
+<p>The writer's <code>/current</code> HTTP handler must therefore support the
+<code>Range</code> header. Implementation in the health thread:</p>
+
+<pre><span class="cm">// health_thread_fn() — /current handler with Range support</span>
+<span class="kw">auto</span> parquet_buf = <span class="fn">serialize_buffer_to_parquet</span>();   <span class="cm">// Arrow → parquet bytes in memory</span>
+<span class="kw">size_t</span> total = parquet_buf-&gt;<span class="fn">size</span>();
+
+<span class="cm">// Parse Range header if present: "bytes=START-END" or "bytes=-SUFFIX"</span>
+<span class="kw">size_t</span> range_start = <span class="num">0</span>, range_end = total - <span class="num">1</span>;
+<span class="kw">bool</span>   is_range    = <span class="kw">false</span>;
+<span class="kw">if</span> (<span class="kw">auto</span> pos = request.<span class="fn">find</span>(<span class="str">"Range: bytes="</span>) != npos) {
+    <span class="kw">auto</span> spec = request.<span class="fn">substr</span>(pos + <span class="num">13</span>);
+    <span class="kw">if</span> (spec[<span class="num">0</span>] == <span class="str">'-'</span>) {                              <span class="cm">// suffix: bytes=-N</span>
+        <span class="kw">size_t</span> suffix = <span class="fn">stoull</span>(spec.<span class="fn">substr</span>(<span class="num">1</span>));
+        range_start = total - suffix;
+    } <span class="kw">else</span> {                                            <span class="cm">// range: bytes=START-END</span>
+        <span class="kw">auto</span> dash  = spec.<span class="fn">find</span>(<span class="str">'-'</span>);
+        range_start = <span class="fn">stoull</span>(spec.<span class="fn">substr</span>(<span class="num">0</span>, dash));
+        range_end   = <span class="fn">stoull</span>(spec.<span class="fn">substr</span>(dash + <span class="num">1</span>));
+    }
+    is_range = <span class="kw">true</span>;
+}
+
+<span class="kw">size_t</span>      send_len = range_end - range_start + <span class="num">1</span>;
+std::string status   = is_range ? <span class="str">"206 Partial Content"</span> : <span class="str">"200 OK"</span>;
+std::string hdr =
+    <span class="str">"HTTP/1.1 "</span> + status + <span class="str">"\r\n"</span>
+    <span class="str">"Content-Type: application/octet-stream\r\n"</span>
+    <span class="str">"Accept-Ranges: bytes\r\n"</span>                          <span class="cm">// advertise Range support</span>
+    <span class="str">"Content-Length: "</span> + <span class="fn">to_string</span>(send_len) + <span class="str">"\r\n"</span>
+    <span class="str">"Content-Range: bytes "</span> + <span class="fn">to_string</span>(range_start) + <span class="str">"-"</span>
+                           + <span class="fn">to_string</span>(range_end)   + <span class="str">"/"</span>
+                           + <span class="fn">to_string</span>(total)       + <span class="str">"\r\n"</span>
+    <span class="str">"Cache-Control: no-store\r\n\r\n"</span>;
+
+<span class="fn">write</span>(client_fd, hdr.<span class="fn">data</span>(), hdr.<span class="fn">size</span>());
+<span class="fn">write</span>(client_fd, parquet_buf-&gt;<span class="fn">data</span>() + range_start, send_len);</pre>
+
+<div class="note">
+  For the small in-memory <code>/current</code> buffer (typically 50–200 KB for 60s of data),
+  DuckDB will likely fetch the entire file in two Range requests regardless. The overhead of
+  Range handling is minimal and the implementation above covers all cases DuckDB will generate.
+  Without <code>Accept-Ranges: bytes</code> in the response header DuckDB falls back to a full
+  read — functionally correct but slightly less efficient.
+</div>
 
 <h4>Overlap and deduplication</h4>
 
 <p class="warn"><strong>Important:</strong> the flush files on disk and the <code>/current</code>
 buffer will overlap. The writer flushes at T-N seconds but the in-memory buffer still contains
 all rows since the last flush start. <code>union_by_name=true</code> merges schemas but does
-<em>not</em> deduplicate rows — a naive union will return duplicate rows for the overlap window.</p>
+<em>not</em> deduplicate rows — a naive union returns duplicate rows for the overlap window.</p>
 
 <p>Two clean solutions:</p>
 
 <ol>
-  <li><strong>Preferred — writer trims /current to post-flush rows only.</strong> The writer
-      already tracks <code>last_flush_ts</code>. The <code>/current</code> endpoint accepts an
-      optional <code>?since=&lt;unix_ts&gt;</code> parameter and only serialises rows with
-      <code>ts &gt; since</code>. subscriber_api passes the timestamp of the newest row in the
-      most-recent flush file:
-<pre><span class="cm"># subscriber_api — pass last flush boundary to /current</span>
-since_ts = _newest_row_ts(globs)   <span class="cm"># scan last file, read max(ts)</span>
-current_tmp = _fetch_current(writer_url, since=since_ts)</pre>
-      The writer then returns only the true gap — zero overlap, zero duplicates.</li>
+  <li><strong>Preferred — <code>?since=</code> parameter trims /current to post-flush rows only.</strong>
+      The writer tracks <code>last_flush_ts</code> and only serialises rows with
+      <code>ts &gt; since</code>. The subscriber_api passes the newest row timestamp from the
+      most recent flush file — shown in the code above as <code>_newest_row_ts(globs)</code>.
+      The writer returns only the true gap — zero overlap, zero duplicates.</li>
 
   <li><strong>Fallback — deduplicate in DuckDB.</strong> If <code>since=</code> is not yet
-      implemented on the writer, wrap the query in a <code>SELECT DISTINCT</code> or group
-      by primary key:
+      implemented on the writer, wrap the query in a window dedup:
 <pre>SELECT * FROM (
     SELECT *, row_number() OVER (PARTITION BY ts, unit_id ORDER BY ts) AS rn
     FROM read_parquet([{sources}], union_by_name=<span class="kw">true</span>)
     WHERE timestamp BETWEEN from_ts AND to_ts
-) WHERE rn = 1
+) WHERE rn = <span class="num">1</span>
 ORDER BY timestamp</pre>
       Slightly heavier but works without any writer changes.</li>
 </ol>
 
-<h4>Multiple writers</h4>
+<h4>Multiple writers — URIs go straight into the source list</h4>
 
-<p>In practice several parquet_writers may be running in parallel — different machines, different
-slices, different schemas (wide-pivot on one, long-format on another). The subscriber_api should
-fan out to all of them and let DuckDB merge the results.</p>
+<p>With <code>httpfs</code>, adding more writers requires no additional fetch code —
+just more URIs in the list. DuckDB fetches all sources in parallel internally:</p>
 
-<p>Config uses a list instead of a single URL:</p>
-
-<pre><span class="cm"># config.yaml — list all writers</span>
+<pre><span class="cm"># config.yaml</span>
 writer_urls:
   - http://192.168.86.34:8771   <span class="cm"># .34 wide-pivot writer</span>
   - http://192.168.86.34:8772   <span class="cm"># .34 second writer</span>
@@ -670,42 +747,22 @@ writer_urls:
 s3:
   local_path: /mnt/tort-sdi/bench/bench-wide/bench</pre>
 
-<p>The fetches run in parallel — a <code>ThreadPoolExecutor</code> fires all requests
-simultaneously so worst-case latency is one timeout (2s) regardless of how many writers there are,
-not N × 2s:</p>
-
-<pre><span class="cm"># subscriber_api — parallel fan-out to all writers</span>
-<span class="kw">from</span> concurrent.futures <span class="kw">import</span> ThreadPoolExecutor, as_completed
-
-<span class="kw">def</span> <span class="fn">_fetch_all_current</span>(writer_urls: list, since_ts: float = <span class="num">0</span>) -> list[str]:
-    tmp_files = []
-    <span class="kw">with</span> ThreadPoolExecutor(max_workers=len(writer_urls)) <span class="kw">as</span> ex:
-        futures = {ex.submit(_fetch_current, url, since_ts): url
-                   <span class="kw">for</span> url <span class="kw">in</span> writer_urls}
-        <span class="kw">for</span> fut <span class="kw">in</span> as_completed(futures):
-            tmp = fut.result()
-            <span class="kw">if</span> tmp:
-                tmp_files.append(tmp)
-    <span class="kw">return</span> tmp_files</pre>
-
-<p>Each temp file is appended to the DuckDB source list alongside the on-disk glob files.
-<code>union_by_name=true</code> handles schema differences between writers transparently —
+<p><code>union_by_name=true</code> handles schema differences between writers transparently —
 a wide-pivot writer and a long-format writer can both contribute to the same query; DuckDB
-null-fills columns that are absent from any given file.</p>
+null-fills columns absent from any given file.</p>
 
-<div class="note">The per-writer 2-second timeout means a slow or dead writer does not block
-the query — its contribution is simply absent from the result. The query succeeds with whatever
-writers responded in time.</div>
+<div class="note">
+  If a writer is unreachable, DuckDB raises an error for that URI. The subscriber_api should
+  catch per-source errors and retry without the failed URI — falling back to files-only for
+  that writer's contribution. The query still succeeds with whatever sources responded.
+</div>
 
-<h4>subscriber_api config (single writer)</h4>
-<pre><span class="cm"># config.yaml — single writer shorthand also accepted</span>
-writer_url: http://192.168.86.34:8771
+<h4>subscriber_api config</h4>
+<pre><span class="cm"># config.yaml — writer_urls added to existing s3/local config</span>
+writer_urls:
+  - http://192.168.86.34:8771
 s3:
   local_path: /mnt/tort-sdi/bench/bench-wide/bench</pre>
-
-<div class="note">The <code>_fetch_current()</code> / <code>_fetch_all_current()</code> calls have
-a 2-second timeout each. If a writer is unreachable the query silently falls back to files-only —
-no error returned to the client. This makes live-buffer stitching transparent and fault-tolerant.</div>
 
 <hr>
 
