@@ -653,15 +653,59 @@ ORDER BY timestamp</pre>
       Slightly heavier but works without any writer changes.</li>
 </ol>
 
-<h4>subscriber_api config</h4>
-<pre><span class="cm"># config.yaml — add writer_url to enable /current stitching</span>
-writer_url: http://192.168.86.34:8771   <span class="cm"># writer health/API port</span>
+<h4>Multiple writers</h4>
+
+<p>In practice several parquet_writers may be running in parallel — different machines, different
+slices, different schemas (wide-pivot on one, long-format on another). The subscriber_api should
+fan out to all of them and let DuckDB merge the results.</p>
+
+<p>Config uses a list instead of a single URL:</p>
+
+<pre><span class="cm"># config.yaml — list all writers</span>
+writer_urls:
+  - http://192.168.86.34:8771   <span class="cm"># .34 wide-pivot writer</span>
+  - http://192.168.86.34:8772   <span class="cm"># .34 second writer</span>
+  - http://192.168.86.48:8771   <span class="cm"># gx10 slice A</span>
+  - http://192.168.86.48:8772   <span class="cm"># gx10 slice B</span>
 s3:
   local_path: /mnt/tort-sdi/bench/bench-wide/bench</pre>
 
-<div class="note">The <code>_fetch_current()</code> call has a 2-second timeout. If the writer is
-unreachable the query silently falls back to files-only — no error returned to the client. This
-makes the live-buffer stitching transparent and fault-tolerant.</div>
+<p>The fetches run in parallel — a <code>ThreadPoolExecutor</code> fires all requests
+simultaneously so worst-case latency is one timeout (2s) regardless of how many writers there are,
+not N × 2s:</p>
+
+<pre><span class="cm"># subscriber_api — parallel fan-out to all writers</span>
+<span class="kw">from</span> concurrent.futures <span class="kw">import</span> ThreadPoolExecutor, as_completed
+
+<span class="kw">def</span> <span class="fn">_fetch_all_current</span>(writer_urls: list, since_ts: float = <span class="num">0</span>) -> list[str]:
+    tmp_files = []
+    <span class="kw">with</span> ThreadPoolExecutor(max_workers=len(writer_urls)) <span class="kw">as</span> ex:
+        futures = {ex.submit(_fetch_current, url, since_ts): url
+                   <span class="kw">for</span> url <span class="kw">in</span> writer_urls}
+        <span class="kw">for</span> fut <span class="kw">in</span> as_completed(futures):
+            tmp = fut.result()
+            <span class="kw">if</span> tmp:
+                tmp_files.append(tmp)
+    <span class="kw">return</span> tmp_files</pre>
+
+<p>Each temp file is appended to the DuckDB source list alongside the on-disk glob files.
+<code>union_by_name=true</code> handles schema differences between writers transparently —
+a wide-pivot writer and a long-format writer can both contribute to the same query; DuckDB
+null-fills columns that are absent from any given file.</p>
+
+<div class="note">The per-writer 2-second timeout means a slow or dead writer does not block
+the query — its contribution is simply absent from the result. The query succeeds with whatever
+writers responded in time.</div>
+
+<h4>subscriber_api config (single writer)</h4>
+<pre><span class="cm"># config.yaml — single writer shorthand also accepted</span>
+writer_url: http://192.168.86.34:8771
+s3:
+  local_path: /mnt/tort-sdi/bench/bench-wide/bench</pre>
+
+<div class="note">The <code>_fetch_current()</code> / <code>_fetch_all_current()</code> calls have
+a 2-second timeout each. If a writer is unreachable the query silently falls back to files-only —
+no error returned to the client. This makes live-buffer stitching transparent and fault-tolerant.</div>
 
 <hr>
 
