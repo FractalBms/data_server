@@ -250,6 +250,42 @@ This is the extension point for the new endpoints.</p>
 <!-- ──────────────────────────────────────────────────────────────── -->
 <h2 id="rolling">4. Rolling 60s Buffer Design</h2>
 
+<h3>Relationship between the live buffer and the WAL</h3>
+
+<p>The writer already has a WAL (Write-Ahead Log) that protects against data loss if the
+process crashes between flushes. The 60-second live buffer is a separate concern — it is
+not a replacement for the WAL and does not change when WAL files are written or deleted.
+The two mechanisms serve entirely different purposes:</p>
+
+<table>
+  <tr><th></th><th>WAL (<code>*.wal.arrow</code>)</th><th>Live buffer (<code>g_buffers</code>)</th></tr>
+  <tr><td><strong>Purpose</strong></td>
+      <td>Crash recovery — recover rows that were buffered but not yet flushed to Parquet</td>
+      <td>Query tail — expose the last N seconds of data to <code>GET /current</code> without waiting for the next flush</td></tr>
+  <tr><td><strong>Written</strong></td>
+      <td>On every flush, alongside the Parquet file</td>
+      <td>Continuously, on every parsed MQTT message</td></tr>
+  <tr><td><strong>Read</strong></td>
+      <td><strong>Only on restart</strong> — replayed once to repopulate <code>g_buffers</code>, then deleted</td>
+      <td>On every <code>GET /current</code> request, under a brief read lock</td></tr>
+  <tr><td><strong>Format</strong></td>
+      <td>Arrow IPC — lossless, low-write overhead, not readable by DuckDB</td>
+      <td>In-process <code>std::map&lt;PartitionKey, Partition&gt;</code> — serialised to Parquet on demand</td></tr>
+  <tr><td><strong>Lifetime</strong></td>
+      <td>From flush until restart replay completes (then deleted)</td>
+      <td>Rolling window — rows older than N seconds are evicted</td></tr>
+</table>
+
+<div class="note">
+  <strong>Normal operation:</strong> <code>GET /current</code> never reads WAL files.
+  It reads only <code>g_buffers</code> — the live in-memory map. WAL files are written and
+  deleted entirely within the flush cycle; the HTTP path does not touch them.<br><br>
+  <strong>After a restart:</strong> WAL replay runs before the MQTT connection is re-established.
+  It populates <code>g_buffers</code> with the rows that were buffered at crash time.
+  Once replay is complete, <code>GET /current</code> immediately has data — the gap between
+  the last successful flush and the crash is bridged automatically.
+</div>
+
 <p>Add a deque of rows that is appended on every MQTT parse and trimmed to the last N seconds.
 The buffer is read-locked only for serialisation (the same brief lock pattern as the existing
 buffer flush).</p>
