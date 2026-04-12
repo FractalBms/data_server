@@ -641,5 +641,219 @@
   </div>
 </div>
 
+<!-- ════════════════════════════════════════════════════════════════ -->
+<h2 id="protocols">Protocol Bridge — Closing the Industrial Protocol Gap</h2>
+
+<div class="section">
+  <p>
+    The parquet_writer speaks MQTT natively. Hardware devices that speak Modbus, CAN, DNP3,
+    or WebSocket JSON only need a thin bridge process to translate their protocol into MQTT
+    topics — the writer never knows the difference. This is a deliberate architectural choice:
+    the bridge is stateless and replaceable; the writer is the durable component.
+  </p>
+
+  <div class="arch-box">BESS / Grid device
+        │
+        │  Modbus RTU/TCP  ─── modbus-mqtt-bridge ───┐
+        │  CAN bus frame   ─── can-mqtt-bridge    ────┤
+        │  DNP3 outstation ─── dnp3-mqtt-bridge   ────┤──▶ FlashMQ ──▶ parquet_writer
+        │  WebSocket JSON  ─── ws-mqtt-bridge     ────┤
+        │  REST/HTTP poll  ─── http-mqtt-bridge   ────┘
+        │  MQTT native     ──────────────────────────▶ FlashMQ ──▶ parquet_writer</div>
+
+  <h3>Modbus RTU / TCP</h3>
+  <p>
+    Modbus is the most common protocol in BMS, PCS, and grid equipment. A bridge reads
+    holding registers or input registers on a poll cycle and publishes each register value
+    as an MQTT message in the writer's topic format.
+  </p>
+  <table>
+    <thead><tr><th>Approach</th><th>Library / Tool</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Python bridge</td>
+        <td><code>pymodbus</code></td>
+        <td>Simple to write; ~100 lines for a polling bridge. Good for prototyping and low-rate devices (&lt;100 registers).</td>
+      </tr>
+      <tr>
+        <td>C bridge</td>
+        <td><code>libmodbus</code></td>
+        <td>Low latency, ARM native. Use for high-rate or embedded deployments.</td>
+      </tr>
+      <tr>
+        <td>Node-RED</td>
+        <td>node-red-contrib-modbus</td>
+        <td>Visual flow builder; good for rapid integration of mixed device types. Higher RAM footprint.</td>
+      </tr>
+    </tbody>
+  </table>
+<pre><span class="cm"># Minimal pymodbus → MQTT bridge skeleton</span>
+<span class="kw">from</span> pymodbus.client <span class="kw">import</span> ModbusTcpClient
+<span class="kw">import</span> paho.mqtt.client <span class="kw">as</span> mqtt, json, time
+
+modbus = ModbusTcpClient(<span class="str">'192.168.1.100'</span>, port=<span class="num">502</span>)
+mq     = mqtt.Client(); mq.connect(<span class="str">'localhost'</span>, <span class="num">1883</span>); mq.loop_start()
+
+REGISTER_MAP = {
+    <span class="str">'SysSOC'</span>:     (<span class="num">40001</span>, <span class="str">'float'</span>),
+    <span class="str">'SysVoltage'</span>: (<span class="num">40003</span>, <span class="str">'float'</span>),
+    <span class="str">'SysCurrent'</span>: (<span class="num">40005</span>, <span class="str">'float'</span>),
+    <span class="str">'FaultCode'</span>:  (<span class="num">40010</span>, <span class="str">'integer'</span>),
+}
+UNIT_ID = <span class="str">'0215D1D8'</span>
+
+<span class="kw">while</span> <span class="kw">True</span>:
+    modbus.connect()
+    ts = time.strftime(<span class="str">"%Y-%m-%dT%H:%M:%S.000Z"</span>, time.gmtime())
+    <span class="kw">for</span> name, (reg, dtype) <span class="kw">in</span> REGISTER_MAP.items():
+        rr  = modbus.read_holding_registers(reg - <span class="num">40001</span>, count=<span class="num">2</span>)
+        val = float(rr.registers[<span class="num">0</span>]) <span class="cm"># scale as needed</span>
+        topic = <span class="str">f"bench/{UNIT_ID}/bms/bms_1/{name}/{dtype}"</span>
+        mq.publish(topic, json.dumps({<span class="str">"ts"</span>: ts, <span class="str">"value"</span>: val}), qos=<span class="num">0</span>)
+    time.sleep(<span class="num">1</span>)</pre>
+
+  <h3>CAN Bus</h3>
+  <p>
+    CAN is common in battery pack BMS and automotive-derived storage systems. Linux
+    <code>socketcan</code> exposes CAN frames as a socket — a bridge decodes the frame using
+    a DBC file and publishes decoded signal values to MQTT.
+  </p>
+  <table>
+    <thead><tr><th>Approach</th><th>Library / Tool</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Python bridge</td>
+        <td><code>python-can</code> + <code>cantools</code> (DBC decoder)</td>
+        <td>~50 lines. Reads DBC file for signal layout; handles scaling, offsets, multiplex automatically.</td>
+      </tr>
+      <tr>
+        <td>C bridge</td>
+        <td><code>socketcan</code> + custom DBC parser</td>
+        <td>Minimal latency. Use when CAN message rate is high (&gt;1000 frames/sec).</td>
+      </tr>
+    </tbody>
+  </table>
+<pre><span class="cm"># python-can + cantools → MQTT bridge skeleton</span>
+<span class="kw">import</span> can, cantools, paho.mqtt.client <span class="kw">as</span> mqtt, json, time
+
+db  = cantools.database.load_file(<span class="str">'bms.dbc'</span>)
+bus = can.interface.Bus(<span class="str">'can0'</span>, bustype=<span class="str">'socketcan'</span>)
+mq  = mqtt.Client(); mq.connect(<span class="str">'localhost'</span>, <span class="num">1883</span>); mq.loop_start()
+
+UNIT_ID = <span class="str">'0215D1D8'</span>
+
+<span class="kw">for</span> msg <span class="kw">in</span> bus:
+    <span class="kw">try</span>:
+        decoded = db.decode_message(msg.arbitration_id, msg.data)
+    <span class="kw">except</span> KeyError:
+        <span class="kw">continue</span>   <span class="cm"># unknown frame ID</span>
+    ts = time.strftime(<span class="str">"%Y-%m-%dT%H:%M:%S.000Z"</span>, time.gmtime())
+    <span class="kw">for</span> name, val <span class="kw">in</span> decoded.items():
+        dtype = <span class="str">'float'</span> <span class="kw">if</span> isinstance(val, float) <span class="kw">else</span> <span class="str">'integer'</span>
+        topic = <span class="str">f"bench/{UNIT_ID}/bms/bms_1/{name}/{dtype}"</span>
+        mq.publish(topic, json.dumps({<span class="str">"ts"</span>: ts, <span class="str">"value"</span>: float(val)}), qos=<span class="num">0</span>)</pre>
+
+  <h3>DNP3</h3>
+  <p>
+    DNP3 is the standard protocol for grid-connected devices — inverters, meters, RTUs, and
+    substations. An unsolicited-response or polled DNP3 master bridge publishes each data
+    object to MQTT.
+  </p>
+  <table>
+    <thead><tr><th>Approach</th><th>Library / Tool</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Python bridge</td>
+        <td><code>pydnp3</code> (OpenDNP3 Python bindings)</td>
+        <td>Full DNP3 master implementation; handles unsolicited responses and integrity polls.</td>
+      </tr>
+      <tr>
+        <td>C++ bridge</td>
+        <td><code>opendnp3</code></td>
+        <td>Production-grade; supports Class 0/1/2/3 polling, unsolicited, time sync. ~200 lines to wire to MQTT.</td>
+      </tr>
+      <tr>
+        <td>Existing gateway</td>
+        <td>Kepware, Triangle MicroWorks with MQTT plugin</td>
+        <td>Commercial option — faster to deploy if device-specific quirks are a concern.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>WebSocket JSON</h3>
+  <p>
+    Modern inverters, EMS platforms, and cloud-connected devices increasingly expose a
+    WebSocket or REST API returning JSON. A bridge subscribes to the WebSocket stream
+    (or polls the REST endpoint) and republishes each value to MQTT.
+  </p>
+  <table>
+    <thead><tr><th>Source type</th><th>Approach</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>WebSocket push stream</td>
+        <td><code>websockets</code> Python library</td>
+        <td>Connect once, receive updates as they arrive. Lowest latency — device pushes on change.</td>
+      </tr>
+      <tr>
+        <td>REST HTTP poll</td>
+        <td><code>httpx</code> / <code>requests</code> + asyncio</td>
+        <td>Poll at fixed interval; async allows many devices from one process.</td>
+      </tr>
+      <tr>
+        <td>Server-Sent Events (SSE)</td>
+        <td><code>httpx</code> streaming</td>
+        <td>HTTP push stream; common in newer EMS APIs.</td>
+      </tr>
+    </tbody>
+  </table>
+<pre><span class="cm"># WebSocket JSON → MQTT bridge skeleton</span>
+<span class="kw">import</span> asyncio, websockets, json, time
+<span class="kw">import</span> paho.mqtt.client <span class="kw">as</span> mqtt
+
+mq = mqtt.Client(); mq.connect(<span class="str">'localhost'</span>, <span class="num">1883</span>); mq.loop_start()
+
+<span class="cm"># Map incoming JSON keys to writer topic segments</span>
+SIGNAL_MAP = {
+    <span class="str">'soc'</span>:      (<span class="str">'bms'</span>, <span class="str">'bms_1'</span>, <span class="str">'SysSOC'</span>,     <span class="str">'float'</span>),
+    <span class="str">'voltage'</span>:  (<span class="str">'bms'</span>, <span class="str">'bms_1'</span>, <span class="str">'SysVoltage'</span>, <span class="str">'float'</span>),
+    <span class="str">'power_kw'</span>: (<span class="str">'pcs'</span>, <span class="str">'pcs_1'</span>, <span class="str">'kW'</span>,          <span class="str">'float'</span>),
+    <span class="str">'fault'</span>:    (<span class="str">'bms'</span>, <span class="str">'bms_1'</span>, <span class="str">'FaultCode'</span>,  <span class="str">'integer'</span>),
+}
+
+<span class="kw">async def</span> <span class="fn">bridge</span>(unit_id, ws_url):
+    <span class="kw">async with</span> websockets.<span class="fn">connect</span>(ws_url) <span class="kw">as</span> ws:
+        <span class="kw">async for</span> raw <span class="kw">in</span> ws:
+            data = json.<span class="fn">loads</span>(raw)
+            ts   = data.get(<span class="str">'ts'</span>, time.<span class="fn">strftime</span>(<span class="str">"%Y-%m-%dT%H:%M:%S.000Z"</span>, time.<span class="fn">gmtime</span>()))
+            <span class="kw">for</span> key, (dev, inst, sig, dtype) <span class="kw">in</span> SIGNAL_MAP.items():
+                <span class="kw">if</span> key <span class="kw">in</span> data:
+                    topic = <span class="str">f"bench/{unit_id}/{dev}/{inst}/{sig}/{dtype}"</span>
+                    mq.<span class="fn">publish</span>(topic, json.<span class="fn">dumps</span>({<span class="str">"ts"</span>: ts, <span class="str">"value"</span>: data[key]}), qos=<span class="num">0</span>)
+
+asyncio.<span class="fn">run</span>(<span class="fn">bridge</span>(<span class="str">'0215D1D8'</span>, <span class="str">'ws://192.168.1.100:8080/stream'</span>))</pre>
+
+  <h3>Bridge summary</h3>
+  <table>
+    <thead><tr><th>Protocol</th><th>Library</th><th>Bridge complexity</th><th>Typical lines of code</th></tr></thead>
+    <tbody>
+      <tr><td>MQTT (native)</td><td>—</td><td>Zero — direct ingest</td><td>0</td></tr>
+      <tr><td>WebSocket JSON</td><td>websockets + paho</td><td>Very low</td><td>~50</td></tr>
+      <tr><td>REST / HTTP poll</td><td>httpx + paho</td><td>Very low</td><td>~50</td></tr>
+      <tr><td>Modbus TCP</td><td>pymodbus + paho</td><td>Low</td><td>~100</td></tr>
+      <tr><td>CAN bus</td><td>python-can + cantools + paho</td><td>Low (DBC file does the heavy lifting)</td><td>~50</td></tr>
+      <tr><td>DNP3</td><td>pydnp3 / opendnp3 + paho</td><td>Medium (DNP3 master state machine)</td><td>~200</td></tr>
+      <tr><td>OPC-UA</td><td>asyncua + paho</td><td>Low–medium</td><td>~100</td></tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-ok">
+    <strong>Key point:</strong> none of these bridges need to know about Parquet, DuckDB, or the
+    writer's internal format. They only need to know the MQTT topic structure:
+    <code>bench/{unit_id}/{device}/{instance}/{signal}/{dtype}</code>.
+    The writer handles everything else — parsing, buffering, flushing, compacting, COV.
+    A new protocol is a ~100-line Python script, not a platform integration project.
+  </div>
+</div>
+
 </body>
 </html>
