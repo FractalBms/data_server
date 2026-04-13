@@ -11,6 +11,13 @@
   --orange:#e3b341; --purple:#bc8cff; --teal:#39d353; --pink:#ff7b72;
   --code-bg:#21262d;
 }
+body.light {
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --muted:#636c76; --accent:#0969da;
+  --green:#1a7f37; --yellow:#9a6700; --red:#cf222e;
+  --orange:#953800; --purple:#8250df; --teal:#116329; --pink:#a40e26;
+  --code-bg:#f6f8fa;
+}
 * { box-sizing:border-box; margin:0; padding:0; }
 body { background:var(--bg); color:var(--text);
        font-family:'Segoe UI',system-ui,sans-serif;
@@ -109,10 +116,12 @@ tr:last-child td { border-bottom:none; }
 
 <div class="nav">
   <a href="../projects.html">&#8592; projects</a>
+  <a href="#" id="theme-toggle" onclick="toggleTheme();return false;">&#9788; light</a>
   <a href="writer_design.html">writer design</a>
   <a href="writer_query_design.html">query design</a>
   <a href="writer_compare_test.html">compare test</a>
   <a href="writer_commercial_options.html">commercial options</a>
+  <a href="#eks">&#9654; EKS deploy</a>
 </div>
 
 <h1>Site Capture Plan &#8212; Four-Format Parquet vs InfluxDB2</h1>
@@ -160,10 +169,14 @@ tr:last-child td { border-bottom:none; }
   <div class="step">
     <div class="step-num">1</div>
     <div class="step-body">
-      <div class="step-title">Deploy <code>parquet_writer</code> on site in long-format mode</div>
-      <div class="step-desc">Config: <code>site_capture_long.yaml</code> (see below). Topic segments renamed to produce
-        schema <code>(ts, value, device_type, device, point_name, unit_id)</code>.
-        10-minute flush. No wide-pivot, no compaction during capture.</div>
+      <div class="step-title">Deploy <code>parquet_writer</code> in EKS as a long-format capture Deployment</div>
+      <div class="step-desc">
+        Build container image from Dockerfile (see <a href="#eks-dockerfile">EKS section</a>).
+        Apply ConfigMap + Secret + PVC + Deployment YAMLs.
+        Config: <code>site_capture_long.yaml</code> injected via ConfigMap; MQTT host and site ID via Secret.
+        10-minute flush. No wide-pivot, no compaction during capture.
+        Health on <code>:8771/health</code> — liveness probe keeps pod alive.
+      </div>
     </div>
   </div>
   <div class="step">
@@ -178,19 +191,25 @@ tr:last-child td { border-bottom:none; }
   <div class="step">
     <div class="step-num">3</div>
     <div class="step-body">
-      <div class="step-title">After 24 h: stop both capture processes and freeze data</div>
-      <div class="step-desc">Stop writer and note exact stop time.
-        Do not delete any flush files. Copy parquet output off site if remote.
-        Snapshot InfluxDB time range for the same window.</div>
+      <div class="step-title">After 24 h: scale Deployment to 0 to flush and freeze data</div>
+      <div class="step-desc">
+        <code>kubectl scale deployment parquet-writer-long --replicas=0 -n data-capture</code>.
+        SIGTERM triggers WAL flush; wait for pod termination before running post-processing.
+        Note exact stop time. Snapshot InfluxDB time range for same window.
+        Parquet files remain on EFS PVC — no copy needed.
+      </div>
     </div>
   </div>
   <div class="step">
     <div class="step-num">4</div>
     <div class="step-body">
-      <div class="step-title">Run <code>long_to_wide.py</code> to produce all 4 formats</div>
-      <div class="step-desc">Input: raw long-format parquet directory.
-        Output: four separate output directories, one per format.
-        Script logs row counts, file sizes, and bytes/signal-value for each.</div>
+      <div class="step-title">Run <code>long-to-wide</code> K8s Job against the PVC</div>
+      <div class="step-desc">
+        <code>kubectl apply -f job-long-to-wide.yaml</code>.
+        Job mounts same EFS PVC; reads <code>/data/site-capture-long</code>;
+        writes 4 output subdirs to <code>/data/converted/</code>.
+        Logs row counts, file sizes, and bytes/signal-value for each format.
+      </div>
     </div>
   </div>
   <div class="step">
@@ -591,6 +610,328 @@ TO <span class="st">'out/D_long_raw/'</span> (FORMAT parquet, PARTITION_BY (unit
 </table>
 
 
+<!-- ── EKS DEPLOYMENT ── -->
+<h2 id="eks">EKS Container Deployment</h2>
+
+<p>
+  <code>parquet_writer</code> runs as a single-container Deployment in EKS.
+  The writer config is injected via a ConfigMap, output parquet lands on an EFS-backed
+  PersistentVolume (shared ReadWriteMany so post-processing Jobs can read the same mount),
+  and the health endpoint is exposed as a liveness probe. MQTT broker address is passed
+  as an environment variable so the same image works across sites.
+</p>
+
+<h3 id="eks-arch">Architecture overview</h3>
+
+<table>
+  <tr><th>Component</th><th>K8s resource</th><th>Notes</th></tr>
+  <tr>
+    <td>Writer config</td>
+    <td>ConfigMap <code>parquet-writer-config</code></td>
+    <td>Mounted as <code>/etc/writer/config.yaml</code> inside container</td>
+  </tr>
+  <tr>
+    <td>InfluxDB token / credentials</td>
+    <td>Secret <code>parquet-writer-secrets</code></td>
+    <td>Env vars <code>INFLUX_TOKEN</code>, <code>MQTT_HOST</code>, <code>SITE_ID</code></td>
+  </tr>
+  <tr>
+    <td>Parquet output</td>
+    <td>PVC &rarr; EFS StorageClass</td>
+    <td>ReadWriteMany so conversion Job mounts the same volume after capture</td>
+  </tr>
+  <tr>
+    <td>Writer process</td>
+    <td>Deployment (1 replica)</td>
+    <td>Liveness probe on <code>:8771/health</code>; restartPolicy Always</td>
+  </tr>
+  <tr>
+    <td>Post-processing</td>
+    <td>Job <code>long-to-wide</code></td>
+    <td>Run manually after capture; mounts same PVC; writes 4 format subdirs</td>
+  </tr>
+  <tr>
+    <td>Validation</td>
+    <td>Job <code>validate-formats</code></td>
+    <td>Mounts PVC + reaches InfluxDB; writes HTML report to PVC</td>
+  </tr>
+</table>
+
+<div class="warn">
+  <strong>EFS vs EBS:</strong> use EFS (NFS) not EBS. The writer Deployment and the
+  post-processing Job both need to mount the same volume. EBS is ReadWriteOnce (single node);
+  EFS is ReadWriteMany and works across nodes. If EFS is not available, use S3 sync after
+  capture instead (see below).
+</div>
+
+<h3 id="eks-pvc">PersistentVolumeClaim</h3>
+
+<pre><span class="cm"># pvc-parquet-capture.yaml</span>
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: parquet-capture-pvc
+  namespace: data-capture
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: efs-sc          <span class="cm"># EFS CSI driver StorageClass</span>
+  resources:
+    requests:
+      storage: 50Gi                 <span class="cm"># 24 h long-format ~2-4 GB; headroom for post-processing</span></pre>
+
+<h3 id="eks-configmap">ConfigMap — writer config</h3>
+
+<p>
+  The ConfigMap wraps <code>site_capture_long.yaml</code>. MQTT host and site ID are
+  left as placeholder strings replaced at runtime by the container's entrypoint script
+  using environment variables.
+</p>
+
+<pre><span class="cm"># configmap-writer.yaml</span>
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: parquet-writer-config
+  namespace: data-capture
+data:
+  config.yaml: |
+    mqtt:
+      host:              <span class="st">"MQTT_HOST_PLACEHOLDER"</span>   <span class="cm"># replaced by entrypoint.sh</span>
+      port:              1883
+      topic:             bench/#
+      client_id:         parquet-writer-long-capture
+      qos:               0
+      topic_parser:      positional
+      topic_segments:
+        - source_type
+        - unit_id
+        - device_type
+        - device
+        - point_name
+        - dtype_hint
+      drop_columns:
+        - source_type
+        - dtype_hint
+      partition_field:   unit_id
+    output:
+      base_path:         /data/site-capture-long
+      partitions:        ['{year}', '{month}', '{day}']
+      partition_as_filename_prefix: true
+      wide_point_name:   false
+      flush_interval_seconds: 600
+      compression:       snappy
+      store_mqtt_topic:  false
+      store_sample_count: false
+      site_id:           <span class="st">"SITE_ID_PLACEHOLDER"</span>    <span class="cm"># replaced by entrypoint.sh</span>
+      max_messages_per_part:  5000000
+      max_total_buffer_rows:  2000000
+    compact:
+      enabled: false
+    guard:
+      min_free_gb: 2.0
+    health:
+      enabled: true
+      port:    8771
+    wal:
+      enabled: true</pre>
+
+<h3 id="eks-secret">Secret</h3>
+
+<pre><span class="cm"># Apply with: kubectl create secret generic parquet-writer-secrets \
+#   --from-literal=MQTT_HOST=192.168.x.x \
+#   --from-literal=SITE_ID=SITE_A \
+#   --from-literal=INFLUX_TOKEN=xEbFxk... \
+#   -n data-capture</span>
+apiVersion: v1
+kind: Secret
+metadata:
+  name: parquet-writer-secrets
+  namespace: data-capture
+type: Opaque
+stringData:
+  MQTT_HOST:    <span class="st">"192.168.x.x"</span>       <span class="cm"># site MQTT broker — set per site</span>
+  SITE_ID:      <span class="st">"SITE_A"</span>
+  INFLUX_TOKEN: <span class="st">"&lt;site-influx-token&gt;"</span></pre>
+
+<h3 id="eks-entrypoint">Container entrypoint</h3>
+
+<p>
+  A small shell script replaces the placeholder strings in the ConfigMap copy before
+  launching the writer. This keeps the ConfigMap site-agnostic.
+</p>
+
+<pre><span class="cm">#!/bin/sh
+# entrypoint.sh — baked into the container image</span>
+set -e
+cp /etc/writer/config.yaml /tmp/config.yaml
+sed -i <span class="st">"s/MQTT_HOST_PLACEHOLDER/${MQTT_HOST}/g"</span> /tmp/config.yaml
+sed -i <span class="st">"s/SITE_ID_PLACEHOLDER/${SITE_ID}/g"</span>   /tmp/config.yaml
+exec /usr/local/bin/parquet_writer --config /tmp/config.yaml</pre>
+
+<h3 id="eks-deployment">Deployment</h3>
+
+<pre><span class="cm"># deployment-writer.yaml</span>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parquet-writer-long
+  namespace: data-capture
+  labels:
+    app: parquet-writer
+    capture-mode: long
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: parquet-writer
+  template:
+    metadata:
+      labels:
+        app: parquet-writer
+    spec:
+      containers:
+        - name: writer
+          image: &lt;ecr-account&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com/parquet-writer:latest
+          command: [<span class="st">"/entrypoint.sh"</span>]
+          env:
+            - name: MQTT_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: parquet-writer-secrets
+                  key: MQTT_HOST
+            - name: SITE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: parquet-writer-secrets
+                  key: SITE_ID
+            - name: INFLUX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: parquet-writer-secrets
+                  key: INFLUX_TOKEN
+          volumeMounts:
+            - name: config
+              mountPath: /etc/writer
+              readOnly: true
+            - name: data
+              mountPath: /data
+          ports:
+            - containerPort: 8771
+              name: health
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8771
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8771
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu:    100m
+              memory: 256Mi
+            limits:
+              cpu:    500m
+              memory: 1Gi
+      volumes:
+        - name: config
+          configMap:
+            name: parquet-writer-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: parquet-capture-pvc</pre>
+
+<h3 id="eks-post-processing">Post-processing Jobs</h3>
+
+<p>
+  After the capture window, scale the Deployment to 0 to flush and close all files,
+  then run the conversion Job against the same PVC.
+</p>
+
+<pre><span class="cm"># Stop writer cleanly (SIGTERM triggers WAL flush)</span>
+kubectl scale deployment parquet-writer-long --replicas=0 -n data-capture
+kubectl wait --for=delete pod -l app=parquet-writer -n data-capture --timeout=60s
+
+<span class="cm"># Run conversion Job</span>
+kubectl apply -f job-long-to-wide.yaml</pre>
+
+<pre><span class="cm"># job-long-to-wide.yaml</span>
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: long-to-wide
+  namespace: data-capture
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: converter
+          image: &lt;ecr-account&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com/parquet-tools:latest
+          command: [<span class="st">"python3"</span>, <span class="st">"/scripts/long_to_wide.py"</span>,
+                    <span class="st">"--input"</span>,  <span class="st">"/data/site-capture-long"</span>,
+                    <span class="st">"--output"</span>, <span class="st">"/data/converted"</span>]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu:    500m
+              memory: 2Gi
+            limits:
+              cpu:    2000m
+              memory: 8Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: parquet-capture-pvc</pre>
+
+<h3 id="eks-s3-alt">Alternative: S3 sync (if EFS not available)</h3>
+
+<p>
+  If only EBS (ReadWriteOnce) storage is available, sync parquet output to S3
+  at the end of capture instead of sharing a PVC. Post-processing runs locally
+  or in a Job that reads directly from S3 via DuckDB's <code>httpfs</code>.
+</p>
+
+<pre><span class="cm"># Sync capture output to S3 after scaling down the Deployment</span>
+kubectl run s3-sync --rm -it --image=amazon/aws-cli \
+  --overrides='{"spec":{"volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"parquet-capture-pvc"}}],"containers":[{"name":"s3-sync","image":"amazon/aws-cli","command":["aws","s3","sync","/data/site-capture-long","s3://my-bucket/site-capture-long"],"volumeMounts":[{"name":"data","mountPath":"/data"}]}]}}' \
+  -- aws s3 sync /data/site-capture-long s3://my-bucket/site-capture-long
+
+<span class="cm"># Post-processing with DuckDB reading directly from S3</span>
+SELECT * FROM read_parquet(<span class="st">'s3://my-bucket/site-capture-long/**/*.parquet'</span>,
+                           union_by_name=<span class="kw">true</span>)
+LIMIT 5;</pre>
+
+<h3 id="eks-dockerfile">Dockerfile (reference)</h3>
+
+<pre><span class="cm"># Dockerfile for parquet-writer image
+# Build: docker build -t parquet-writer .
+# Push:  docker tag parquet-writer &lt;ecr&gt;/parquet-writer:latest && docker push ...</span>
+FROM debian:bookworm-slim
+RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends \
+      libssl3 libstdc++6 ca-certificates &amp;&amp; \
+    rm -rf /var/lib/apt/lists/*
+COPY parquet_writer          /usr/local/bin/parquet_writer
+COPY entrypoint.sh           /entrypoint.sh
+RUN chmod +x /usr/local/bin/parquet_writer /entrypoint.sh
+EXPOSE 8771
+ENTRYPOINT [<span class="st">"/entrypoint.sh"</span>]</pre>
+
+<div class="note">
+  <strong>Health check in EKS:</strong> <code>:8771/health</code> returns JSON.
+  The liveness probe kills and restarts the pod if health fails 3 consecutive times
+  (90 s). The WAL ensures no data is lost on pod restart — the writer replays the WAL
+  on next startup before accepting new MQTT messages.
+</div>
+
 <!-- ── PHASE 4: VALIDATION ── -->
 <h2 id="validation">Phase 4 &#8212; Validation Against InfluxDB2.0</h2>
 
@@ -848,12 +1189,27 @@ Algorithm:
   </li>
   <li>
     <div class="chk-status"><span class="tag tag-partial">confirm</span></div>
-    <div class="chk-item">Disk space on site</div>
+    <div class="chk-item">Disk space / PVC size</div>
     <div class="chk-note">
-      Format D raw: ~65 M rows. At 7 bytes/signal-value for wide format, long format is ~6&#215; more per row
-      (one signal vs 63). Estimate ~2&#8211;4 GB for 24 h long-format depending on signal count.
-      Confirm <code>df -h /mnt/data</code> before starting.
+      Format D raw: ~65 M rows. Estimate ~2&#8211;4 GB for 24 h long-format.
+      EKS: PVC set to 50 Gi (headroom for all 4 converted formats).
+      Confirm EFS StorageClass is available in the cluster: <code>kubectl get sc</code>.
     </div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-missing">needed</span></div>
+    <div class="chk-item">Container image in ECR</div>
+    <div class="chk-note">Build from Dockerfile above; push to ECR; update image reference in Deployment YAML</div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-missing">needed</span></div>
+    <div class="chk-item">EKS namespace <code>data-capture</code></div>
+    <div class="chk-note"><code>kubectl create namespace data-capture</code></div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-missing">needed</span></div>
+    <div class="chk-item">EFS StorageClass + PVC</div>
+    <div class="chk-note">EFS CSI driver must be installed; apply <code>pvc-parquet-capture.yaml</code></div>
   </li>
   <li>
     <div class="chk-status"><span class="tag tag-partial">confirm</span></div>
@@ -910,5 +1266,16 @@ Algorithm:
   </tr>
 </table>
 
+<script>
+function toggleTheme() {
+  const light = document.body.classList.toggle('light');
+  document.getElementById('theme-toggle').textContent = light ? '\u2600 dark' : '\u2688 light';
+  localStorage.setItem('theme', light ? 'light' : 'dark');
+}
+if (localStorage.getItem('theme') === 'light') {
+  document.body.classList.add('light');
+  document.getElementById('theme-toggle').textContent = '\u2600 dark';
+}
+</script>
 </body>
 </html>
