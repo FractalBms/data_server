@@ -6,7 +6,8 @@
  *
  * Key design decisions:
  *   - site_id comes from config, not topic (partition directory context)
- *   - dtype_hint drives INT64 vs FLOAT64 value storage; not written as a column
+ *   - dtype_hint is stored as a string label column (long format only); all signal
+ *     values go to row.floats (FLOAT32); only ts uses INT64
  *   - Parquet dictionary encoding handles repeated point_name strings for free
  *   - Lock-free SPSC ring buffer decouples libmosquitto network thread from
  *     JSON parsing; on_message does only a memcpy so FlashMQ never drops at 80k+ msg/s
@@ -191,7 +192,7 @@ struct Config {
     std::string base_path      {"/srv/data/parquet-ems"};
     int         project_id     {0};
     std::vector<std::string> partitions {"site={site_id}", "{year}", "{month}", "{day}"};
-    std::string compression    {"snappy"};
+    std::string compression    {"zstd"};
     int flush_interval_seconds {60};
     int max_messages_per_part  {5000000};
     int max_total_buffer_rows  {2000000};
@@ -362,7 +363,7 @@ Config load_config(const std::string& path) {
 
 struct Row {
     std::map<std::string, int64_t>     ints;
-    std::map<std::string, double>      floats;
+    std::map<std::string, float>       floats;
     std::map<std::string, std::string> strings;
 };
 
@@ -573,15 +574,15 @@ Row parse_payload(const std::string& payload_str, const TopicInfo& topic,
             simdjson::dom::element ve;
             if (val["value"].get(ve) == simdjson::SUCCESS) {
                 double d;
-                if (ve.get(d) == simdjson::SUCCESS) row.floats[k] = d;
-                else { int64_t iv; if (ve.get(iv) == simdjson::SUCCESS) row.floats[k] = static_cast<double>(iv); }
+                if (ve.get(d) == simdjson::SUCCESS) row.floats[k] = static_cast<float>(d);
+                else { int64_t iv; if (ve.get(iv) == simdjson::SUCCESS) row.floats[k] = static_cast<float>(iv); }
             }
         } else {
             double d;
-            if (val.get(d) == simdjson::SUCCESS) row.floats[k] = d;
+            if (val.get(d) == simdjson::SUCCESS) row.floats[k] = static_cast<float>(d);
             else {
                 int64_t iv;
-                if (val.get(iv) == simdjson::SUCCESS) row.floats[k] = static_cast<double>(iv);
+                if (val.get(iv) == simdjson::SUCCESS) row.floats[k] = static_cast<float>(iv);
                 else {
                     std::string_view sv;
                     if (val.get(sv) == simdjson::SUCCESS) row.strings[k] = std::string(sv);
@@ -727,7 +728,7 @@ build_table(const std::vector<Row>& rows) {
     }
     for (const auto& col : float_cols) {
         const std::string lk = (split && col == "value_f") ? "value" : col;
-        arrow::DoubleBuilder b;
+        arrow::FloatBuilder b;
         for (const auto& r : rows) {
             auto it = r.floats.find(lk);
             if (it != r.floats.end()) ARROW_RETURN_NOT_OK(b.Append(it->second));
@@ -735,7 +736,7 @@ build_table(const std::vector<Row>& rows) {
         }
         std::shared_ptr<arrow::Array> arr;
         ARROW_RETURN_NOT_OK(b.Finish(&arr));
-        fields.push_back(arrow::field(col, arrow::float64()));
+        fields.push_back(arrow::field(col, arrow::float32()));
         arrays.push_back(arr);
     }
     for (const auto& col : str_cols) {
@@ -792,7 +793,7 @@ static std::vector<Row> merge_wide_rows(const std::vector<Row>& rows) {
 // at day boundaries (new date → new parent dir → fresh state).
 static std::mutex s_nf_mtx;
 static std::unordered_map<std::string,
-       std::unordered_map<std::string, double>> s_nf_last;
+       std::unordered_map<std::string, float>> s_nf_last;
 static std::unordered_map<std::string, int64_t> s_nf_reset_time; // epoch seconds
 
 arrow::Status flush_partition(const std::string& path,
@@ -838,11 +839,11 @@ arrow::Status flush_partition(const std::string& path,
                     ++it;
                 }
             }
-            // ints (skip ts) — cast to double for threshold comparison
+            // ints (skip ts) — cast to float for threshold comparison
             for (auto it = row.ints.begin(); it != row.ints.end(); ) {
                 if (it->first == "ts") { ++it; continue; }
                 auto lit = last.find(it->first);
-                double dv = static_cast<double>(it->second);
+                float dv = static_cast<float>(it->second);
                 if (lit != last.end() && nf.is_unchanged(it->first, dv, lit->second)) {
                     it = row.ints.erase(it);     // unchanged (within threshold) → null
                 } else {
@@ -938,7 +939,8 @@ static std::vector<Row> wal_replay_file(const std::string& path) {
         int nrows = static_cast<int>(table->num_rows());
 
         std::vector<std::pair<std::string, std::shared_ptr<arrow::Int64Array>>>  int_cols;
-        std::vector<std::pair<std::string, std::shared_ptr<arrow::DoubleArray>>> dbl_cols;
+        std::vector<std::pair<std::string, std::shared_ptr<arrow::FloatArray>>>  flt_cols;
+        std::vector<std::pair<std::string, std::shared_ptr<arrow::DoubleArray>>> dbl_cols; // legacy WAL
         std::vector<std::pair<std::string, std::shared_ptr<arrow::StringArray>>> str_cols;
 
         for (int c = 0; c < ncols; ++c) {
@@ -951,6 +953,8 @@ static std::vector<Row> wal_replay_file(const std::string& path) {
             auto arr = combined.ValueOrDie();
             if (type_id == arrow::Type::INT64)
                 int_cols.emplace_back(name, std::static_pointer_cast<arrow::Int64Array>(arr));
+            else if (type_id == arrow::Type::FLOAT)
+                flt_cols.emplace_back(name, std::static_pointer_cast<arrow::FloatArray>(arr));
             else if (type_id == arrow::Type::DOUBLE)
                 dbl_cols.emplace_back(name, std::static_pointer_cast<arrow::DoubleArray>(arr));
             else if (type_id == arrow::Type::STRING || type_id == arrow::Type::LARGE_STRING)
@@ -962,8 +966,10 @@ static std::vector<Row> wal_replay_file(const std::string& path) {
             Row row;
             for (auto& [name, arr] : int_cols)
                 if (arr && !arr->IsNull(r)) row.ints[name] = arr->Value(r);
-            for (auto& [name, arr] : dbl_cols)
+            for (auto& [name, arr] : flt_cols)
                 if (arr && !arr->IsNull(r)) row.floats[name] = arr->Value(r);
+            for (auto& [name, arr] : dbl_cols)
+                if (arr && !arr->IsNull(r)) row.floats[name] = static_cast<float>(arr->Value(r));
             for (auto& [name, arr] : str_cols)
                 if (arr && !arr->IsNull(r)) row.strings[name] = arr->GetString(r);
             rows.push_back(std::move(row));
@@ -1814,9 +1820,9 @@ static void process_message(const char* topic, const char* payload) {
     if (!g_cfg->site_id.empty() && row.strings.find("site_id") == row.strings.end())
         row.strings["site_id"] = g_cfg->site_id;
 
-    // Integer/boolean values stay as double in row.floats["value"] — EMS integers
-    // (status bits, 0/1 booleans, small counts) are exact in float64, and a single
-    // "value" column avoids COALESCE(value_f, value_i) in every query.
+    // Integer/boolean values stay as float in row.floats["value"] — EMS integers
+    // (status bits, 0/1 booleans, small counts ≤16M) are exact in float32, and a
+    // single "value" column avoids COALESCE(value_f, value_i) in every query.
 
     // String payloads (dtype_hint="string"): rename "value" → "value_str".
     {

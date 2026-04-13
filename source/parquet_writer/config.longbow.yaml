@@ -60,7 +60,7 @@ output:
     - "{year}"
     - "{month}"
     - "{day}"
-  compression: snappy
+  compression: zstd
   flush_interval_seconds: 60
   max_messages_per_part: 5000000
   max_total_buffer_rows: 2000000
