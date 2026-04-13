@@ -128,6 +128,7 @@
       </ul></li>
     <li><a href="#impl">Implementation Steps</a></li>
     <li><a href="#partial">Partial Dataset Queries</a></li>
+    <li><a href="#ducklake">DuckLake — Open Table Format Option</a></li>
     <li><a href="#longspan">Longer Time-Span Queries</a>
       <ul><li><a href="#cpp-changes">parquet_writer.cpp — exact code changes</a></li></ul></li>
     <li><a href="#client">Client-Side Integration</a></li>
@@ -1643,6 +1644,126 @@ request; <code>200 OK</code> otherwise. DuckDB httpfs handles both correctly.</p
 </div>
 </div>
 </details>
+
+<hr>
+
+<!-- ──────────────────────────────────────────────────────────────── -->
+<h2 id="ducklake">7b. DuckLake — Open Table Format Option <span class="badge-todo">EVALUATE</span></h2>
+
+<p><strong>DuckLake</strong> is an open table format introduced by the DuckDB team in early 2025.
+It adds a catalog and versioning layer on top of plain Parquet files, giving the query stack
+ACID transactions, time travel, and schema evolution — without changing the underlying storage format.
+It is DuckDB's answer to Apache Iceberg and Delta Lake, designed for simplicity: the catalog is
+a single DuckDB or SQLite database rather than a directory of JSON metadata files.</p>
+
+<h3>What DuckLake adds</h3>
+<table>
+  <tr><th>Feature</th><th>Description</th><th>Useful here?</th></tr>
+  <tr><td><strong>ACID transactions</strong></td>
+      <td>Safe concurrent reads during compaction — writer and reader never see a torn file</td>
+      <td>Moderate — single writer, but removes the tmp→rename dance</td></tr>
+  <tr><td><strong>Time travel</strong></td>
+      <td><code>SELECT * FROM table AT (TIMESTAMP '2026-04-13 14:32:00')</code></td>
+      <td>High — "what was SysSOC doing at 14:32 yesterday?" becomes trivial</td></tr>
+  <tr><td><strong>Schema evolution</strong></td>
+      <td>Add new signals (columns) without rewriting existing Parquet files</td>
+      <td>High — new device added mid-run just adds columns, old files unchanged</td></tr>
+  <tr><td><strong>Snapshot/version history</strong></td>
+      <td>Every write creates a new version; old versions retained until vacuumed</td>
+      <td>Moderate — useful for audit, not critical for bench data</td></tr>
+  <tr><td><strong>Catalog</strong></td>
+      <td>Single DB file replaces glob patterns in subscriber_api</td>
+      <td>High — eliminates manual path construction in queries</td></tr>
+</table>
+
+<h3>How it changes the current stack</h3>
+
+<p>Currently the pipeline is:</p>
+<pre>
+MQTT → parquet_writer → flush_*.parquet  →  compact_*.parquet
+                                                   ↓
+                          subscriber_api: glob paths + DuckDB read_parquet([...])
+</pre>
+
+<p>With DuckLake:</p>
+<pre>
+MQTT → parquet_writer → flush_*.parquet  ─┐
+                                           ├─→  DuckLake catalog (ducklake.db)
+                        compact_*.parquet ─┘         ↓
+                                          subscriber_api: ATTACH 'ducklake.db';
+                                                         SELECT * FROM bench_data
+                                                         AT (TIMESTAMP '...')
+</pre>
+
+<p>The compactor registers each new file with the catalog rather than renaming it into place.
+The subscriber_api drops its glob/path logic entirely — DuckLake knows which files make up
+the current table and handles union-by-name across schema versions automatically.</p>
+
+<h3>DuckLake vs current approach</h3>
+<table>
+  <tr><th></th><th>Current (manual Parquet)</th><th>DuckLake</th></tr>
+  <tr><td><strong>Query entry point</strong></td>
+      <td><code>read_parquet([glob])</code> — caller builds path list</td>
+      <td><code>SELECT * FROM table</code> — catalog resolves files</td></tr>
+  <tr><td><strong>Time travel</strong></td>
+      <td>Not supported — would need separate snapshot files</td>
+      <td>Built-in — <code>AT (TIMESTAMP ...)</code></td></tr>
+  <tr><td><strong>Schema evolution</strong></td>
+      <td><code>union_by_name=true</code> — works but fragile across renames</td>
+      <td>First-class — catalog tracks column history</td></tr>
+  <tr><td><strong>Compaction</strong></td>
+      <td>Manual: write tmp → rename → delete sources</td>
+      <td>Catalog transaction: register new file, deregister sources atomically</td></tr>
+  <tr><td><strong>Forward-fill (Strategy C)</strong></td>
+      <td>Done in <code>compact_directory()</code></td>
+      <td>Same — DuckLake doesn't change the Parquet content</td></tr>
+  <tr><td><strong>Maturity</strong></td>
+      <td>Production — proven stack</td>
+      <td>New (2025) — evaluate before committing</td></tr>
+  <tr><td><strong>Dependency</strong></td>
+      <td>DuckDB only</td>
+      <td>DuckDB + DuckLake extension</td></tr>
+  <tr><td><strong>Local SSD</strong></td>
+      <td>Full support</td>
+      <td>Full support — catalog is a local file</td></tr>
+  <tr><td><strong>S3 / EFS</strong></td>
+      <td>Via DuckDB httpfs</td>
+      <td>Native — designed for object storage</td></tr>
+</table>
+
+<h3>Integration sketch</h3>
+<pre><span class="cm">-- One-time setup: create the DuckLake catalog and table</span>
+INSTALL ducklake;
+LOAD ducklake;
+ATTACH <span class="str">'ducklake:///mnt/zike/bench/catalog.db'</span> AS bench;
+CREATE TABLE bench.signals (
+    ts        TIMESTAMPTZ,
+    unit_id   VARCHAR,
+    <span class="cm">-- signal columns added automatically as schema evolves</span>
+);
+
+<span class="cm">-- Compactor registers each new compact file (replaces manual rename)</span>
+COPY bench.signals FROM <span class="str">'/mnt/zike/bench/compact_20260413T090000Z.parquet'</span>;
+
+<span class="cm">-- Time travel query</span>
+SELECT <span class="str">"bms/bms_1/SysSOC"</span>
+FROM bench.signals AT (TIMESTAMP <span class="str">'2026-04-13 09:15:00+00'</span>)
+WHERE unit_id = <span class="str">'UC61B5'</span>;
+
+<span class="cm">-- subscriber_api: attach catalog, query normally</span>
+conn.execute(<span class="str">"ATTACH 'ducklake:///mnt/zike/bench/catalog.db' AS bench"</span>)
+conn.execute(<span class="str">"SELECT * FROM bench.signals WHERE ts > ?"</span>, [since])</pre>
+
+<div class="note">
+  <strong>Caveat:</strong> DuckLake was released in early 2025 and is still maturing.
+  Verify extension availability (<code>INSTALL ducklake</code>) and API stability before
+  committing the stack to it. The parquet_writer flush path does not need to change —
+  DuckLake can ingest the existing Parquet files. The main integration point is the
+  compactor (catalog registration) and subscriber_api (ATTACH instead of glob).<br><br>
+  <strong>Recommended evaluation path:</strong> run DuckLake in parallel with the current
+  glob-based stack on the .51 test data. If time travel and schema evolution prove useful,
+  migrate the compactor and subscriber_api. The writer itself is unaffected.
+</div>
 
 <hr>
 
