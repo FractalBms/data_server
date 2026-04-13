@@ -489,6 +489,141 @@ from(bucket: <span class="st">"sbess3"</span>)
   </tbody>
 </table>
 
+
+<!-- ── STORAGE COMPARISON ── -->
+<h2 id="storage-comparison">Live Storage Comparison</h2>
+<p style="font-size:.8rem;color:var(--muted);margin:0 0 10px">
+  Reads live disk stats from bench_server <code>:8780/api/storage</code>.
+  Parquet = all <code>.parquet</code> files under <code>bench-wide/</code>.
+  Influx = TSM&nbsp;+&nbsp;WAL bytes reported by <code>/metrics</code>.
+  Both on the same drive (<code>/mnt/tort-sdi</code>).
+</p>
+<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+  <button class="btn primary" onclick="fetchStorageStats()" style="font-size:.75rem">⟳ Fetch Storage Stats</button>
+  <label style="font-size:.75rem;color:var(--muted)">Host
+    <input id="storage-host" type="text" value="192.168.86.34"
+      style="margin-left:4px;width:130px;background:var(--bg);border:1px solid var(--border);
+      color:var(--text);border-radius:3px;padding:2px 6px;font-size:.78rem">
+  </label>
+  <span id="storage-status" style="font-size:.75rem;color:var(--muted)">—</span>
+</div>
+
+<div id="storage-cards" style="display:none">
+  <div class="card-row" id="storage-card-row"></div>
+  <table class="cmp-table" id="storage-table" style="margin-top:12px">
+    <thead><tr>
+      <th>Metric</th>
+      <th><span class="tag tag-wide">wide-pivot parquet</span></th>
+      <th><span class="tag tag-influx">influx2 / telegraf</span></th>
+    </tr></thead>
+    <tbody id="storage-body"></tbody>
+  </table>
+  <p id="storage-note" style="font-size:.72rem;color:var(--muted);margin-top:6px;max-width:820px"></p>
+</div>
+
+<script>
+(function() {
+
+function fmtBytes(b) {
+  if (b == null) return '—';
+  if (b === 0) return '0 B';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b/1048576).toFixed(2) + ' MB';
+  return (b/1073741824).toFixed(2) + ' GB';
+}
+function fmtNum(n) { return (n == null) ? '—' : Math.round(n).toLocaleString(); }
+function fmtTs(s)  { return s ? s.replace('T',' ').slice(0,19) + ' Z' : '—'; }
+
+window.fetchStorageStats = async function() {
+  const host = (document.getElementById('storage-host') || document.getElementById('host-in')).value.trim() || '192.168.86.34';
+  const stat = document.getElementById('storage-status');
+  stat.style.color = 'var(--muted)';
+  stat.textContent = 'fetching…';
+  try {
+    const r = await fetch('http://' + host + ':8780/api/storage', {cache:'no-cache'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    stat.textContent = 'updated ' + new Date().toLocaleTimeString();
+    stat.style.color = 'var(--green)';
+    renderStorageStats(d);
+  } catch(e) {
+    stat.textContent = 'error: ' + e.message;
+    stat.style.color = 'var(--red)';
+  }
+};
+
+function renderStorageStats(d) {
+  const pq  = d.parquet || {};
+  const inf = d.influx  || {};
+  const el  = document.getElementById('storage-cards');
+  el.style.display = 'block';
+
+  const SIGNALS = 63;  // signals per wide-pivot row
+  const ratio    = (pq.bytes && inf.bytes)  ? (inf.bytes / pq.bytes).toFixed(2)          : null;
+  const bprPq    = (pq.bytes  && pq.rows)   ? (pq.bytes  / pq.rows).toFixed(1)           : null;
+  const bprInf   = (inf.bytes && inf.rows)  ? (inf.bytes / inf.rows).toFixed(1)           : null;
+  const bpsvPq   = (pq.bytes  && pq.rows)   ? (pq.bytes  / (pq.rows * SIGNALS)).toFixed(3) : null;
+  const bpsvInf  = (inf.bytes && inf.rows)  ? (inf.bytes / inf.rows).toFixed(3)           : null;
+
+  // ratio card colour: green = parquet wins (ratio > 1 means influx is bigger)
+  const rFloat   = ratio ? parseFloat(ratio) : 0;
+  const ratioCol = rFloat > 1.5 ? 'var(--green)' : rFloat > 1 ? 'var(--yellow)' : 'var(--red)';
+
+  document.getElementById('storage-card-row').innerHTML =
+    '<div class="card c-orange">' +
+      '<div class="card-label">Parquet disk</div>' +
+      '<div class="card-val">' + fmtBytes(pq.bytes) + '</div>' +
+      '<div class="card-sub">' + fmtNum(pq.files) + ' files · ' + fmtNum(pq.rows) + ' rows</div>' +
+    '</div>' +
+    '<div class="card c-purple">' +
+      '<div class="card-label">InfluxDB2 disk (TSM+WAL)</div>' +
+      '<div class="card-val">' + fmtBytes(inf.bytes) + '</div>' +
+      '<div class="card-sub">' + fmtNum(inf.rows) + ' rows</div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<div class="card-label">Influx / Parquet ratio</div>' +
+      '<div class="card-val" style="color:' + ratioCol + '">' + (ratio ? ratio + '×' : '—') + '</div>' +
+      '<div class="card-sub">influx bytes ÷ parquet bytes</div>' +
+    '</div>' +
+    '<div class="card c-blue">' +
+      '<div class="card-label">Bytes / signal-value</div>' +
+      '<div class="card-val" style="font-size:1rem">' +
+        '<span style="color:var(--orange)">' + (bpsvPq  ? bpsvPq  + ' B' : '—') + '</span>' +
+        ' <span style="color:var(--muted);font-size:.7rem">pq</span>' +
+        ' &nbsp; ' +
+        '<span style="color:var(--purple)">' + (bpsvInf ? bpsvInf + ' B' : '—') + '</span>' +
+        ' <span style="color:var(--muted);font-size:.7rem">inf</span>' +
+      '</div>' +
+      '<div class="card-sub">parquet: bytes ÷ (rows×' + SIGNALS + ' signals)</div>' +
+    '</div>';
+
+  const rows = [
+    ['Disk bytes',           fmtBytes(pq.bytes),                 fmtBytes(inf.bytes)],
+    ['Rows stored',          fmtNum(pq.rows),                    fmtNum(inf.rows)],
+    ['Row ratio (influx/pq)','—',                           ratio ? ratio + '× more rows' : '—'],
+    ['Bytes / row',          bprPq  ? bprPq  + ' B' : '—', bprInf  ? bprInf  + ' B' : '—'],
+    ['Bytes / signal-value', bpsvPq ? bpsvPq + ' B' : '—', bpsvInf ? bpsvInf + ' B' : '—'],
+    ['Files / shards',       fmtNum(pq.files),                   'WAL + TSM shards'],
+    ['First timestamp',      fmtTs(pq.first_ts),                 fmtTs(inf.first_ts)],
+    ['Last  timestamp',      fmtTs(pq.last_ts),                  fmtTs(inf.last_ts)],
+  ];
+
+  document.getElementById('storage-body').innerHTML = rows.map(function(r) {
+    return '<tr><td class="metric">' + r[0] + '</td><td>' + r[1] + '</td><td>' + r[2] + '</td></tr>';
+  }).join('');
+
+  document.getElementById('storage-note').textContent =
+    '“Bytes / signal-value” normalises both systems to the same unit: cost per ' +
+    'single (timestamp, signal, value) triple. Parquet divides total bytes by rows×' + SIGNALS +
+    ' because each wide-pivot row holds ' + SIGNALS + ' signals at once, all compressed together ' +
+    'in the same column stripe. Influx stores each signal as a separate row, so bytes/row = bytes/signal-value directly. ' +
+    'Parquet wins on this metric because correlated float columns compress far better than independent TSM series.';
+}
+
+})();
+</script>
+
 <!-- ── SETUP ── -->
 <details style="margin-bottom:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
   <summary style="padding:10px 14px;cursor:pointer;font-size:1rem;font-weight:600;
