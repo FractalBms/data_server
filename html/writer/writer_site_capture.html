@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Site Capture Plan — Four-Format Parquet vs InfluxDB2</title>
+<style>
+:root {
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#c9d1d9; --muted:#8b949e; --accent:#58a6ff;
+  --green:#3fb950; --yellow:#d29922; --red:#f85149;
+  --orange:#e3b341; --purple:#bc8cff; --teal:#39d353; --pink:#ff7b72;
+  --code-bg:#21262d;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:var(--bg); color:var(--text);
+       font-family:'Segoe UI',system-ui,sans-serif;
+       padding:20px; max-width:1100px; margin:0 auto; }
+.nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+.nav a { color:var(--muted); text-decoration:none; font-size:.82rem;
+         padding:3px 8px; border:1px solid var(--border); border-radius:4px; }
+.nav a:hover { color:var(--accent); border-color:var(--accent); }
+h1 { color:var(--accent); font-size:1.2rem; margin-bottom:4px; }
+.subtitle { color:var(--muted); font-size:.85rem; margin-bottom:28px; }
+h2 { color:var(--orange); font-size:1rem; margin:32px 0 12px;
+     padding-bottom:5px; border-bottom:1px solid var(--border); }
+h3 { color:var(--accent); font-size:.9rem; margin:18px 0 8px; }
+h4 { color:var(--text); font-size:.85rem; margin:14px 0 6px; font-weight:600; }
+p  { font-size:.85rem; line-height:1.65; margin-bottom:10px; color:var(--text); }
+ul, ol { padding-left:1.4em; margin-bottom:10px; }
+li { font-size:.85rem; line-height:1.6; margin-bottom:3px; }
+pre, code { background:var(--code-bg); border-radius:4px;
+            font-family:'Cascadia Code','Fira Code',monospace; }
+pre { border:1px solid var(--border); padding:12px 14px; font-size:.78rem;
+      line-height:1.6; overflow-x:auto; margin:8px 0; }
+code { padding:1px 5px; font-size:.82rem; }
+.kw  { color:var(--pink); }
+.cm  { color:var(--muted); }
+.st  { color:var(--green); }
+.val { color:var(--teal); }
+.nm  { color:var(--orange); }
+.tag { display:inline-block; padding:1px 7px; border-radius:3px; font-size:.7rem;
+       border:1px solid var(--border); color:var(--muted); vertical-align:middle; }
+.tag-long    { border-color:var(--accent); color:var(--accent); }
+.tag-wide    { border-color:var(--orange); color:var(--orange); }
+.tag-influx  { border-color:var(--purple); color:var(--purple); }
+.tag-val     { border-color:var(--green); color:var(--green); }
+.tag-ok      { border-color:var(--green); color:var(--green); background:rgba(63,185,80,.08); }
+.tag-missing { border-color:var(--red); color:var(--red); background:rgba(248,81,73,.08); }
+.tag-partial { border-color:var(--yellow); color:var(--yellow); background:rgba(210,153,34,.08); }
+.note { background:var(--surface); border-left:3px solid var(--accent);
+        padding:10px 14px; border-radius:0 4px 4px 0; margin:10px 0;
+        font-size:.83rem; line-height:1.6; }
+.warn { background:var(--surface); border-left:3px solid var(--yellow);
+        padding:10px 14px; border-radius:0 4px 4px 0; margin:10px 0;
+        font-size:.83rem; line-height:1.6; }
+.card-row { display:flex; gap:12px; margin:12px 0; flex-wrap:wrap; }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:6px;
+        padding:14px 16px; flex:1; min-width:200px; }
+.card-label { font-size:.7rem; text-transform:uppercase; letter-spacing:.08em;
+              color:var(--muted); margin-bottom:4px; }
+.card-val   { font-size:1.3rem; font-weight:700; font-family:monospace; }
+.card-sub   { font-size:.72rem; color:var(--muted); margin-top:2px; line-height:1.5; }
+.c-blue   .card-val { color:var(--accent); }
+.c-green  .card-val { color:var(--green); }
+.c-orange .card-val { color:var(--orange); }
+.c-purple .card-val { color:var(--purple); }
+.c-red    .card-val { color:var(--red); }
+table { width:100%; border-collapse:collapse; font-size:.82rem; margin:10px 0; }
+th { background:var(--surface2); color:var(--muted); font-size:.72rem;
+     text-transform:uppercase; letter-spacing:.06em; padding:7px 12px;
+     border-bottom:1px solid var(--border); text-align:left; }
+td { padding:7px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+tr:last-child td { border-bottom:none; }
+.metric { color:var(--muted); font-size:.78rem; }
+.best  { color:var(--green); font-weight:600; }
+.mid   { color:var(--yellow); }
+.worst { color:var(--red); }
+.steps { display:flex; flex-direction:column; gap:0; margin:12px 0; }
+.step  { display:flex; gap:14px; align-items:flex-start; padding:12px 0;
+         border-bottom:1px solid var(--border); }
+.step:last-child { border-bottom:none; }
+.step-num { width:28px; height:28px; border-radius:50%; background:var(--surface2);
+            border:1px solid var(--accent); color:var(--accent); font-size:.82rem;
+            font-weight:700; display:flex; align-items:center; justify-content:center;
+            flex-shrink:0; margin-top:1px; }
+.step-body { flex:1; }
+.step-title { font-size:.88rem; font-weight:600; color:var(--text); margin-bottom:4px; }
+.step-desc  { font-size:.8rem; color:var(--muted); line-height:1.55; }
+.format-block { background:var(--surface); border:1px solid var(--border);
+                border-radius:6px; padding:16px; margin:10px 0; }
+.format-block h4 { margin-top:0; }
+.format-letter { display:inline-block; width:22px; height:22px; border-radius:4px;
+                 font-size:.78rem; font-weight:700; text-align:center; line-height:22px;
+                 margin-right:6px; }
+.fa { background:rgba(88,166,255,.15); color:var(--accent); }
+.fb { background:rgba(63,185,80,.15); color:var(--green); }
+.fc { background:rgba(227,179,65,.15); color:var(--orange); }
+.fd { background:rgba(188,140,255,.15); color:var(--purple); }
+.checklist { list-style:none; padding:0; }
+.checklist li { display:flex; gap:10px; padding:6px 0;
+                border-bottom:1px solid var(--border); font-size:.83rem; }
+.checklist li:last-child { border-bottom:none; }
+.chk-status { flex-shrink:0; width:70px; }
+.chk-item { flex:1; color:var(--text); }
+.chk-note { flex:2; color:var(--muted); font-size:.78rem; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="../projects.html">&#8592; projects</a>
+  <a href="writer_design.html">writer design</a>
+  <a href="writer_query_design.html">query design</a>
+  <a href="writer_compare_test.html">compare test</a>
+  <a href="writer_commercial_options.html">commercial options</a>
+</div>
+
+<h1>Site Capture Plan &#8212; Four-Format Parquet vs InfluxDB2</h1>
+<p class="subtitle">
+  Real-site data capture test &nbsp;&#183;&nbsp;
+  Long-format parquet baseline + InfluxDB2.0 concurrent capture &nbsp;&#183;&nbsp;
+  Post-capture: 4 format conversions + validation
+</p>
+
+<!-- ── OVERVIEW ── -->
+<h2 id="overview">Overview</h2>
+
+<p>
+  This test captures one day of live site data in parallel to both
+  <strong>long-format parquet</strong> (via <code>parquet_writer</code>) and
+  <strong>InfluxDB2.0</strong> (via the existing on-site Telegraf chain).
+  After the capture window, the raw long-format parquet is converted to
+  four formats and all four are validated against the InfluxDB ground truth.
+</p>
+
+<div class="card-row">
+  <div class="card c-blue">
+    <div class="card-label">Capture window</div>
+    <div class="card-val">24 h</div>
+    <div class="card-sub">minimum; start/stop on the hour for clean alignment</div>
+  </div>
+  <div class="card c-orange">
+    <div class="card-label">Flush interval</div>
+    <div class="card-val">10 min</div>
+    <div class="card-sub">6 parquet files per hour per unit; one row per signal per reading</div>
+  </div>
+  <div class="card c-purple">
+    <div class="card-label">Output formats</div>
+    <div class="card-val">4</div>
+    <div class="card-sub">A: wide+dedupe &nbsp; B: wide+filled &nbsp; C: long+1/min &nbsp; D: long raw</div>
+  </div>
+  <div class="card c-green">
+    <div class="card-label">Validation target</div>
+    <div class="card-val">InfluxDB2</div>
+    <div class="card-sub">existing on-site capture; same Telegraf chain already running</div>
+  </div>
+</div>
+
+<div class="steps">
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="step-title">Deploy <code>parquet_writer</code> on site in long-format mode</div>
+      <div class="step-desc">Config: <code>site_capture_long.yaml</code> (see below). Topic segments renamed to produce
+        schema <code>(ts, value, device_type, device, point_name, unit_id)</code>.
+        10-minute flush. No wide-pivot, no compaction during capture.</div>
+    </div>
+  </div>
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">Confirm InfluxDB2.0 is capturing concurrently</div>
+      <div class="step-desc">Existing Telegraf chain on site subscribes to the same MQTT topics.
+        Record the exact start and stop timestamps. Query InfluxDB at the end to
+        confirm row count and signal coverage.</div>
+    </div>
+  </div>
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <div class="step-title">After 24 h: stop both capture processes and freeze data</div>
+      <div class="step-desc">Stop writer and note exact stop time.
+        Do not delete any flush files. Copy parquet output off site if remote.
+        Snapshot InfluxDB time range for the same window.</div>
+    </div>
+  </div>
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <div class="step-title">Run <code>long_to_wide.py</code> to produce all 4 formats</div>
+      <div class="step-desc">Input: raw long-format parquet directory.
+        Output: four separate output directories, one per format.
+        Script logs row counts, file sizes, and bytes/signal-value for each.</div>
+    </div>
+  </div>
+  <div class="step">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <div class="step-title">Run <code>validate_formats.py</code> against InfluxDB2.0</div>
+      <div class="step-desc">For each of the 4 parquet formats: compare row counts, signal coverage,
+        value samples, time range, and bytes/signal-value.
+        Output HTML comparison report.</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── PHASE 1: CAPTURE CONFIG ── -->
+<h2 id="capture-config">Phase 1 &#8212; On-Site Capture Config</h2>
+
+<h3 id="topic-mapping">Topic segment mapping</h3>
+
+<p>
+  The MQTT topic published by the site follows the same structure as the bench.
+  The writer's <code>topic_segments</code> names become parquet column names, so
+  we rename here to match the target schema exactly:
+</p>
+
+<table>
+  <tr>
+    <th>Topic position</th>
+    <th>Bench segment name</th>
+    <th>Site segment name</th>
+    <th>Action</th>
+    <th>Example value</th>
+  </tr>
+  <tr>
+    <td>0</td>
+    <td><code>source_type</code></td>
+    <td><code>source_type</code></td>
+    <td>Drop</td>
+    <td><code>bench</code></td>
+  </tr>
+  <tr>
+    <td>1</td>
+    <td><code>unit_id</code></td>
+    <td><code>unit_id</code></td>
+    <td>Keep &rarr; column + partition key</td>
+    <td><code>0215D1D8</code></td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><code>device</code> (category)</td>
+    <td><code>device_type</code></td>
+    <td>Keep &rarr; column</td>
+    <td><code>bms</code></td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td><code>instance</code> (specific)</td>
+    <td><code>device</code></td>
+    <td>Keep &rarr; column</td>
+    <td><code>bms_1</code></td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td><code>point_name</code></td>
+    <td><code>point_name</code></td>
+    <td>Keep &rarr; column</td>
+    <td><code>SysSOC</code></td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td><code>dtype_hint</code></td>
+    <td><code>dtype_hint</code></td>
+    <td>Drop</td>
+    <td><code>float</code></td>
+  </tr>
+</table>
+
+<div class="note">
+  <strong>Column order note:</strong> Parquet stores columns in declaration order, but DuckDB
+  and PyArrow queries are column-name-based. The schema <code>(ts, value, device_type, device,
+  point_name, unit_id)</code> is equivalent to the manager's
+  <code>(ts, value, device, device_type, point_name, unit_id)</code> as long as column names
+  match. The writer emits them in the order they are encountered; DuckDB
+  <code>SELECT ts, value, device, device_type, point_name, unit_id</code> returns them in
+  any desired order regardless.
+</div>
+
+<h3 id="long-yaml">site_capture_long.yaml</h3>
+
+<p>
+  This config produces the raw long-format parquet. Key differences from the bench wide config:
+  <code>compound_field_name</code> is absent (disables wide-pivot),
+  <code>time_window_ms</code> is absent (each MQTT message = one row),
+  flush is 10 minutes, compaction is off during capture.
+</p>
+
+<pre><span class="cm"># site_capture_long.yaml
+# Long-format parquet capture for site comparison test.
+# Schema per row: (ts, value, unit_id, device_type, device, point_name)
+# One row per MQTT message. No wide-pivot. No compaction during capture.
+# Adjust mqtt.topic and output.base_path for the target site.</span>
+
+<span class="nm">mqtt</span>:
+  <span class="nm">host</span>:              <span class="st">localhost</span>    <span class="cm"># or site MQTT broker IP</span>
+  <span class="nm">port</span>:              <span class="val">1883</span>
+  <span class="nm">topic</span>:             <span class="st">bench/#</span>      <span class="cm"># adjust to site topic root</span>
+  <span class="nm">client_id</span>:         <span class="st">parquet-writer-long-capture</span>
+  <span class="nm">qos</span>:               <span class="val">0</span>
+  <span class="nm">topic_parser</span>:      <span class="st">positional</span>
+  <span class="nm">topic_segments</span>:
+    - <span class="st">source_type</span>
+    - <span class="st">unit_id</span>
+    - <span class="st">device_type</span>      <span class="cm"># renamed from "device" (bms, pcs, ...)</span>
+    - <span class="st">device</span>           <span class="cm"># renamed from "instance" (bms_1, pcs_1, ...)</span>
+    - <span class="st">point_name</span>
+    - <span class="st">dtype_hint</span>
+  <span class="nm">drop_columns</span>:
+    - <span class="st">source_type</span>
+    - <span class="st">dtype_hint</span>
+  <span class="nm">partition_field</span>:   <span class="st">unit_id</span>
+  <span class="cm"># No compound_field_name → long format (one row per message)
+  # No time_window_ms     → no coalescing, each message keeps its own ts</span>
+
+<span class="nm">output</span>:
+  <span class="nm">base_path</span>:                <span class="st">/mnt/data/site-capture-long</span>   <span class="cm"># adjust to site</span>
+  <span class="nm">partitions</span>:
+    - <span class="st">'{year}'</span>
+    - <span class="st">'{month}'</span>
+    - <span class="st">'{day}'</span>
+  <span class="nm">partition_as_filename_prefix</span>: <span class="kw">true</span>
+  <span class="nm">wide_point_name</span>:          <span class="kw">false</span>
+  <span class="nm">flush_interval_seconds</span>:   <span class="val">600</span>    <span class="cm"># 10 minutes</span>
+  <span class="nm">compression</span>:              <span class="st">snappy</span>
+  <span class="nm">store_mqtt_topic</span>:         <span class="kw">false</span>
+  <span class="nm">store_sample_count</span>:       <span class="kw">false</span>
+  <span class="nm">site_id</span>:                  <span class="st">SITE_A</span>   <span class="cm"># adjust</span>
+  <span class="nm">max_messages_per_part</span>:    <span class="val">5000000</span>
+  <span class="nm">max_total_buffer_rows</span>:    <span class="val">2000000</span>
+
+<span class="nm">compact</span>:
+  <span class="nm">enabled</span>:  <span class="kw">false</span>   <span class="cm"># no compaction during capture; convert in post-processing</span>
+
+<span class="nm">guard</span>:
+  <span class="nm">min_free_gb</span>: <span class="val">2.0</span>
+
+<span class="nm">health</span>:
+  <span class="nm">enabled</span>: <span class="kw">true</span>
+  <span class="nm">port</span>:    <span class="val">8771</span>
+
+<span class="nm">wal</span>:
+  <span class="nm">enabled</span>: <span class="kw">true</span></pre>
+
+<h3 id="capture-commands">Start / stop commands</h3>
+
+<pre><span class="cm"># Start writer in long-format mode</span>
+nohup /path/to/parquet_writer \
+  --config /path/to/site_capture_long.yaml &gt; /tmp/writer_long.log 2&gt;&amp;1 &amp;
+echo &quot;writer PID $! started at $(date -u +%Y-%m-%dT%H:%M:%SZ)&quot;
+
+<span class="cm"># Confirm health</span>
+curl -s http://localhost:8771/health | python3 -m json.tool
+
+<span class="cm"># Stop (record exact stop time for InfluxDB query alignment)</span>
+kill $(pgrep parquet_writer)
+echo &quot;stopped at $(date -u +%Y-%m-%dT%H:%M:%SZ)&quot;</pre>
+
+<h3 id="expected-schema">Expected long-format schema</h3>
+
+<p>
+  After the first flush (10 min), inspect the file to confirm the schema:
+</p>
+
+<pre><span class="cm"># Quick schema check</span>
+python3 -c <span class="st">"
+import pyarrow.parquet as pq, glob, os
+files = sorted(glob.glob('/mnt/data/site-capture-long/**/*.parquet', recursive=True))
+if files:
+    s = pq.read_schema(files[-1])
+    print(len(s.names), 'columns:', s.names)
+    df = pq.read_table(files[-1]).to_pandas().head(3)
+    print(df.to_string())
+"</span></pre>
+
+<p>Expected output:</p>
+<pre>6 columns: ['ts', 'value', 'unit_id', 'device_type', 'device', 'point_name']
+                          ts  value    unit_id device_type  device point_name
+0  2026-04-14 09:00:00+00:00   88.0  0215D1D8         bms   bms_1     SysSOC
+1  2026-04-14 09:00:00+00:00   99.5  0215D1D8         bms   bms_1     SysSOH
+2  2026-04-14 09:00:01+00:00   88.0  0215D1D8         bms   bms_1     SysSOC</pre>
+
+<div class="warn">
+  <strong>Important:</strong> If the site topic has more or fewer segments than
+  <code>bench/{source_type}/{unit_id}/{device_type}/{device}/{point_name}/{dtype_hint}</code>,
+  adjust <code>topic_segments</code> accordingly. Verify with <code>mosquitto_sub -t '#' -C 5</code>
+  before starting the writer.
+</div>
+
+
+<!-- ── PHASE 2: INFLUX ── -->
+<h2 id="influx-baseline">Phase 2 &#8212; InfluxDB2.0 Baseline</h2>
+
+<p>
+  The site's existing Telegraf pipeline already writes to InfluxDB2.0. No new Telegraf config
+  is needed. Before starting the parquet capture, confirm Influx is receiving data and record
+  the start time. The same start/stop timestamps must be used for both the parquet capture
+  window and the InfluxDB query window in validation.
+</p>
+
+<h3 id="influx-check">Pre-capture checks</h3>
+
+<pre><span class="cm"># Confirm Influx is running and receiving data</span>
+curl -s http://localhost:8086/health
+
+<span class="cm"># Quick row count for last 10 min to confirm data is flowing</span>
+influx query --org &lt;org&gt; --token &lt;token&gt; \
+  'from(bucket:"&lt;bucket&gt;") |&gt; range(start:-10m) |&gt; count() |&gt; sum(column:"_value")'
+
+<span class="cm"># Note the current timestamp before starting writer — this is T_START</span>
+date -u +%Y-%m-%dT%H:%M:%SZ</pre>
+
+<h3 id="influx-storage-growth">Storage growth monitoring</h3>
+
+<p>
+  Query InfluxDB's Prometheus <code>/metrics</code> endpoint every 30 minutes during capture to
+  record TSM + WAL growth. No auth required. Log to a CSV:
+</p>
+
+<pre><span class="cm"># poll_influx_bytes.sh — run every 30 min via cron or watch</span>
+echo <span class="st">"$(date -u +%Y-%m-%dT%H:%M:%SZ),$(curl -s http://localhost:8086/metrics \
+  | grep -E 'storage_tsm_files_disk_bytes|storage_wal_size' \
+  | grep -v '^#' \
+  | awk '{sum+=$2} END{print sum}')"</span> &gt;&gt; /tmp/influx_bytes_log.csv</pre>
+
+<p>
+  At end of capture, also record the parquet directory size for the same interval:
+</p>
+
+<pre>du -sb /mnt/data/site-capture-long/</pre>
+
+
+<!-- ── PHASE 3: FOUR FORMATS ── -->
+<h2 id="four-formats">Phase 3 &#8212; Four Output Formats</h2>
+
+<p>
+  All four formats are produced from the same raw long-format parquet by
+  <code>long_to_wide.py</code>. The script uses DuckDB for all transformations.
+</p>
+
+<div class="format-block">
+  <h4><span class="format-letter fa">A</span> Wide format &#8212; data dedupe <span class="tag tag-wide">null_fill_unchanged</span></h4>
+  <p>
+    Long rows are pivoted to wide (one row per timestamp per unit, one column per signal path
+    <code>device_type/device/point_name</code>). Within each flush window, any signal whose
+    value has not changed since the previous flush is stored as <code>NULL</code>.
+    This is equivalent to enabling <code>null_fill_unchanged: true</code> in the writer.
+  </p>
+  <p><strong>Expected result:</strong> ~78&#8211;85% nulls across all rows.
+    Constant signals (SOH = 100.0 over many hours) compress to ~55 bytes per column.
+    Dynamic signals retain every value.</p>
+  <pre><span class="cm">-- Step 1: build the wide pivot with last-value-per-window logic
+-- Signal column name format: device_type || '/' || device || '/' || point_name</span>
+CREATE TABLE wide_raw AS
+PIVOT (
+  SELECT ts, unit_id,
+         device_type || <span class="st">'/'</span> || device || <span class="st">'/'</span> || point_name AS signal,
+         value
+  FROM read_parquet(<span class="st">'raw/**/*.parquet'</span>, union_by_name=<span class="kw">true</span>)
+)
+ON signal USING LAST(value) GROUP BY ts, unit_id ORDER BY unit_id, ts;
+
+<span class="cm">-- Step 2: null out values that match the previous row for the same unit
+-- (simulates null_fill_unchanged — signals only written when they change)</span>
+CREATE TABLE wide_deduped AS
+SELECT ts, unit_id,
+  CASE WHEN sig = LAG(sig) OVER (PARTITION BY unit_id ORDER BY ts) THEN NULL ELSE sig END AS sig
+  <span class="cm">-- ... repeated for each signal column (generated dynamically by script)</span>
+FROM wide_raw;</pre>
+  <p><strong>Output dir:</strong> <code>out/A_wide_deduped/</code></p>
+</div>
+
+<div class="format-block">
+  <h4><span class="format-letter fb">B</span> Wide format &#8212; deduped data reinserted <span class="tag tag-wide">forward-fill</span></h4>
+  <p>
+    Same pivot as Format A, but all NULL cells are forward-filled to restore the last known
+    value. Every row has a complete set of signal values with no nulls.
+    Represents what a query would return after applying <code>COALESCE(val, last_val)</code>.
+  </p>
+  <p><strong>Expected result:</strong> 0% nulls. Largest file size of the four formats.
+    Compresses worst (forward-filled constants repeat identically, so RLE still helps,
+    but the explicit values increase the column chunk size vs true null-fill).</p>
+  <pre><span class="cm">-- Start from Format A (wide_deduped), forward-fill each signal column</span>
+CREATE TABLE wide_filled AS
+SELECT ts, unit_id,
+  LAST_VALUE(sig IGNORE NULLS) OVER (
+    PARTITION BY unit_id ORDER BY ts
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS sig
+  <span class="cm">-- ... repeated for each signal column</span>
+FROM wide_deduped;</pre>
+  <p><strong>Output dir:</strong> <code>out/B_wide_filled/</code></p>
+</div>
+
+<div class="format-block">
+  <h4><span class="format-letter fc">C</span> Long format &#8212; data dedupe (1 write per minute) <span class="tag tag-long">resampled</span></h4>
+  <p>
+    Long schema kept. Rows are binned to 1-minute intervals; within each bin the
+    <code>LAST</code> value is taken for each <code>(unit_id, device_type, device, point_name)</code>
+    combination. For 1 Hz data this reduces row count by ~60&#215;.
+    Equivalent to what the on-site InfluxDB capture does when telegraf sends one value per
+    minute (deduped at source).
+  </p>
+  <p><strong>Expected result:</strong> ~1/60 the rows of Format D.
+    Bytes/signal-value similar to Format D but with far fewer rows.</p>
+  <pre><span class="cm">-- Bin to 1-minute buckets, keep last value per signal</span>
+CREATE TABLE long_deduped AS
+SELECT
+  TIME_BUCKET(INTERVAL <span class="st">'1 minute'</span>, ts) AS ts,
+  unit_id, device_type, device, point_name,
+  LAST(value ORDER BY ts) AS value
+FROM read_parquet(<span class="st">'raw/**/*.parquet'</span>, union_by_name=<span class="kw">true</span>)
+GROUP BY 1, 2, 3, 4, 5
+ORDER BY unit_id, ts;
+
+<span class="cm">-- DuckDB alternative if TIME_BUCKET not available:</span>
+  epoch_ms(ts) / 60000 * 60000 AS ts_bin   <span class="cm">-- floor to minute boundary</span></pre>
+  <p><strong>Output dir:</strong> <code>out/C_long_deduped/</code></p>
+</div>
+
+<div class="format-block">
+  <h4><span class="format-letter fd">D</span> Long format &#8212; un-deduped (raw as captured) <span class="tag tag-long">raw</span></h4>
+  <p>
+    The original raw long-format parquet as written by the writer. Every MQTT message is
+    one row. No transformation. This is the reference input for all other formats.
+  </p>
+  <p><strong>Expected result:</strong> one row per signal per second (1 Hz), 63 signals,
+    N units. For a 24-hour run: <code>24 &#215; 3600 &#215; 63 &#215; N_units</code> rows.</p>
+  <pre><span class="cm">-- No transformation; just re-partition for consistency
+-- (or symlink raw/ to out/D_long_raw/)</span>
+COPY (SELECT * FROM read_parquet(<span class="st">'raw/**/*.parquet'</span>, union_by_name=<span class="kw">true</span>)
+      ORDER BY unit_id, ts)
+TO <span class="st">'out/D_long_raw/'</span> (FORMAT parquet, PARTITION_BY (unit_id), COMPRESSION snappy);</pre>
+  <p><strong>Output dir:</strong> <code>out/D_long_raw/</code></p>
+</div>
+
+<h3 id="format-comparison">Expected size and row-count comparison</h3>
+<p>Values below are estimates for a 24-hour 1-Hz run with 63 signals across 12 units.
+   Fill in actuals after capture.</p>
+
+<table>
+  <tr>
+    <th>Format</th>
+    <th>Rows (est.)</th>
+    <th>Null %</th>
+    <th>Disk (est.)</th>
+    <th>Bytes/signal-value</th>
+    <th>Notes</th>
+  </tr>
+  <tr>
+    <td><span class="format-letter fa">A</span> Wide + dedupe</td>
+    <td>86,400 &#215; 12 units = 1.04 M</td>
+    <td class="best">~78&#8211;85%</td>
+    <td>&#8212; <em>fill in</em></td>
+    <td>&#8212; <em>fill in</em></td>
+    <td>Best compression on constants</td>
+  </tr>
+  <tr>
+    <td><span class="format-letter fb">B</span> Wide + filled</td>
+    <td>86,400 &#215; 12 units = 1.04 M</td>
+    <td>0%</td>
+    <td>&#8212; <em>fill in</em></td>
+    <td>&#8212; <em>fill in</em></td>
+    <td>Largest; easiest to query</td>
+  </tr>
+  <tr>
+    <td><span class="format-letter fc">C</span> Long + 1/min</td>
+    <td>1440 &#215; 63 &#215; 12 = 1.09 M</td>
+    <td>0%</td>
+    <td>&#8212; <em>fill in</em></td>
+    <td>&#8212; <em>fill in</em></td>
+    <td>Smallest; matches InfluxDB best</td>
+  </tr>
+  <tr>
+    <td><span class="format-letter fd">D</span> Long raw</td>
+    <td>86,400 &#215; 63 &#215; 12 = 65.3 M</td>
+    <td>0%</td>
+    <td>&#8212; <em>fill in</em></td>
+    <td>&#8212; <em>fill in</em></td>
+    <td>Reference; largest row count</td>
+  </tr>
+  <tr>
+    <td><span class="tag tag-influx">InfluxDB2</span> baseline</td>
+    <td>86,400 &#215; 63 &#215; 12 = 65.3 M</td>
+    <td>0%</td>
+    <td>&#8212; <em>fill in</em></td>
+    <td>&#8212; <em>fill in</em></td>
+    <td>Ground truth; long/narrow TSM</td>
+  </tr>
+</table>
+
+
+<!-- ── PHASE 4: VALIDATION ── -->
+<h2 id="validation">Phase 4 &#8212; Validation Against InfluxDB2.0</h2>
+
+<p>
+  <code>validate_formats.py</code> fetches the InfluxDB data for the exact capture window
+  (using <code>influx_to_parquet.py</code> as a library), then runs DuckDB comparison
+  queries against each of the four parquet formats.
+</p>
+
+<h3 id="validation-checks">Validation checks per format</h3>
+
+<table>
+  <tr>
+    <th>Check</th>
+    <th>Query approach</th>
+    <th>Pass criterion</th>
+  </tr>
+  <tr>
+    <td><strong>Signal coverage</strong></td>
+    <td>
+      <code>SELECT DISTINCT unit_id, device_type, device, point_name</code>
+      from parquet vs InfluxDB tags
+    </td>
+    <td>Same set of (unit_id, point_name) tuples in both</td>
+  </tr>
+  <tr>
+    <td><strong>Time range</strong></td>
+    <td>
+      <code>MIN(ts)</code> and <code>MAX(ts)</code> from parquet vs InfluxDB
+      <code>first()</code> / <code>last()</code>
+    </td>
+    <td>Both within 1 flush-interval (10 min) of T_START / T_STOP</td>
+  </tr>
+  <tr>
+    <td><strong>Row count per signal</strong></td>
+    <td>
+      <code>COUNT(*) GROUP BY unit_id, point_name</code> in parquet vs InfluxDB
+      <code>count()</code>
+    </td>
+    <td>
+      Format D &#8773; InfluxDB (&#177;1 per flush boundary).<br>
+      Format C &#8773; InfluxDB/60.<br>
+      Formats A/B: rows = unique timestamps (always &#8804; Format D)
+    </td>
+  </tr>
+  <tr>
+    <td><strong>Value accuracy &#8212; spot check</strong></td>
+    <td>
+      Sample 100 random (ts, unit_id, point_name) triples from InfluxDB.
+      Look up same key in each parquet format.
+      Compare values.
+    </td>
+    <td>Absolute difference &lt; 1e&#8722;6 (float precision)</td>
+  </tr>
+  <tr>
+    <td><strong>Value accuracy &#8212; aggregate</strong></td>
+    <td>
+      <code>AVG(value), STDDEV(value), MIN(value), MAX(value)</code>
+      per (unit_id, point_name) in parquet vs InfluxDB
+    </td>
+    <td>AVG within 0.01%, min/max identical</td>
+  </tr>
+  <tr>
+    <td><strong>No phantom signals</strong></td>
+    <td>
+      Signals present in parquet but absent in InfluxDB
+    </td>
+    <td>Set difference = empty</td>
+  </tr>
+  <tr>
+    <td><strong>No dropped signals</strong></td>
+    <td>
+      Signals present in InfluxDB but absent in parquet
+    </td>
+    <td>Set difference = empty</td>
+  </tr>
+  <tr>
+    <td><strong>Bytes / signal-value</strong></td>
+    <td>
+      <code>file_size / (row_count &#215; signal_count)</code> per format vs
+      <code>influx_bytes / influx_row_count</code>
+    </td>
+    <td>Parquet formats &lt; InfluxDB for all formats (expected)</td>
+  </tr>
+</table>
+
+<h3 id="validation-query-examples">Key validation queries</h3>
+
+<pre><span class="cm">-- Signal coverage: find any signal in InfluxDB not in parquet format D</span>
+SELECT influx.unit_id, influx.point_name
+FROM influx_signals influx
+LEFT JOIN (
+  SELECT DISTINCT unit_id, point_name
+  FROM read_parquet(<span class="st">'out/D_long_raw/**/*.parquet'</span>, union_by_name=<span class="kw">true</span>)
+) pq USING (unit_id, point_name)
+WHERE pq.unit_id IS NULL;
+
+<span class="cm">-- Row count agreement (Format D vs InfluxDB, per signal)</span>
+SELECT
+  p.unit_id, p.point_name,
+  p.pq_rows, i.inf_rows,
+  ROUND(100.0 * ABS(p.pq_rows - i.inf_rows) / i.inf_rows, 2) AS diff_pct
+FROM (
+  SELECT unit_id, point_name, COUNT(*) AS pq_rows
+  FROM read_parquet(<span class="st">'out/D_long_raw/**/*.parquet'</span>, union_by_name=<span class="kw">true</span>)
+  GROUP BY 1, 2
+) p
+JOIN (
+  SELECT unit_id, point_name, inf_count AS inf_rows FROM influx_counts
+) i USING (unit_id, point_name)
+ORDER BY diff_pct DESC;
+
+<span class="cm">-- Value accuracy: spot-check 100 random samples from InfluxDB against Format D</span>
+SELECT
+  s.ts, s.unit_id, s.point_name,
+  s.influx_value,
+  p.value AS pq_value,
+  ABS(s.influx_value - p.value) AS delta
+FROM influx_sample s
+JOIN read_parquet(<span class="st">'out/D_long_raw/**/*.parquet'</span>, union_by_name=<span class="kw">true</span>) p
+  ON p.ts = s.ts AND p.unit_id = s.unit_id AND p.point_name = s.point_name
+WHERE delta > 1e-6
+ORDER BY delta DESC;</pre>
+
+
+<!-- ── SCRIPTS TO BUILD ── -->
+<h2 id="scripts-needed">Scripts to Build</h2>
+
+<p>
+  Three scripts are needed and do not yet exist in the repo.
+  The fourth item (site_capture_long.yaml) is a config file shown above.
+</p>
+
+<table>
+  <tr>
+    <th>Script</th>
+    <th>Status</th>
+    <th>Inputs</th>
+    <th>Outputs</th>
+    <th>Reuses</th>
+  </tr>
+  <tr>
+    <td><code>site_capture_long.yaml</code></td>
+    <td><span class="tag tag-ok">defined above</span></td>
+    <td>&#8212;</td>
+    <td><code>site-capture-long/**/*.parquet</code></td>
+    <td>existing <code>parquet_writer</code> binary</td>
+  </tr>
+  <tr>
+    <td><code>long_to_wide.py</code></td>
+    <td><span class="tag tag-missing">not yet written</span></td>
+    <td>raw long parquet dir, output dir</td>
+    <td>4 output dirs (A/B/C/D), size + row stats</td>
+    <td>DuckDB, PyArrow</td>
+  </tr>
+  <tr>
+    <td><code>validate_formats.py</code></td>
+    <td><span class="tag tag-missing">not yet written</span></td>
+    <td>4 output dirs + InfluxDB connection</td>
+    <td>HTML report with pass/fail per check per format</td>
+    <td><code>influx_to_parquet.py</code> (fetch logic), DuckDB</td>
+  </tr>
+  <tr>
+    <td><code>poll_influx_bytes.sh</code></td>
+    <td><span class="tag tag-partial">1-liner above</span></td>
+    <td>runs on cron every 30 min during capture</td>
+    <td><code>/tmp/influx_bytes_log.csv</code></td>
+    <td>curl + awk</td>
+  </tr>
+</table>
+
+<h3 id="long-to-wide-spec">long_to_wide.py &#8212; design spec</h3>
+
+<pre><span class="cm">Usage:
+  python3 long_to_wide.py --input raw/ --output out/ [--units 0215D1D8,...]
+
+Arguments:
+  --input   dir containing raw long-format parquet (all units, all days)
+  --output  output root; subdirs A_wide_deduped/ B_wide_filled/ C_long_deduped/ D_long_raw/
+  --units   optional comma-separated unit_id filter
+  --start   optional start ISO timestamp
+  --stop    optional stop ISO timestamp
+
+Algorithm:
+  1. Load raw via DuckDB read_parquet with union_by_name=true
+  2. Build signal list: SELECT DISTINCT device_type||'/'||device||'/'||point_name
+  3. Generate dynamic PIVOT SQL over signal list  (DuckDB PIVOT clause)
+  4. Format D: COPY raw to out/D with partition_by unit_id
+  5. Format C: bin to 1-min, LAST(value), COPY to out/C
+  6. Format A: PIVOT → wide_raw, then lag-compare to null unchanged values
+  7. Format B: COPY wide_raw to out/B (all values; no null-fill)
+  8. Print stats table: rows / files / bytes / bytes-per-signal-value for each format</span></pre>
+
+<h3 id="validate-spec">validate_formats.py &#8212; design spec</h3>
+
+<pre><span class="cm">Usage:
+  python3 validate_formats.py \
+    --influx-url http://site-host:8086 --token TOKEN --org ORG --bucket BUCKET \
+    --start 2026-04-14T09:00:00Z --stop 2026-04-15T09:00:00Z \
+    --output out/ \
+    --report validation_report.html
+
+Algorithm:
+  1. Fetch InfluxDB data for window via influx_to_parquet.fetch_measurement()
+     → saves as influx_ground_truth.parquet
+  2. For each of the 4 parquet output dirs:
+     a. Signal coverage check (set intersection / difference vs InfluxDB signals)
+     b. Time range check (min/max ts alignment)
+     c. Row count per signal (vs InfluxDB count; expected ratios for each format)
+     d. Value spot-check (100 random samples from InfluxDB → lookup in parquet)
+     e. Value aggregate check (AVG, MIN, MAX per signal vs InfluxDB)
+     f. Bytes/signal-value calculation
+  3. Write HTML report: pass/fail table per format per check
+     + per-format size/rows summary + bytes/signal-value bar chart</span></pre>
+
+
+<!-- ── READINESS CHECKLIST ── -->
+<h2 id="checklist">Readiness Checklist</h2>
+
+<ul class="checklist">
+  <li>
+    <div class="chk-status"><span class="tag tag-ok">ready</span></div>
+    <div class="chk-item"><code>parquet_writer</code> binary on .34</div>
+    <div class="chk-note">Long format mode: omit <code>compound_field_name</code> and <code>time_window_ms</code></div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-missing">needed</span></div>
+    <div class="chk-item"><code>site_capture_long.yaml</code></div>
+    <div class="chk-note">Full config above; copy and adjust <code>mqtt.topic</code> and <code>output.base_path</code> for target site</div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-ok">ready</span></div>
+    <div class="chk-item">InfluxDB2 + Telegraf on site</div>
+    <div class="chk-note">Existing on-site capture chain; confirm it is running and recording the right bucket before starting parquet capture</div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-missing">needed</span></div>
+    <div class="chk-item"><code>long_to_wide.py</code></div>
+    <div class="chk-note">Post-capture conversion; produces all 4 formats from raw long parquet</div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-missing">needed</span></div>
+    <div class="chk-item"><code>validate_formats.py</code></div>
+    <div class="chk-note">Compares each format against InfluxDB2; outputs HTML report</div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-ok">ready</span></div>
+    <div class="chk-item"><code>influx_to_parquet.py</code></div>
+    <div class="chk-note">Already in repo; used by <code>validate_formats.py</code> to fetch InfluxDB data as parquet</div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-ok">ready</span></div>
+    <div class="chk-item">Storage growth monitoring (bytes over time)</div>
+    <div class="chk-note">1-liner cron shown above; logs to <code>/tmp/influx_bytes_log.csv</code>. Parquet bytes from <code>du -sb</code> at same intervals</div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-partial">confirm</span></div>
+    <div class="chk-item">Disk space on site</div>
+    <div class="chk-note">
+      Format D raw: ~65 M rows. At 7 bytes/signal-value for wide format, long format is ~6&#215; more per row
+      (one signal vs 63). Estimate ~2&#8211;4 GB for 24 h long-format depending on signal count.
+      Confirm <code>df -h /mnt/data</code> before starting.
+    </div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-partial">confirm</span></div>
+    <div class="chk-item">MQTT topic structure on site</div>
+    <div class="chk-note">Run <code>mosquitto_sub -t '#' -C 5</code> and count segments. The yaml above assumes 6 segments: source_type/unit_id/device_type/device/point_name/dtype_hint</div>
+  </li>
+  <li>
+    <div class="chk-status"><span class="tag tag-partial">confirm</span></div>
+    <div class="chk-item">InfluxDB query credentials for site</div>
+    <div class="chk-note">Needed for validation: URL, token, org, bucket. Store in <code>~/.influxdb_site.env</code> and source before running <code>validate_formats.py</code></div>
+  </li>
+</ul>
+
+
+<!-- ── OPEN QUESTIONS ── -->
+<h2 id="open-questions">Open Questions</h2>
+
+<table>
+  <tr>
+    <th>#</th>
+    <th>Question</th>
+    <th>Impact</th>
+    <th>Answer / action</th>
+  </tr>
+  <tr>
+    <td>1</td>
+    <td>Does the site MQTT topic use 6 segments matching the bench pattern, or a different structure?</td>
+    <td>Determines <code>topic_segments</code> in <code>site_capture_long.yaml</code></td>
+    <td>Run <code>mosquitto_sub -t '#' -C 5</code> on site before deploying</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>Is there a separate <code>device_type</code> vs <code>device</code> distinction on site, or is it just <code>device</code>?</td>
+    <td>Affects whether the schema has 2 device columns or 1. Manager specified <code>device_type</code> + <code>device</code> separately.</td>
+    <td>Confirm with site data sample</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>Is the site InfluxDB2.0 capture in standard Telegraf schema (measurement/tag/field) or EMS schema?</td>
+    <td><code>influx_to_parquet.py</code> auto-detects; but EMS schema needs <code>--signal-col point_name</code></td>
+    <td>Check <code>influx bucket list</code> and sample a Flux query to confirm _field values</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>What data rate does the site produce? (Hz per signal, number of units)</td>
+    <td>Determines Format D row count and disk space requirements</td>
+    <td>Query InfluxDB: <code>|&gt; range(start:-1m) |&gt; count() |&gt; sum()</code></td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td>Does the site InfluxDB2 use its own retention policy that might drop data before validation runs?</td>
+    <td>Validation must run within the retention window</td>
+    <td><code>influx bucket list</code> to check retention period</td>
+  </tr>
+</table>
+
+</body>
+</html>
