@@ -123,6 +123,7 @@
     <li><a href="#wal-live">WAL-as-Live-Buffer (Local SSD)</a>
       <ul>
         <li><a href="#rle-vs-cov">RLE vs COV null-fill — why both matter</a></li>
+        <li><a href="#forward-fill-strategies">Forward-fill strategies — when and where</a></li>
         <li><a href="#cov-config">Per-point COV null-fill config</a></li>
       </ul></li>
     <li><a href="#impl">Implementation Steps</a></li>
@@ -736,6 +737,98 @@ every row group that contains it. COV null-fill replaces those repeated values w
   <code>null_fill_unchanged: true</code> cuts file size by a further 70–80% and
   makes column scans faster by eliminating page reads for unchanged signals.
 </div>
+
+<h3 id="forward-fill-strategies">Forward-fill strategies — when and where</h3>
+
+<p>COV null-fill writes <code>NULL</code> for unchanged values, which means any reader
+must reconstruct the last known value for a signal across rows. There are three points in
+the pipeline where forward-fill can happen, each with different trade-offs:</p>
+
+<table>
+  <tr><th>Strategy</th><th>Where</th><th>Files</th><th>Query</th><th>Compression</th></tr>
+  <tr><td><strong>A — None</strong></td>
+      <td>Never fill — store NULLs everywhere</td>
+      <td>Smallest — max null pages</td>
+      <td>Needs <code>LAST_VALUE IGNORE NULLS</code></td>
+      <td>Best</td></tr>
+  <tr><td><strong>B — Write-time fill</strong></td>
+      <td>Writer copies last value into every row</td>
+      <td>Self-contained, no NULLs</td>
+      <td>Plain <code>SELECT</code></td>
+      <td>Worst — RLE only, no page skipping</td></tr>
+  <tr><td><strong>C — Compact-time fill</strong> ⭐</td>
+      <td>Compactor forward-fills when merging flush files</td>
+      <td>Flush files: null-filled (small). Compact files: self-contained</td>
+      <td>Plain <code>SELECT</code> on compact files</td>
+      <td>Good — flush files stay compressed; compact adds small overhead</td></tr>
+  <tr><td><strong>D — Query-time fill</strong></td>
+      <td>DuckDB SQL does the fill at read time</td>
+      <td>Always null-filled (smallest)</td>
+      <td>Needs window function in every query</td>
+      <td>Best</td></tr>
+</table>
+
+<h4>Strategy C — compact-time forward-fill (recommended)</h4>
+
+<p>Flush files are written with <code>null_fill_unchanged: true</code> — small, compressed,
+fast to write. When the compactor merges N flush files into a single compact file it
+forward-fills the NULLs across the merge window. The resulting compact file is fully
+self-contained: every signal has a value at every timestamp, no lookback required.</p>
+
+<div class="timeline" style="margin:16px 0;">
+  <div class="tl-seg tl-flushed" style="flex:2">
+    Flush files<br>
+    <small>null-filled, small</small><br>
+    <small>→ compactor reads these</small>
+  </div>
+  <div class="tl-seg" style="flex:0.3;background:#64748b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:1.2em;">⟹</div>
+  <div class="tl-seg" style="flex:2;background:#166534;color:#fff">
+    Compact file<br>
+    <small>forward-filled, self-contained</small><br>
+    <small>plain SELECT works</small>
+  </div>
+</div>
+
+<p>The compactor already reads all flush rows into memory to merge them — forward-fill is
+a single pass over the merged row set before writing, adding negligible cost:</p>
+
+<pre><span class="cm">// compact_directory() — after merge_wide_rows(), before write_parquet_table()</span>
+<span class="cm">// For each column, carry the last non-null value forward.</span>
+<span class="kw">void</span> <span class="fn">forward_fill_rows</span>(std::vector&lt;Row&gt;&amp; rows) {
+    std::unordered_map&lt;std::string, double&gt; last_float;
+    std::unordered_map&lt;std::string, int64_t&gt; last_int;
+    <span class="kw">for</span> (<span class="kw">auto</span>&amp; row : rows) {
+        <span class="kw">for</span> (<span class="kw">auto</span>&amp; [k, v] : last_float)   <span class="cm">// fill missing floats from last known</span>
+            row.floats.emplace(k, v);   <span class="cm">// emplace: only inserts if key absent (null)</span>
+        <span class="kw">for</span> (<span class="kw">auto</span>&amp; [k, v] : row.floats)   <span class="cm">// update last known</span>
+            last_float[k] = v;
+        <span class="kw">for</span> (<span class="kw">auto</span>&amp; [k, v] : last_int)
+            <span class="kw">if</span> (k != <span class="str">"ts"</span>) row.ints.emplace(k, v);
+        <span class="kw">for</span> (<span class="kw">auto</span>&amp; [k, v] : row.ints)
+            <span class="kw">if</span> (k != <span class="str">"ts"</span>) last_int[k] = v;
+    }
+}</pre>
+
+<div class="note">
+  <strong>null_fill_reset_interval no longer needed</strong> when using compact-time fill —
+  the compact file is always self-contained so there is no cross-file null gap to worry about.
+  The reset interval can be set to <code>0</code> (disabled) when this strategy is active.<br><br>
+  <strong>Query compatibility:</strong> plain <code>SELECT * FROM compact_*.parquet</code>
+  works without any window function. Flush files (pre-compaction) still need
+  <code>LAST_VALUE IGNORE NULLS</code> if queried directly — but in normal operation
+  dashboards query compact files only.
+</div>
+
+<h4>Config addition</h4>
+<pre><span class="cm"># parquet_writer.yaml</span>
+null_fill_unchanged: <span class="kw">true</span>          <span class="cm"># flush files: null-fill unchanged columns</span>
+null_fill_reset_interval_seconds: <span class="num">0</span>  <span class="cm"># not needed — compactor forward-fills</span>
+
+compact:
+  enabled: <span class="kw">true</span>
+  forward_fill: <span class="kw">true</span>               <span class="cm"># NEW — forward-fill nulls when merging flush files</span>
+  interval_seconds: <span class="num">300</span>
+  min_files: <span class="num">3</span></pre>
 
 <h3 id="cov-config">Per-point COV null-fill config (<code>NullFillCfg</code>)</h3>
 
