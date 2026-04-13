@@ -121,7 +121,10 @@
     <li><a href="#rolling">Rolling 60s Buffer Design</a></li>
     <li><a href="#duckdb">DuckDB In-Process Query Engine</a></li>
     <li><a href="#wal-live">WAL-as-Live-Buffer (Local SSD)</a>
-      <ul><li><a href="#cov-config">Per-point COV null-fill config</a></li></ul></li>
+      <ul>
+        <li><a href="#rle-vs-cov">RLE vs COV null-fill — why both matter</a></li>
+        <li><a href="#cov-config">Per-point COV null-fill config</a></li>
+      </ul></li>
     <li><a href="#impl">Implementation Steps</a></li>
     <li><a href="#partial">Partial Dataset Queries</a></li>
     <li><a href="#longspan">Longer Time-Span Queries</a>
@@ -684,6 +687,54 @@ output_dir: /mnt/tort-sdi/bench/bench-wide</pre>
   dedicated thread signalled by a condition variable so the parse thread never
   blocks on network I/O. On local SSD this is unnecessary — the rewrite is
   sub-millisecond.
+</div>
+
+<h3 id="rle-vs-cov">RLE vs COV null-fill — why both matter</h3>
+
+<p>Parquet applies <strong>Run-Length Encoding (RLE)</strong> automatically to repeated values within
+a column — no configuration needed. A constant signal stored as
+<code>[23.5, 23.5, 23.5, 23.5, 23.5]</code> is encoded as <code>[23.5 &times; 5]</code>.
+It is tempting to conclude that RLE makes COV null-fill redundant. In the long schema
+(one row per signal per timestamp) that is largely true. In the <strong>wide-pivot schema</strong>
+the two mechanisms are complementary and null-fill adds significant value on top of RLE.</p>
+
+<h4>Why RLE alone is not enough in wide-pivot mode</h4>
+
+<p>In the wide schema every row spans a full timestamp sweep — 63 signal columns, most of
+which are changing at different rates. Even though a constant column like
+<code>bms/SysSOC = 85.0</code> compresses well with RLE, Parquet still writes a page for
+every row group that contains it. COV null-fill replaces those repeated values with
+<code>NULL</code>, which enables an additional level of compression:</p>
+
+<table>
+  <tr><th></th><th>RLE only</th><th>RLE + COV null-fill</th></tr>
+  <tr><td><strong>What is stored</strong></td>
+      <td>Repeated float value, RLE compressed</td>
+      <td>Mostly NULLs — 1-bit validity bitmap, tiny RLE run</td></tr>
+  <tr><td><strong>Page skipping at read time</strong></td>
+      <td>No — Parquet must read all pages to decode values</td>
+      <td>Yes — DuckDB skips null pages entirely during column scan</td></tr>
+  <tr><td><strong>Compression ratio</strong></td>
+      <td>Good — RLE reduces byte count</td>
+      <td>Better — nulls compress more aggressively than repeated floats</td></tr>
+  <tr><td><strong>Forward-fill required at query</strong></td>
+      <td>No</td>
+      <td>Yes — <code>LAST_VALUE IGNORE NULLS</code> or equivalent</td></tr>
+  <tr><td><strong>Observed null_pct (SBESS3 bench)</strong></td>
+      <td>~0% (all values present)</td>
+      <td>~78–85% (dynamic + constant signals)</td></tr>
+</table>
+
+<div class="note">
+  <strong>Page skipping</strong> is the key read-time benefit. A 63-column wide table where
+  50 signals are slow-moving will have most pages flagged all-null after COV fill.
+  DuckDB's Parquet reader skips those pages at the column chunk level — it reads only
+  the pages where the signal actually changed. RLE reduces write size; null-fill reduces
+  both write size <em>and</em> read work.<br><br>
+  <strong>Bottom line:</strong> RLE and COV null-fill are complementary. RLE is free and
+  always on. For wide-pivot tables with mostly slow-moving signals, adding
+  <code>null_fill_unchanged: true</code> cuts file size by a further 70–80% and
+  makes column scans faster by eliminating page reads for unchanged signals.
 </div>
 
 <h3 id="cov-config">Per-point COV null-fill config (<code>NullFillCfg</code>)</h3>
