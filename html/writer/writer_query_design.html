@@ -739,6 +739,73 @@ every row group that contains it. COV null-fill replaces those repeated values w
   makes column scans faster by eliminating page reads for unchanged signals.
 </div>
 
+<h4 id="parquet-columnar-layout">How Parquet stores columns and timestamps</h4>
+
+<p>Parquet is a <strong>columnar</strong> format. All values for the same signal are stored
+adjacent on disk, compressed independently:</p>
+
+<pre>File
+└── Row Group  (default ~128 MB uncompressed)
+    ├── Column chunk: ts           → all N timestamps, delta-encoded then Snappy
+    ├── Column chunk: unit_id      → all N strings, dictionary + RLE
+    ├── Column chunk: bms/…/SysSOC → all N floats, Snappy
+    ├── Column chunk: bms/…/SysSOH → all N × 100.0, dictionary + RLE → ~55 bytes
+    ⋮
+    └── Column chunk: pcs/…/kW   → all N floats, Snappy</pre>
+
+<p>Because all values for the same column are adjacent, RLE and dictionary encoding work
+across the entire row group at once. A constant column
+(<code>SysSOH = 100.0</code> for 1440 rows) compresses to roughly 55&nbsp;bytes regardless
+of row count — the encoding is: <em>dictionary entry 0 = 100.0; RLE: index 0 repeated
+1440 times</em>.</p>
+
+<h4>Timestamp encoding — delta + Snappy</h4>
+
+<p>Timestamps are stored as <code>INT64 TIMESTAMP(MICROS, UTC)</code>.
+Parquet applies <strong>delta encoding</strong> before compression: instead of storing
+absolute epoch values, it stores the first timestamp then the successive differences.
+For a 1&nbsp;Hz signal the deltas are all <code>+1,000,000&nbsp;μs</code> — a run of
+identical small integers that Snappy compresses very efficiently.</p>
+
+<table>
+  <tr><th>Encoding stage</th><th>What happens</th><th>Why</th></tr>
+  <tr>
+    <td>Delta encode</td>
+    <td><code>[T, T+1000, T+2000, …]</code> → <code>[T, +1000, +1000, …]</code></td>
+    <td>Turns large INT64s into tiny repeated integers</td>
+  </tr>
+  <tr>
+    <td>RLE / bit-packing</td>
+    <td>Run of identical delta values → <code>(+1000 × N)</code></td>
+    <td>Further reduces the repeated delta to a single (value, count) pair</td>
+  </tr>
+  <tr>
+    <td>Snappy</td>
+    <td>Byte-level compression of the encoded stream</td>
+    <td>Catches any residual redundancy</td>
+  </tr>
+</table>
+
+<p>Observed on SBESS3 bench (1440 rows, 1&nbsp;Hz, 12 units interleaved):</p>
+
+<pre>ts column:  compressed = 955 B,  uncompressed = 2,268 B  (2.4×)
+            raw INT64 would be: 1440 × 8 = 11,520 B  → 12× overall</pre>
+
+<p>Timestamp compression is slightly worse when multiple units are interleaved in the
+same file (deltas are not perfectly uniform across unit boundaries).
+Partitioning by <code>unit_id</code> — which your config does — puts each unit in its
+own file so all deltas within a file are uniform, improving timestamp compression
+further.</p>
+
+<div class="note">
+  <strong>Practical rule:</strong> in the wide-pivot schema with 64 columns and 1&nbsp;Hz data,
+  constant columns compress to ~55&nbsp;bytes each regardless of row count (the RLE
+  overhead is fixed). Dynamic columns compress at 1.1–1.7×. The timestamp column
+  compresses at ~12× from raw INT64 due to delta + RLE. Overall the wide-pivot file
+  achieves <strong>~7&nbsp;bytes per row</strong> across all 64 columns — about 0.11&nbsp;bytes
+  per signal-value stored.
+</div>
+
 <h3 id="forward-fill-strategies">Forward-fill strategies — when and where</h3>
 
 <p>COV null-fill writes <code>NULL</code> for unchanged values, which means any reader
