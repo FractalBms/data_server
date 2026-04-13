@@ -806,6 +806,77 @@ further.</p>
   per signal-value stored.
 </div>
 
+<h4 id="flush-compact-schema">Flush vs compact schema — why <code>union_by_name=true</code> is the standard read pattern</h4>
+
+<p>The writer produces two kinds of Parquet file in the same output directory:</p>
+
+<table>
+  <tr><th>File type</th><th>Name pattern</th><th>Columns</th><th>Has <code>unit_id</code>?</th></tr>
+  <tr>
+    <td><strong>Flush file</strong></td>
+    <td><code>0215D1D8_20260413T180650Z.parquet</code></td>
+    <td>63 (ts + 62 signals)</td>
+    <td>No — implicit in filename prefix</td>
+  </tr>
+  <tr>
+    <td><strong>Compact file</strong></td>
+    <td><code>compact_20260413T180849Z.parquet</code></td>
+    <td>64 (ts + unit_id + 62 signals)</td>
+    <td>Yes — injected from filename prefix during compaction</td>
+  </tr>
+</table>
+
+<p>The compactor reads the <code>0215D1D8_</code> prefix from each flush filename and adds
+<code>unit_id</code> as column 1 before merging all partitions. Flush files are lean by design —
+the partition key is already encoded in the filename so there is no point writing it per-row until
+compaction produces a multi-unit file.</p>
+
+<p>During a live run, flush files and compact files coexist in the same directory. Any query
+that reads both without schema reconciliation fails with <em>column not found: unit_id</em>.
+The correct pattern is always:</p>
+
+<pre><span class="cm">-- DuckDB: always read with union_by_name=true</span>
+SELECT *
+FROM read_parquet(<span class="st">'/mnt/tort-sdi/bench/bench-wide/**/*.parquet'</span>,
+                  union_by_name=<span class="kw">true</span>)
+WHERE unit_id = <span class="st">'0215D1D8'</span>
+
+<span class="cm">-- flush file rows: unit_id = NULL (not yet compacted)</span>
+<span class="cm">-- compact file rows: unit_id = '0215D1D8'</span>
+<span class="cm">-- compacted-only rows: WHERE unit_id IS NOT NULL</span></pre>
+
+<p><code>union_by_name=true</code> is also the correct approach for <strong>schema evolution</strong>:
+when a new signal appears (new column), older files return <code>NULL</code> for it rather than
+raising an error. Behaviour by change type:</p>
+
+<table>
+  <tr><th>Schema change</th><th>Effect with <code>union_by_name=true</code></th><th>Migration needed?</th></tr>
+  <tr>
+    <td>Add signal (new column)</td>
+    <td>Old files return NULL for new column; new files have values</td>
+    <td class="best">None</td>
+  </tr>
+  <tr>
+    <td>Remove signal</td>
+    <td>Old files return values; new files return NULL</td>
+    <td class="best">None</td>
+  </tr>
+  <tr>
+    <td>Rename signal</td>
+    <td>Old and new name both appear as separate columns; old = NULL in new files, new = NULL in old files</td>
+    <td class="mid">One-off recompaction of old files</td>
+  </tr>
+</table>
+
+<div class="note">
+  <strong>Always use <code>union_by_name=true</code></strong> when querying wide-pivot files.
+  This applies to bench_server, subscriber_api, and all ad-hoc DuckDB or PyArrow queries
+  against the output directory. Without it, any schema mismatch between two files in the
+  glob raises an error. With it, DuckDB fills missing columns with <code>NULL</code> silently.
+</div>
+
+
+
 <h3 id="forward-fill-strategies">Forward-fill strategies — when and where</h3>
 
 <p>COV null-fill writes <code>NULL</code> for unchanged values, which means any reader
@@ -1776,7 +1847,7 @@ the current table and handles union-by-name across schema versions automatically
       <td>Not supported — would need separate snapshot files</td>
       <td>Built-in — <code>AT (TIMESTAMP ...)</code></td></tr>
   <tr><td><strong>Schema evolution</strong></td>
-      <td><code>union_by_name=true</code> — works but fragile across renames</td>
+      <td><code>union_by_name=true</code> — handles column additions and removals; renames need a one-off migration script</td>
       <td>First-class — catalog tracks column history</td></tr>
   <tr><td><strong>Compaction</strong></td>
       <td>Manual: write tmp → rename → delete sources</td>
