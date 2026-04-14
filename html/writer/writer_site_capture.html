@@ -2007,41 +2007,106 @@ kubectl apply -f manifests/ -n data-capture
 <span class="cm"># 6. Watch pods come up</span>
 kubectl get pods -n data-capture -w</pre>
 
+<h3 id="k3s-start">Start / restart procedure</h3>
+
+<p>Run these in order every time you deploy or restart the writer on k3s:</p>
+
+<pre><span class="cm"># 1. Kill any stale port-forwards from a previous session</span>
+pkill -f "kubectl port-forward" ; sleep 1
+
+<span class="cm"># 2. Create namespace (skip if already exists)</span>
+kubectl create namespace data-capture 2>/dev/null || true
+
+<span class="cm"># 3. Create secret (skip if already exists)</span>
+kubectl create secret generic parquet-writer-secrets \
+  --from-literal=MQTT_HOST=mosquitto-svc \
+  --from-literal=SITE_ID=TEST_SITE \
+  -n data-capture 2>/dev/null || true
+
+<span class="cm"># 4. Deploy mosquitto broker</span>
+kubectl run mosquitto \
+  --image=eclipse-mosquitto:2 \
+  --port=1883 \
+  -n data-capture 2>/dev/null || true
+
+kubectl expose pod mosquitto \
+  --port=1883 \
+  --name=mosquitto-svc \
+  -n data-capture 2>/dev/null || true
+
+<span class="cm"># 5. Deploy writer</span>
+kubectl apply -f manifests/pvc.yaml \
+  -f manifests/configmap.yaml \
+  -f manifests/deployment.yaml \
+  -n data-capture
+
+<span class="cm"># 6. Wait for both pods to be Ready</span>
+kubectl get pods -n data-capture -w
+
+<span class="cm"># 7. Open port-forwards (run in background)</span>
+kubectl port-forward -n data-capture pod/mosquitto 1883:1883 &
+kubectl port-forward -n data-capture deployment/parquet-writer-long 8771:8771 &
+sleep 2
+
+<span class="cm"># 8. Verify health</span>
+curl -s http://localhost:8771/health | python3 -m json.tool | grep -E 'status|site_id|msgs'</pre>
+
 <h3 id="k3s-test">Test data flow</h3>
 
-<pre><span class="cm"># Check writer health</span>
-kubectl port-forward -n data-capture svc/mosquitto-svc 8771:8771 &amp;
-curl -s http://localhost:8771/health | python3 -m json.tool | grep -E 'status|seen_topics'
-
-<span class="cm"># Publish test messages</span>
+<pre><span class="cm"># Publish test messages across 3 phases (adds signals dynamically)</span>
 python3 /home/phil/data_server/source/parquet_writer/test_multi_publish.py
 
-<span class="cm"># Check seen_topics grew</span>
+<span class="cm"># Trigger an early flush (writer normally waits flush_interval_seconds)</span>
+kubectl exec -n data-capture \
+  $(kubectl get pod -n data-capture -l app=parquet-writer -o name) \
+  -- kill -HUP 1
+
+<span class="cm"># Check health — msgs_received and seen_topics should be populated</span>
 python3 /home/phil/data_server/source/parquet_writer/get_health.py</pre>
 
 <h3 id="k3s-files">Extract parquet files</h3>
 
-<pre><span class="cm"># Find the pod name</span>
-kubectl get pods -n data-capture -l app=parquet-writer
+<pre><span class="cm"># List parquet files inside the pod</span>
+kubectl exec -n data-capture \
+  $(kubectl get pod -n data-capture -l app=parquet-writer -o name) \
+  -- find /data -name '*.parquet'
 
-<span class="cm"># List files on the PVC</span>
-kubectl exec -n data-capture &lt;pod-name&gt; -- find /data -name '*.parquet'
+<span class="cm"># Copy all files to local machine</span>
+kubectl cp \
+  data-capture/$(kubectl get pod -n data-capture -l app=parquet-writer -o jsonpath='{.items[0].metadata.name}'):/data \
+  ./site-capture-files/
 
-<span class="cm"># Copy files to local machine</span>
-kubectl cp data-capture/&lt;pod-name&gt;:/data ./site-capture-files/
+<span class="cm"># k3s only — go direct to host filesystem (no kubectl needed)</span>
+sudo find /var/lib/rancher/k3s/storage -name '*.parquet'
+sudo cp -r /var/lib/rancher/k3s/storage/pvc-*/  ./site-capture-files/</pre>
 
-<span class="cm"># Or go direct to host filesystem (k3s only)</span>
-sudo ls /var/lib/rancher/k3s/storage/</pre>
+<div class="note">
+  <strong>PVC survives namespace deletion.</strong> When you run
+  <code>kubectl delete namespace data-capture</code> the PVC and its data on the
+  host filesystem are <strong>not</strong> deleted — only the pods and services are removed.
+  The data remains at <code>/var/lib/rancher/k3s/storage/</code> until you explicitly
+  delete the PVC with <code>kubectl delete pvc parquet-capture-pvc</code>.
+</div>
 
 <h3 id="k3s-teardown">Teardown</h3>
 
-<pre><span class="cm"># Delete all resources</span>
+<pre><span class="cm"># Stop port-forwards</span>
+pkill -f "kubectl port-forward"
+
+<span class="cm"># Scale writer to 0 for clean WAL flush before stopping</span>
+kubectl scale deployment parquet-writer-long --replicas=0 -n data-capture
+sleep 5
+
+<span class="cm"># Delete pods and services (PVC data is preserved)</span>
 kubectl delete namespace data-capture
 
-<span class="cm"># Stop k3s (data on host filesystem is preserved)</span>
+<span class="cm"># To also delete the PVC data:</span>
+kubectl delete pvc parquet-capture-pvc -n data-capture  <span class="cm"># run BEFORE deleting namespace</span>
+
+<span class="cm"># Stop k3s service</span>
 sudo systemctl stop k3s
 
-<span class="cm"># Full uninstall</span>
+<span class="cm"># Full uninstall (removes all k3s data including PVCs)</span>
 /usr/local/bin/k3s-uninstall.sh</pre>
 
 <h2 id="eks">EKS Container Deployment</h2>
