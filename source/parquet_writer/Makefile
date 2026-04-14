@@ -157,6 +157,7 @@ DEPLOY_DIR  ?= /home/phil/build/parquet-writer
 image:
 	@echo '--- building Docker image (GIT_HASH=$(GIT_HASH)) ---'
 	docker build --build-arg GIT_HASH=$(GIT_HASH) -t parquet-writer:latest .
+	@docker images parquet-writer
 
 .PHONY: deploy
 
