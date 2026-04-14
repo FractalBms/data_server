@@ -21,15 +21,31 @@ Usage:
   python3 test_multi_publish.py [mqtt_host] [health_host] [unit_id]
   python3 test_multi_publish.py [mqtt_host] [health_host] [unit_id] --format fractal
 """
-import sys, json, time, datetime, urllib.request, urllib.error
+import sys, json, time, datetime, socket, urllib.request, urllib.error, argparse
 import paho.mqtt.client as mqtt
 
-MQTT_HOST   = sys.argv[1] if len(sys.argv) > 1 else 'localhost'
-HEALTH_HOST = sys.argv[2] if len(sys.argv) > 2 else MQTT_HOST
-UNIT        = sys.argv[3] if len(sys.argv) > 3 else '0215D1D8'
+_default_host = socket.gethostname()
+
+ap = argparse.ArgumentParser(
+    description='Publish test MQTT signals to a running parquet_writer in multiple phases.',
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+)
+ap.add_argument('mqtt_host',   nargs='?', default=_default_host,
+                help='MQTT broker host')
+ap.add_argument('health_host', nargs='?', default=None,
+                help='Writer health host (defaults to mqtt_host)')
+ap.add_argument('unit_id',     nargs='?', default='0215D1D8',
+                help='Unit ID used in topic paths')
+ap.add_argument('--format', choices=['bench', 'fractal'], default='bench',
+                help='Topic format to publish')
+args = ap.parse_args()
+
+MQTT_HOST   = args.mqtt_host
+HEALTH_HOST = args.health_host or MQTT_HOST
+UNIT        = args.unit_id
 SITE        = 'SITE_A'
 HEALTH_URL  = f'http://{HEALTH_HOST}:8771/health'
-FMT         = 'fractal' if '--format' in sys.argv and sys.argv[sys.argv.index('--format') + 1] == 'fractal' else 'bench'
+FMT         = args.format
 
 # ── bench phases ───────────────────────────────────────────────────────────────
 # Each signal: (device_type, device, point_name, base_value)
@@ -166,7 +182,10 @@ def publish_fractal_phase(client, phase, sweep_offset):
 
 # Connect
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-client.connect(MQTT_HOST, 1883)
+try:
+    client.connect(MQTT_HOST, 1883)
+except OSError:
+    sys.exit(f'error: cannot connect to MQTT broker at {MQTT_HOST}:1883 — is it running?')
 client.loop_start()
 print(f'connected to MQTT {MQTT_HOST}:1883  health -> {HEALTH_URL}')
 print(f'format: {FMT}\n')
