@@ -107,8 +107,8 @@ help:
 	@echo 'Build:'
 	@echo '  all             check deps then build parquet_writer (default)'
 	@echo '  parquet_writer  compile binary directly'
-	@echo '  clean           remove compiled binaries
-	@echo '  purge           clean + remove /tmp logs and parquet files''
+	@echo '  clean           remove compiled binaries'
+	@echo '  purge           clean + remove /tmp logs and parquet files'
 	@echo '  deps            install apt build dependencies'
 	@echo ''
 	@echo 'Test:'
