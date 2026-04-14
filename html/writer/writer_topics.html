@@ -102,6 +102,7 @@ function toggleTheme(){
   <a href="#parser">&#9654; positional parser</a>
   <a href="#bench">&#9654; bench format</a>
   <a href="#fractal">&#9654; fractal format</a>
+  <a href="#topic-to-dir">&#9654; topic→dir</a>
   <a href="#site-id">&#9654; site_id</a>
   <a href="#subscription">&#9654; subscription</a>
   <a href="#config-ref">&#9654; config reference</a>
@@ -401,6 +402,194 @@ no config change required:</p>
   SITE_A/2026/04/14/...
   SITE_B/2026/04/14/...
   SITE_C/2026/04/14/...</pre>
+
+<!-- ══════════════════════════════════════════════════════ TOPIC → DIR -->
+<h2 id="topic-to-dir">Topic &#8594; Directory Mapping</h2>
+
+<p>Every incoming MQTT message has its topic parsed into fields.
+Those fields drive the output path — the coloured segments below map directly
+to the coloured path components on the right.</p>
+
+<h3>Bench</h3>
+
+<p>One topic depth. <code>unit_id</code> (segment 1) becomes the filename prefix.
+<code>source_type</code> (segment 0) is auto-prepended as the first directory.</p>
+
+<div style="overflow-x:auto; margin:12px 0;">
+<table style="width:auto; border:none;">
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">topic</strong>
+  </td>
+  <td style="border:none; padding:4px 0;">
+    <div class="seg-row" style="margin:0; flex-wrap:nowrap;">
+      <span class="seg seg-drop">bench</span><span class="seg-sep">/</span>
+      <span class="seg seg-key">0215D1D8</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">bms</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">bms_1</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">SysSOC</span><span class="seg-sep">/</span>
+      <span class="seg seg-hint">float</span>
+    </div>
+  </td>
+</tr>
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">path</strong>
+  </td>
+  <td style="border:none; padding:4px 0; font-family:monospace; font-size:.82rem;">
+    /data/site-capture/<span style="color:var(--red); font-weight:600;">bench</span>/2026/04/14/<span style="color:var(--green); font-weight:600;">0215D1D8</span>_20260414T100000Z.parquet
+  </td>
+</tr>
+</table>
+</div>
+
+<div style="font-size:.78rem; color:var(--muted); margin:4px 0 16px 0; line-height:1.8;">
+  <span class="seg seg-drop" style="font-size:.72rem;">bench</span> → first directory &nbsp;
+  <span class="seg seg-key" style="font-size:.72rem;">0215D1D8</span> → filename prefix &nbsp;
+  <span class="seg seg-col" style="font-size:.72rem;">bms / bms_1 / SysSOC</span> → row columns &nbsp;
+  <span class="seg seg-hint" style="font-size:.72rem;">float</span> → dropped
+</div>
+
+<h3>Fractal — 9-seg (unit device signal, ~95% of traffic)</h3>
+
+<div style="overflow-x:auto; margin:12px 0;">
+<table style="width:auto; border:none;">
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">topic</strong>
+  </td>
+  <td style="border:none; padding:4px 0;">
+    <div class="seg-row" style="margin:0; flex-wrap:nowrap;">
+      <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+      <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">unit</span><span class="seg-sep">/</span>
+      <span class="seg seg-key">0215D1D8</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">bms</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">bms_1</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">SysSOC</span><span class="seg-sep">/</span>
+      <span class="seg seg-hint">float</span>
+    </div>
+  </td>
+</tr>
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">path</strong>
+  </td>
+  <td style="border:none; padding:4px 0; font-family:monospace; font-size:.82rem;">
+    /data/site-capture/<span style="color:var(--accent); font-weight:600;">SITE_A</span>/2026/04/14/20260414T100000Z.parquet
+  </td>
+</tr>
+</table>
+</div>
+
+<div style="font-size:.78rem; color:var(--muted); margin:4px 0 16px 0; line-height:1.8;">
+  <span class="seg seg-drop" style="font-size:.72rem;">ems / site / unit</span> → dropped &nbsp;
+  <span class="seg seg-site" style="font-size:.72rem;">SITE_A</span> → first directory &nbsp;
+  <span class="seg seg-key" style="font-size:.72rem;">0215D1D8</span> → row column (unit_id) &nbsp;
+  <span class="seg seg-col" style="font-size:.72rem;">bms / bms_1 / SysSOC</span> → row columns &nbsp;
+  <span class="seg seg-hint" style="font-size:.72rem;">float</span> → dropped
+</div>
+
+<h3>Fractal — 8-seg (unit root, no instance)</h3>
+
+<div style="overflow-x:auto; margin:12px 0;">
+<table style="width:auto; border:none;">
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">topic</strong>
+  </td>
+  <td style="border:none; padding:4px 0;">
+    <div class="seg-row" style="margin:0; flex-wrap:nowrap;">
+      <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+      <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">unit</span><span class="seg-sep">/</span>
+      <span class="seg seg-key">0215D1D8</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">root</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">SystemMode</span><span class="seg-sep">/</span>
+      <span class="seg seg-hint">string</span>
+    </div>
+  </td>
+</tr>
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">path</strong>
+  </td>
+  <td style="border:none; padding:4px 0; font-family:monospace; font-size:.82rem;">
+    /data/site-capture/<span style="color:var(--accent); font-weight:600;">SITE_A</span>/2026/04/14/20260414T100000Z.parquet
+    <span style="color:var(--muted);"> ← same file as 9-seg, instance is null</span>
+  </td>
+</tr>
+</table>
+</div>
+
+<h3>Fractal — 7-seg (site device, no unit)</h3>
+
+<div style="overflow-x:auto; margin:12px 0;">
+<table style="width:auto; border:none;">
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">topic</strong>
+  </td>
+  <td style="border:none; padding:4px 0;">
+    <div class="seg-row" style="margin:0; flex-wrap:nowrap;">
+      <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+      <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">meter</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">meter_1</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">kWh_import</span><span class="seg-sep">/</span>
+      <span class="seg seg-hint">float</span>
+    </div>
+  </td>
+</tr>
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">path</strong>
+  </td>
+  <td style="border:none; padding:4px 0; font-family:monospace; font-size:.82rem;">
+    /data/site-capture/<span style="color:var(--accent); font-weight:600;">SITE_A</span>/2026/04/14/20260414T100000Z.parquet
+    <span style="color:var(--muted);"> ← same file, unit_id is null</span>
+  </td>
+</tr>
+</table>
+</div>
+
+<h3>Fractal — 6-seg (site root, no unit or instance)</h3>
+
+<div style="overflow-x:auto; margin:12px 0;">
+<table style="width:auto; border:none;">
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">topic</strong>
+  </td>
+  <td style="border:none; padding:4px 0;">
+    <div class="seg-row" style="margin:0; flex-wrap:nowrap;">
+      <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+      <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">root</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">SiteAlarm</span><span class="seg-sep">/</span>
+      <span class="seg seg-hint">string</span>
+    </div>
+  </td>
+</tr>
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">path</strong>
+  </td>
+  <td style="border:none; padding:4px 0; font-family:monospace; font-size:.82rem;">
+    /data/site-capture/<span style="color:var(--accent); font-weight:600;">SITE_A</span>/2026/04/14/20260414T100000Z.parquet
+    <span style="color:var(--muted);"> ← same file, unit_id + instance are null</span>
+  </td>
+</tr>
+</table>
+</div>
+
+<div class="note">All four fractal depths land in the <strong>same parquet file</strong> for a given site and day.
+The partition is <code>site_id</code> only — depth differences show up as null columns in individual rows,
+not as separate files or directories.</div>
 
 <!-- ════════════════════════════════════════════════════════════ SITE_ID -->
 <h2 id="site-id">What Happens to site_id</h2>
