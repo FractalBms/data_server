@@ -1,3 +1,4 @@
+.DEFAULT_GOAL := all
 CXX      := g++
 CXXFLAGS := -std=c++20 -O2 -Wall -Wextra
 
@@ -97,9 +98,10 @@ check-deps:
 # Targets
 # --------------------------------------------------------------------------
 
-.PHONY: all clean deps test kpi
+.PHONY: clean deps test kpi
 
-all: check-deps parquet_writer
+all: check-deps
+	$(MAKE) parquet_writer
 
 parquet_writer: parquet_writer.cpp mqtt_ring.h
 	$(CXX) $(ALL_CFLAGS) $(VERSION_FLAGS) parquet_writer.cpp -o $@ $(ALL_LIBS)
