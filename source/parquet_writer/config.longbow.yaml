@@ -56,7 +56,7 @@ output:
   base_path: /data/parquet-longbow
   site_id: ""          # intentionally empty — site_id comes from topic segment 2
   partitions:
-    - "site={site_id}"
+    - "{site_id}"
     - "{year}"
     - "{month}"
     - "{day}"
