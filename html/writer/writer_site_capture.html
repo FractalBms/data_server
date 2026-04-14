@@ -1135,7 +1135,7 @@ UNIT_ID = "0215D1D8"
 for i in range(10):
     ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     for dev_type, dev, point, base_val in SIGNALS:
-        topic   = f"bench/source/{UNIT_ID}/{dev_type}/{dev}/{point}/float"
+        topic   = f"bench/{UNIT_ID}/{dev_type}/{dev}/{point}/float"
         payload = json.dumps({"ts": ts, "value": round(base_val + i * 0.1, 2)})
         client.publish(topic, payload)
     time.sleep(1)
@@ -1683,7 +1683,7 @@ spec:
             httpGet:
               path: /health
               port: 8771
-            initialDelaySeconds: 15
+            initialDelaySeconds: 30  <span class="cm"># health only opens after MQTT connects</span>
             periodSeconds: 30
           resources:
             requests: {cpu: 100m, memory: 256Mi}
@@ -1949,14 +1949,14 @@ spec:
             httpGet:
               path: /health
               port: 8771
-            initialDelaySeconds: 10
+            initialDelaySeconds: 30   # health only opens after MQTT connects
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
               port: 8771
-            initialDelaySeconds: 5
+            initialDelaySeconds: 30
             periodSeconds: 10
           resources:
             requests:
