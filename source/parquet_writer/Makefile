@@ -171,6 +171,15 @@ purge: clean
 	rm -f /tmp/*.parquet
 	@echo "--- removing /tmp bench/test logs ---"
 	rm -f /tmp/bench*.log /tmp/bench-*.log
+	@echo "--- removing parquet files from k3s pod ---"
+	@POD=$$(kubectl get pod -n data-capture -l app=parquet-writer \
+	        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null); \
+	if [ -n "$$POD" ]; then \
+	  kubectl exec -n data-capture $$POD -- \
+	    sh -c 'find /data -name "*.parquet" -delete && echo "pod data cleared"'; \
+	else \
+	  echo "no writer pod found — skipping"; \
+	fi
 	@echo "done"
 
 # --------------------------------------------------------------------------
