@@ -1,0 +1,35 @@
+# site.yaml — site deployment descriptor
+# Feed into generate_eks_manifests.py to produce all Kubernetes YAMLs.
+# One file per site; commit to version control (no secrets — MQTT password goes in site_secrets.yaml).
+
+site:
+  id:          SITE_A                  # injected as site_id column in every row
+  unit_id:     0215D1D8                # partition key — one writer per unit
+  description: "Bench BESS unit 1"    # human label, not used by writer
+
+mqtt:
+  host:        192.168.86.34           # broker address (substituted at pod startup)
+  port:        1883
+  topic_root:  bench                   # subscription: bench/#
+  client_id:   parquet-writer-site-a
+  qos:         0
+  topic_segments: [source_type, unit_id, device_type, device, point_name, dtype_hint]
+  drop_columns:   [source_type, dtype_hint]
+  partition_field: unit_id
+
+capture:
+  format:               long           # long | wide
+  flush_interval_seconds: 600          # 10 min per manager instructions
+  compression:          snappy
+  max_messages_per_part: 5000000
+  max_total_buffer_rows: 2000000
+  compact_enabled:      false          # no compaction during capture
+
+eks:
+  namespace:        data-capture
+  deployment_name:  parquet-writer-long
+  image:            ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/parquet-writer:latest
+  storage_gb:       20
+  storage_class:    gp2
+  health_port:      8771
+  liveness_initial_delay_seconds: 30
