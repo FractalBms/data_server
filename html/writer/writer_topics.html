@@ -364,7 +364,7 @@ patterns are listed first.</p>
   <span class="kw">base_path:</span>  <span class="st">/data/parquet-longbow</span>
   <span class="kw">site_id:</span>    <span class="st">""</span>               <span class="cm"># empty — value comes from topic at runtime</span>
   <span class="kw">partitions:</span>
-    - <span class="st">"site={site_id}"</span>       <span class="cm"># first level groups by site</span>
+    - <span class="st">"{site_id}"</span>            <span class="cm"># first level groups by site</span>
     - <span class="st">"{year}"</span>
     - <span class="st">"{month}"</span>
     - <span class="st">"{day}"</span></pre>
@@ -394,13 +394,13 @@ depth (<code>unit_id</code>, <code>instance</code>) are stored as <code>null</co
 </table>
 
 <h3>Output path</h3>
-<pre>/data/parquet-longbow/site=SITE_A/2026/04/14/20260414T100000Z.parquet</pre>
+<pre>/data/parquet-longbow/SITE_A/2026/04/14/20260414T100000Z.parquet</pre>
 <p>A broker serving multiple sites produces separate directory trees automatically —
 no config change required:</p>
 <pre>/data/parquet-longbow/
-  site=SITE_A/2026/04/14/...
-  site=SITE_B/2026/04/14/...
-  site=SITE_C/2026/04/14/...</pre>
+  SITE_A/2026/04/14/...
+  SITE_B/2026/04/14/...
+  SITE_C/2026/04/14/...</pre>
 
 <!-- ════════════════════════════════════════════════════════════ SITE_ID -->
 <h2 id="site-id">What Happens to site_id</h2>
@@ -437,7 +437,7 @@ ems/site/<span class="st">SITE_A</span>/unit/0215D1D8/bms/...</pre>
     <pre><span class="kw">output:</span>
   <span class="kw">site_id:</span> <span class="st">""</span>           <span class="cm"># populated from topic</span>
   <span class="kw">partitions:</span>
-    - <span class="st">"site={site_id}"</span>  <span class="cm"># groups by site first</span>
+    - <span class="st">"{site_id}"</span>       <span class="cm"># groups by site first</span>
     - <span class="st">"{year}"</span>
     - <span class="st">"{month}"</span>
     - <span class="st">"{day}"</span></pre>
@@ -544,7 +544,7 @@ topics on a shared broker without needing a more specific subscription.</p>
   <span class="kw">base_path:</span>    <span class="st">/data/site-capture</span>
   <span class="kw">site_id:</span>      <span class="st">""</span>
   <span class="kw">partitions:</span>
-    - <span class="st">"site={site_id}"</span>
+    - <span class="st">"{site_id}"</span>
     - <span class="st">"{year}"</span>
     - <span class="st">"{month}"</span>
     - <span class="st">"{day}"</span>
@@ -577,7 +577,7 @@ is embedded in the ConfigMap.</p>
     <td><code>fractal</code></td>
     <td><code>topic: ems/#</code><br><code>topic_patterns: [4 patterns]</code></td>
     <td><code>""</code> (from topic at runtime)</td>
-    <td><code>[site={site_id}, year, month, day]</code></td>
+    <td><code>[{site_id}, year, month, day]</code></td>
   </tr>
 </table>
 

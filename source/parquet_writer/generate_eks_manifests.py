@@ -135,7 +135,7 @@ def _output_block_fractal(cap):
     return f"""\
       base_path:    /data/site-capture
       site_id:      ""
-      partitions:   ['site={{site_id}}', '{{year}}', '{{month}}', '{{day}}']
+      partitions:   ['{{site_id}}', '{{year}}', '{{month}}', '{{day}}']
       flush_interval_seconds: {cap["flush_interval_seconds"]}
       compression:  {cap["compression"]}
       store_mqtt_topic:   false
