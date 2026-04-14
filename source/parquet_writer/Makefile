@@ -154,16 +154,16 @@ DEPLOY_DIR  ?= /home/phil/build/parquet-writer
 
 deploy:
 ifeq ($(DEPLOY_HOST),)
-	@echo '--- building Docker image locally ---'
-	docker build -t parquet-writer:latest $(DEPLOY_DIR)
+	@echo '--- building Docker image from repo (GIT_HASH=$(GIT_HASH)) ---'
+	docker build --build-arg GIT_HASH=$(GIT_HASH) -t parquet-writer:latest .
 	@echo '--- importing into k3s ---'
 	docker save parquet-writer:latest | sudo k3s ctr images import -
 	@echo '--- bouncing pod ---'
 	kubectl rollout restart deployment/parquet-writer-long -n data-capture
 	kubectl rollout status  deployment/parquet-writer-long -n data-capture --timeout=90s
 else
-	@echo '--- syncing source to $(DEPLOY_HOST):$(DEPLOY_DIR) ---'
-	scp parquet_writer.cpp mqtt_ring.h Makefile $(DEPLOY_HOST):$(DEPLOY_DIR)/
+	@echo '--- syncing repo files to $(DEPLOY_HOST):$(DEPLOY_DIR) ---'
+	scp parquet_writer.cpp mqtt_ring.h Makefile Dockerfile entrypoint.sh $(DEPLOY_HOST):$(DEPLOY_DIR)/
 	@echo '--- running redeploy.sh on $(DEPLOY_HOST) ---'
 	ssh -t $(DEPLOY_HOST) "GIT_HASH=$(GIT_HASH) bash $(DEPLOY_DIR)/redeploy.sh"
 endif
