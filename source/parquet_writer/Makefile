@@ -98,7 +98,7 @@ check-deps:
 # Targets
 # --------------------------------------------------------------------------
 
-.PHONY: help clean deps test kpi
+.PHONY: help clean purge deps test kpi
 
 help:
 	@echo ''
@@ -107,7 +107,8 @@ help:
 	@echo 'Build:'
 	@echo '  all             check deps then build parquet_writer (default)'
 	@echo '  parquet_writer  compile binary directly'
-	@echo '  clean           remove compiled binaries'
+	@echo '  clean           remove compiled binaries
+	@echo '  purge           clean + remove /tmp logs and parquet files''
 	@echo '  deps            install apt build dependencies'
 	@echo ''
 	@echo 'Test:'
@@ -162,6 +163,15 @@ deps:
 
 clean:
 	rm -f parquet_writer tests/test_parquet_writer tests/kpi_parquet_writer
+
+purge: clean
+	@echo "--- removing /tmp logs ---"
+	rm -f /tmp/writer.log /tmp/pub.log
+	@echo "--- removing /tmp parquet files ---"
+	rm -f /tmp/*.parquet
+	@echo "--- removing /tmp bench/test logs ---"
+	rm -f /tmp/bench*.log /tmp/bench-*.log
+	@echo "done"
 
 # --------------------------------------------------------------------------
 # Deployment — k3s / local
