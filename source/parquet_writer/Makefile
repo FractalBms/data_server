@@ -98,7 +98,7 @@ check-deps:
 # Targets
 # --------------------------------------------------------------------------
 
-.PHONY: help clean purge deps test kpi test_multi health
+.PHONY: help clean purge deps test kpi test_multi health demo
 
 help:
 	@echo ''
@@ -121,10 +121,12 @@ help:
 	@echo 'Docker / Deploy:'
 	@echo '  configmap       regenerate ConfigMap from site.yaml + apply to k3s'
 	@echo '  image           build Docker image (tags parquet-writer:latest)'
-	@echo '  deploy          build image, import to k3s, bounce pod (local)'
-	@echo '  deploy DEPLOY_HOST=user@host  sync source + redeploy on remote host'
+	@echo '  deploy          apply manifests + restart writer pod (image from registry)'
+	@echo '  deploy NAMESPACE=my-ns  override target namespace (default: data-capture)'
+	@echo '  demo            build image locally, import to k3s, bounce pod (demo only)'
+	@echo '  demo DEPLOY_HOST=user@host  sync source + redeploy on remote host'
 	@echo ''
-	@echo 'Manual deploy (when make deploy needs sudo password):'
+	@echo 'Manual deploy (when make demo needs sudo password):'
 	@echo '  make image'
 	@echo '  docker save parquet-writer:latest -o /tmp/pw-image.tar'
 	@echo '  printf "PASSWORD\\n" | sudo -S k3s ctr images import /tmp/pw-image.tar'
@@ -133,7 +135,8 @@ help:
 	@echo '  kubectl rollout status  deployment/parquet-writer-long -n data-capture --timeout=60s'
 	@echo ''
 	@echo 'Variables:'
-	@echo '  DEPLOY_HOST     remote build host (default: local)'
+	@echo '  NAMESPACE       k8s namespace for deploy target (default: data-capture)'
+	@echo '  DEPLOY_HOST     remote build host for demo target (default: local)'
 	@echo '  DEPLOY_DIR      remote deploy directory (default: /home/phil/build/parquet-writer)'
 	@echo '  GIT_HASH        embedded in binary and /health (default: from git)'
 	@echo '  SITE            site descriptor fed to configmap (default: site.yaml)'
@@ -211,18 +214,12 @@ purge: clean
 # --------------------------------------------------------------------------
 # Deployment — k3s / local
 # --------------------------------------------------------------------------
-# If DEPLOY_HOST is set, syncs source to that host and runs redeploy.sh there.
-# If DEPLOY_HOST is not set, assumes we are already on the build host and
-# runs the docker build + k3s import + kubectl rollout directly.
-#
-# Examples:
-#   make deploy                                     # local build host
-#   make deploy DEPLOY_HOST=phil@192.168.86.51      # remote k3s node
 
 DEPLOY_HOST ?=
 DEPLOY_DIR  ?= /home/phil/build/parquet-writer
+NAMESPACE   ?= data-capture
 
-.PHONY: configmap image deploy
+.PHONY: configmap image deploy demo
 
 # Regenerate and apply the k3s ConfigMap from site.yaml
 # Usage: make configmap [SITE=site.yaml]
@@ -234,26 +231,37 @@ configmap:
 	@echo '--- applying configmap to k3s ---'
 	kubectl apply -f manifests/configmap.yaml
 	@echo '--- restarting writer pod ---'
-	kubectl rollout restart deployment/parquet-writer-long -n data-capture
-	kubectl rollout status  deployment/parquet-writer-long -n data-capture --timeout=60s
-
+	kubectl rollout restart deployment/parquet-writer-long -n $(NAMESPACE)
+	kubectl rollout status  deployment/parquet-writer-long -n $(NAMESPACE) --timeout=60s
 
 image:
 	@echo '--- building Docker image (GIT_HASH=$(GIT_HASH)) ---'
 	docker build --build-arg GIT_HASH=$(GIT_HASH) -t parquet-writer:latest .
 	@docker images parquet-writer
 
-.PHONY: deploy
-
+# deploy — production path: image already in registry, just apply manifests + bounce pod
 deploy:
+	@echo '--- applying manifests to namespace $(NAMESPACE) ---'
+	kubectl apply -k manifests/
+	@echo '--- restarting writer pod ---'
+	kubectl rollout restart deployment/parquet-writer-long -n $(NAMESPACE)
+	kubectl rollout status  deployment/parquet-writer-long -n $(NAMESPACE) --timeout=90s
+
+# demo — local dev path: build image, import to k3s, bounce pod
+# If DEPLOY_HOST is set, syncs source to that host and runs redeploy.sh there.
+#
+# Examples:
+#   make demo                                     # local build host
+#   make demo DEPLOY_HOST=phil@192.168.86.51      # remote k3s node
+demo:
 ifeq ($(DEPLOY_HOST),)
 	@echo '--- building Docker image from repo (GIT_HASH=$(GIT_HASH)) ---'
 	docker build --build-arg GIT_HASH=$(GIT_HASH) -t parquet-writer:latest .
 	@echo '--- importing into k3s ---'
 	docker save parquet-writer:latest | sudo k3s ctr images import -
 	@echo '--- bouncing pod ---'
-	kubectl rollout restart deployment/parquet-writer-long -n data-capture
-	kubectl rollout status  deployment/parquet-writer-long -n data-capture --timeout=90s
+	kubectl rollout restart deployment/parquet-writer-long -n $(NAMESPACE)
+	kubectl rollout status  deployment/parquet-writer-long -n $(NAMESPACE) --timeout=90s
 else
 	@echo '--- syncing repo files to $(DEPLOY_HOST):$(DEPLOY_DIR) ---'
 	scp parquet_writer.cpp mqtt_ring.h Makefile Dockerfile entrypoint.sh $(DEPLOY_HOST):$(DEPLOY_DIR)/
