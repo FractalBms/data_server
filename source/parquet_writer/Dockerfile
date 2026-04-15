@@ -13,6 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends       wget ca-certificates &&     wget -q https://apache.jfrog.io/artifactory/arrow/ubuntu/apache-arrow-apt-source-latest-jammy.deb &&     apt-get install -y ./apache-arrow-apt-source-latest-jammy.deb &&     apt-get update &&     apt-get install -y --no-install-recommends       libparquet2300 libmosquitto1 libyaml-cpp0.7 libsimdjson9 &&     rm -rf /var/lib/apt/lists/* /tmp/*.deb
 COPY --from=builder /build/parquet_writer /usr/local/bin/parquet_writer
 COPY entrypoint.sh /entrypoint.sh
+COPY README.k3s.md /README.k3s.md
 RUN chmod +x /entrypoint.sh
 # Default MQTT broker — overridden at runtime by the MQTT_HOST secret
 ARG DEFAULT_MQTT_HOST=localhost
