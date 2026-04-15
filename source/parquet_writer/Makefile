@@ -122,7 +122,6 @@ help:
 	@echo '  configmap       regenerate ConfigMap from site.yaml + apply to k3s'
 	@echo '  image           build Docker image (tags parquet-writer:latest)'
 	@echo '  deploy          apply manifests + restart writer pod (image from registry)'
-	@echo '  deploy NAMESPACE=my-ns  override target namespace (default: data-capture)'
 	@echo '  demo            build image locally, import to k3s, bounce pod (demo only)'
 	@echo '  demo DEPLOY_HOST=user@host  sync source + redeploy on remote host'
 	@echo ''
@@ -135,7 +134,6 @@ help:
 	@echo '  kubectl rollout status  deployment/parquet-writer-long -n data-capture --timeout=60s'
 	@echo ''
 	@echo 'Variables:'
-	@echo '  NAMESPACE       k8s namespace for deploy target (default: data-capture)'
 	@echo '  DEPLOY_HOST     remote build host for demo target (default: local)'
 	@echo '  DEPLOY_DIR      remote deploy directory (default: /home/phil/build/parquet-writer)'
 	@echo '  GIT_HASH        embedded in binary and /health (default: from git)'
@@ -217,7 +215,9 @@ purge: clean
 
 DEPLOY_HOST ?=
 DEPLOY_DIR  ?= /home/phil/build/parquet-writer
-NAMESPACE   ?= data-capture
+
+# Namespace is read from the generated manifests (set in site.yaml → make configmap)
+NS = $(shell grep 'namespace:' manifests/deployment.yaml 2>/dev/null | head -1 | awk '{print $$2}')
 
 .PHONY: configmap image deploy demo
 
@@ -231,8 +231,8 @@ configmap:
 	@echo '--- applying configmap to k3s ---'
 	kubectl apply -f manifests/configmap.yaml
 	@echo '--- restarting writer pod ---'
-	kubectl rollout restart deployment/parquet-writer-long -n $(NAMESPACE)
-	kubectl rollout status  deployment/parquet-writer-long -n $(NAMESPACE) --timeout=60s
+	kubectl rollout restart deployment/parquet-writer-long -n $(NS)
+	kubectl rollout status  deployment/parquet-writer-long -n $(NS) --timeout=60s
 
 image:
 	@echo '--- building Docker image (GIT_HASH=$(GIT_HASH)) ---'
@@ -241,11 +241,11 @@ image:
 
 # deploy — production path: image already in registry, just apply manifests + bounce pod
 deploy:
-	@echo '--- applying manifests to namespace $(NAMESPACE) ---'
+	@echo '--- applying manifests (namespace: $(NS)) ---'
 	kubectl apply -k manifests/
 	@echo '--- restarting writer pod ---'
-	kubectl rollout restart deployment/parquet-writer-long -n $(NAMESPACE)
-	kubectl rollout status  deployment/parquet-writer-long -n $(NAMESPACE) --timeout=90s
+	kubectl rollout restart deployment/parquet-writer-long -n $(NS)
+	kubectl rollout status  deployment/parquet-writer-long -n $(NS) --timeout=90s
 
 # demo — local dev path: build image, import to k3s, bounce pod
 # If DEPLOY_HOST is set, syncs source to that host and runs redeploy.sh there.
@@ -260,8 +260,8 @@ ifeq ($(DEPLOY_HOST),)
 	@echo '--- importing into k3s ---'
 	docker save parquet-writer:latest | sudo k3s ctr images import -
 	@echo '--- bouncing pod ---'
-	kubectl rollout restart deployment/parquet-writer-long -n $(NAMESPACE)
-	kubectl rollout status  deployment/parquet-writer-long -n $(NAMESPACE) --timeout=90s
+	kubectl rollout restart deployment/parquet-writer-long -n $(NS)
+	kubectl rollout status  deployment/parquet-writer-long -n $(NS) --timeout=90s
 else
 	@echo '--- syncing repo files to $(DEPLOY_HOST):$(DEPLOY_DIR) ---'
 	scp parquet_writer.cpp mqtt_ring.h Makefile Dockerfile entrypoint.sh $(DEPLOY_HOST):$(DEPLOY_DIR)/
