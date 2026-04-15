@@ -98,7 +98,7 @@ check-deps:
 # Targets
 # --------------------------------------------------------------------------
 
-.PHONY: help clean purge deps test kpi test_multi
+.PHONY: help clean purge deps test kpi test_multi health
 
 help:
 	@echo ''
@@ -115,6 +115,7 @@ help:
 	@echo '  test            build and run unit tests'
 	@echo '  test_multi      publish multi-phase MQTT test (fractal by default)'
 	@echo '  test_multi FORMAT=bench HOST=192.168.86.34  override format/host'
+	@echo '  health          curl /health | jq  (uses HOST variable)'
 	@echo '  kpi             build and run KPI/benchmark tests'
 	@echo ''
 	@echo 'Docker / Deploy:'
@@ -155,6 +156,10 @@ HOST   ?= $(shell hostname)
 
 test_multi:
 	python3 test_multi_publish.py $(HOST) $(HOST) --format $(FORMAT)
+
+health:
+	curl -s http://$(HOST):8771/health | jq
+
 
 
 # Install missing dev packages (requires sudo)
