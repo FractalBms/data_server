@@ -5,7 +5,7 @@ metadata:
   namespace: data-capture
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: gp2
+  storageClassName: local-path
   resources:
     requests:
       storage: 20Gi

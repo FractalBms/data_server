@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parquet-query
+  namespace: data-capture
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+  selector:
+    matchLabels:
+      app: parquet-query
+  template:
+    metadata:
+      labels:
+        app: parquet-query
+    spec:
+      containers:
+        - name: query
+          image: parquet-query:latest
+          imagePullPolicy: Never
+          env:
+            - name: DATA_PATH
+              value: /data/site-capture
+            - name: QUERY_PORT
+              value: "8772"
+          ports:
+            - containerPort: 8772
+              hostPort: 8772
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8772
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: parquet-capture-pvc

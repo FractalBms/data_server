@@ -87,7 +87,18 @@ def write(path, text):
         f.write(text)
     print(f"  wrote {path}")
 
+def _volume_data_block(cap):
+    """Return the 'data' volume stanza for the deployment.
+    Uses hostPath if capture.host_path is set, otherwise PVC."""
+    host_path = cap.get("host_path")
+    if host_path:
+        return f"          hostPath:\n            path: {host_path}\n            type: DirectoryOrCreate"
+    return "          persistentVolumeClaim:\n            claimName: parquet-capture-pvc"
+
 def pvc_yaml(s):
+    """Returns PVC yaml, or None if capture.host_path is set (hostPath used instead)."""
+    if s["capture"].get("host_path"):
+        return None
     eks = s["eks"]
     return f"""apiVersion: v1
 kind: PersistentVolumeClaim
@@ -123,8 +134,9 @@ def _mqtt_block_fractal(mqtt):
 
 def _output_block_bench(cap, wide):
     """Output block for bench / simple flat topic format."""
+    base_path = cap.get("base_path", "/data/site-capture")
     return f"""\
-      base_path:    /data/site-capture
+      base_path:    {base_path}
       partitions:   ['{{year}}', '{{month}}', '{{day}}']
       partition_as_filename_prefix: true
       wide_point_name: {wide}
@@ -137,8 +149,9 @@ def _output_block_bench(cap, wide):
 
 def _output_block_fractal(cap):
     """Output block for Fractal format."""
+    base_path = cap.get("base_path", "/data/site-capture")
     return f"""\
-      base_path:    /data/site-capture
+      base_path:    {base_path}
       partitions:   ['{{year}}', '{{month}}', '{{day}}']
       partition_as_filename_prefix: true
       wide_point_name: false
@@ -257,15 +270,16 @@ spec:
           configMap:
             name: parquet-writer-config
         - name: data
-          persistentVolumeClaim:
-            claimName: parquet-capture-pvc
+{_volume_data_block(s["capture"])}
 """
 
 def query_deployment_yaml(s, image):
     """Optional DuckDB query pod — only generated when eks.query_port is set."""
-    eks   = s["eks"]
-    ns    = eks["namespace"]
-    port  = eks["query_port"]
+    eks       = s["eks"]
+    cap       = s["capture"]
+    ns        = eks["namespace"]
+    port      = eks["query_port"]
+    base_path = cap.get("base_path", "/data/site-capture")
     is_local    = str(eks.get("account_id", "")).lower() in ("local", "k3s", "")
     pull_policy = "Never" if is_local else "Always"
     return f"""apiVersion: apps/v1
@@ -291,7 +305,7 @@ spec:
           imagePullPolicy: {pull_policy}
           env:
             - name: DATA_PATH
-              value: /data/site-capture
+              value: {base_path}
             - name: QUERY_PORT
               value: "{port}"
           ports:
@@ -314,7 +328,10 @@ spec:
 """
 
 def kustomization_yaml(s):
-    resources = ["  - pvc.yaml", "  - configmap.yaml", "  - deployment.yaml"]
+    resources = []
+    if not s["capture"].get("host_path"):
+        resources.append("  - pvc.yaml")
+    resources += ["  - configmap.yaml", "  - deployment.yaml"]
     if s["eks"].get("query_port"):
         resources.append("  - query-deployment.yaml")
     return "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n" \
@@ -334,7 +351,11 @@ if __name__ == "__main__":
     image     = resolve_image(eks)
     print(f"Generating manifests for site={s['site']['id']}  topic_format={topic_fmt}")
     print(f"  writer image: {image}")
-    write(f"{output_dir}/pvc.yaml",           pvc_yaml(s))
+    pvc = pvc_yaml(s)
+    if pvc:
+        write(f"{output_dir}/pvc.yaml", pvc)
+    else:
+        print(f"  pvc.yaml:     skipped (using hostPath: {s['capture']['host_path']})")
     write(f"{output_dir}/configmap.yaml",     configmap_yaml(s))
     write(f"{output_dir}/deployment.yaml",    deployment_yaml(s, image))
 

@@ -4,3 +4,4 @@ resources:
   - pvc.yaml
   - configmap.yaml
   - deployment.yaml
+  - query-deployment.yaml
