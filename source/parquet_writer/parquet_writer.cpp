@@ -1855,12 +1855,6 @@ static void process_message(const char* topic, const char* payload) {
         row.strings["point_name"] = std::move(compound);
     }
 
-    for (const auto& col : g_cfg->drop_columns) {
-        row.strings.erase(col);
-        row.ints.erase(col);
-        row.floats.erase(col);
-    }
-
     // Apply config site_id only if topic parsing did not already provide one.
     if (!g_cfg->site_id.empty() && row.strings.find("site_id") == row.strings.end())
         row.strings["site_id"] = g_cfg->site_id;
@@ -1895,6 +1889,14 @@ static void process_message(const char* topic, const char* payload) {
             auto iit = row.ints.find(g_cfg->partition_field);
             if (iit != row.ints.end()) pval = std::to_string(iit->second);
         }
+    }
+
+    // drop_columns: applied after partition value captured so partition_field
+    // can be used for filename prefix even when listed in drop_columns.
+    for (const auto& col : g_cfg->drop_columns) {
+        row.strings.erase(col);
+        row.ints.erase(col);
+        row.floats.erase(col);
     }
 
     // wide_point_name: drop site_id and project_id after partition key captured.
