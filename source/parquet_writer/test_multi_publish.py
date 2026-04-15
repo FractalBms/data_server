@@ -20,11 +20,13 @@ After each phase, queries /health to show seen_topics growing.
 Usage:
   python3 test_multi_publish.py [mqtt_host] [health_host] [unit_id]
   python3 test_multi_publish.py [mqtt_host] [health_host] [unit_id] --format fractal
+
+  export WRITER_HOST=10.0.1.42             # set once, all tools use it
 """
-import sys, json, time, datetime, socket, urllib.request, urllib.error, argparse
+import sys, os, json, time, datetime, socket, urllib.request, urllib.error, argparse
 import paho.mqtt.client as mqtt
 
-_default_host = socket.gethostname()
+_default_host = os.environ.get('WRITER_HOST', socket.gethostname())
 
 ap = argparse.ArgumentParser(
     description='Publish test MQTT signals to a running parquet_writer in multiple phases.',

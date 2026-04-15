@@ -3,14 +3,17 @@
 show_health.py — display parquet_writer /health endpoint
 
 Usage:
-  python3 show_health.py                   # default host (current machine)
+  python3 show_health.py                   # default: $WRITER_HOST or current machine
   python3 show_health.py 192.168.86.51
   python3 show_health.py 192.168.86.51 8771
+
+  export WRITER_HOST=10.0.1.42             # set once, all tools use it
 """
 
-import sys, json, urllib.request, urllib.error, socket
+import sys, os, json, urllib.request, urllib.error, socket
 
-host = sys.argv[1] if len(sys.argv) > 1 else socket.gethostname()
+_default_host = os.environ.get('WRITER_HOST', socket.gethostname())
+host = sys.argv[1] if len(sys.argv) > 1 else _default_host
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 8771
 url  = f'http://{host}:{port}/health'
 
