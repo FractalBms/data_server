@@ -78,12 +78,16 @@ def pivot_table(t, filters):
     sig_cols = []
 
     for r in rows_raw:
-        key = (r.get('ts'), r.get('site_id', ''))
+        site = r.get('site_id') or ''
+        key = (r.get('ts'), site)
         sig = make_sig_name(r)
         val = r.get('value') if r.get('value') is not None else r.get('value_str')
 
         if key not in pivoted:
-            pivoted[key] = {'ts': r.get('ts'), 'site_id': r.get('site_id', '')}
+            row_base = {'ts': r.get('ts')}
+            if site:
+                row_base['site_id'] = site
+            pivoted[key] = row_base
         pivoted[key][sig] = val
 
         if sig not in sig_cols:
@@ -108,8 +112,9 @@ def dump_wide(path, max_rows, filters):
     print(f'\n=== {name}  ({total} wide rows total, showing {shown}) ===')
     print(f'    signals ({len(sig_cols)}): {sig_cols}\n')
 
-    # display columns: ts, site_id, then signals
-    display_cols = ['ts', 'site_id'] + sig_cols
+    # display columns: ts, site_id (only if present), then signals
+    has_site = any(r.get('site_id') for r in rows)
+    display_cols = ['ts'] + (['site_id'] if has_site else []) + sig_cols
 
     # compute widths
     def fmt(v):
