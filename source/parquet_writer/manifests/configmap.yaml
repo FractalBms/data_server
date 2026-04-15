@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: parquet-writer-config
+  namespace: data-capture
+data:
+  config.yaml: |
+    mqtt:
+      host:         MQTT_HOST_PLACEHOLDER
+      port:         1883
+      client_id:    parquet-writer-site-a
+      qos:          0
+      topic:        ems/#
+      topic_parser: positional
+      partition_field: site_id
+      drop_columns:    ["dtype_hint", "site_id"]
+      topic_patterns:
+
+        # 9-seg: unit signals with device + instance  (95% of traffic)
+        # ems/site/{site}/unit/{unit}/{device}/{instance}/{point}/{dtype}
+        - match: "ems/site/+/unit/+/+/+/+/+"
+          segments: ["_","_","site_id","_","unit_id","device","instance","point_name","dtype_hint"]
+
+        # 8-seg: unit root signals — no instance level
+        # ems/site/{site}/unit/{unit}/root/{point}/{dtype}
+        - match: "ems/site/+/unit/+/+/+/+"
+          segments: ["_","_","site_id","_","unit_id","device","point_name","dtype_hint"]
+
+        # 7-seg: meter/rtac/site-device signals — no unit
+        # ems/site/{site}/{device}/{instance}/{point}/{dtype}
+        - match: "ems/site/+/+/+/+/+"
+          segments: ["_","_","site_id","device","instance","point_name","dtype_hint"]
+
+        # 6-seg: site-level root signals — no unit or instance
+        # ems/site/{site}/root/{point}/{dtype}
+        - match: "ems/site/+/+/+/+"
+          segments: ["_","_","site_id","device","point_name","dtype_hint"]
+    output:
+      base_path:    /data/site-capture
+      partitions:   ['{year}', '{month}', '{day}']
+      partition_as_filename_prefix: true
+      wide_point_name: false
+      flush_interval_seconds: 30
+      compression:  snappy
+      store_mqtt_topic:   false
+      store_sample_count: false
+      max_messages_per_part: 5000000
+      max_total_buffer_rows: 2000000
+    compact:
+      enabled: false
+    guard:
+      min_free_gb: 1.0
+    health:
+      enabled: true
+      port: 8771
+    wal:
+      enabled: true

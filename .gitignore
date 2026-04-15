@@ -33,6 +33,10 @@ html/controllers/arduino/fast_load_control/build/
 # Data directories
 manager/nats-data/
 aws/data_store/minio-data/
+parquet/
+
+# Compiled binaries
+source/parquet_sync_checker/parquet_sync_checker
 
 # temp output dirs
 dist/

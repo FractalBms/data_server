@@ -1,3 +1,4 @@
+.DEFAULT_GOAL := all
 CXX      := g++
 CXXFLAGS := -std=c++20 -O2 -Wall -Wextra
 
@@ -19,6 +20,9 @@ SIMDJSON_LIBS   := $(shell pkg-config --libs   simdjson 2>/dev/null || echo "-ls
 
 ALL_CFLAGS := $(CXXFLAGS) $(ARROW_CFLAGS) $(MOSQ_CFLAGS) $(YAML_CFLAGS) $(SIMDJSON_CFLAGS)
 ALL_LIBS   := $(ARROW_LIBS) $(MOSQ_LIBS) $(YAML_LIBS) $(SIMDJSON_LIBS)
+WRITER_VERSION := 1.1.0
+GIT_HASH       := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+VERSION_FLAGS  := -DWRITER_VERSION=\"$(WRITER_VERSION)\" -DGIT_HASH=\"$(GIT_HASH)\"
 
 TEST_PYTHON := $(shell \
   ls $(HOME)/data_server/.venv/bin/python3 2>/dev/null || \
@@ -94,12 +98,52 @@ check-deps:
 # Targets
 # --------------------------------------------------------------------------
 
-.PHONY: all clean deps test kpi
+.PHONY: help clean purge deps test kpi test_multi health
 
-all: check-deps parquet_writer
+help:
+	@echo ''
+	@echo 'Usage: make [target]'
+	@echo ''
+	@echo 'Build:'
+	@echo '  all             check deps then build parquet_writer (default)'
+	@echo '  parquet_writer  compile binary directly'
+	@echo '  clean           remove compiled binaries'
+	@echo '  purge           clean + remove /tmp logs and parquet files'
+	@echo '  deps            install apt build dependencies'
+	@echo ''
+	@echo 'Test:'
+	@echo '  test            build and run unit tests'
+	@echo '  test_multi      publish multi-phase MQTT test (fractal by default)'
+	@echo '  test_multi FORMAT=bench HOST=192.168.86.34  override format/host'
+	@echo '  health          curl /health | jq  (uses HOST variable)'
+	@echo '  kpi             build and run KPI/benchmark tests'
+	@echo ''
+	@echo 'Docker / Deploy:'
+	@echo '  configmap       regenerate ConfigMap from site.yaml + apply to k3s'
+	@echo '  image           build Docker image (tags parquet-writer:latest)'
+	@echo '  deploy          build image, import to k3s, bounce pod (local)'
+	@echo '  deploy DEPLOY_HOST=user@host  sync source + redeploy on remote host'
+	@echo ''
+	@echo 'Manual deploy (when make deploy needs sudo password):'
+	@echo '  make image'
+	@echo '  docker save parquet-writer:latest -o /tmp/pw-image.tar'
+	@echo '  printf "PASSWORD\\n" | sudo -S k3s ctr images import /tmp/pw-image.tar'
+	@echo '  rm /tmp/pw-image.tar'
+	@echo '  kubectl rollout restart deployment/parquet-writer-long -n data-capture'
+	@echo '  kubectl rollout status  deployment/parquet-writer-long -n data-capture --timeout=60s'
+	@echo ''
+	@echo 'Variables:'
+	@echo '  DEPLOY_HOST     remote build host (default: local)'
+	@echo '  DEPLOY_DIR      remote deploy directory (default: /home/phil/build/parquet-writer)'
+	@echo '  GIT_HASH        embedded in binary and /health (default: from git)'
+	@echo '  SITE            site descriptor fed to configmap (default: site.yaml)'
+	@echo ''
 
-parquet_writer: check-deps parquet_writer.cpp mqtt_ring.h
-	$(CXX) $(ALL_CFLAGS) parquet_writer.cpp -o $@ $(ALL_LIBS)
+all: check-deps
+	$(MAKE) parquet_writer
+
+parquet_writer: parquet_writer.cpp mqtt_ring.h
+	$(CXX) $(ALL_CFLAGS) $(VERSION_FLAGS) parquet_writer.cpp -o $@ $(ALL_LIBS)
 
 tests/test_parquet_writer: tests/test_parquet_writer.cpp parquet_writer.cpp mqtt_ring.h tests/test_runner.h
 	$(CXX) $(TEST_FLAGS) -I. tests/test_parquet_writer.cpp -o $@ $(ALL_LIBS)
@@ -112,6 +156,19 @@ test: tests/test_parquet_writer
 
 kpi: tests/kpi_parquet_writer
 	./tests/kpi_parquet_writer
+
+# MQTT format: bench or fractal  (default: fractal)
+# HOST: MQTT + health host       (default: current machine)
+FORMAT ?= fractal
+HOST   ?= $(shell hostname)
+
+test_multi:
+	python3 test_multi_publish.py $(HOST) $(HOST) --format $(FORMAT)
+
+health:
+	curl -s http://$(HOST):8771/health | jq
+
+
 
 # Install missing dev packages (requires sudo)
 # Arrow/Parquet are not always in the default apt repo — this covers Ubuntu 22.04+.
@@ -132,3 +189,74 @@ deps:
 
 clean:
 	rm -f parquet_writer tests/test_parquet_writer tests/kpi_parquet_writer
+
+purge: clean
+	@echo "--- removing /tmp logs ---"
+	rm -f /tmp/writer.log /tmp/pub.log
+	@echo "--- removing /tmp parquet files ---"
+	rm -f /tmp/*.parquet
+	@echo "--- removing /tmp bench/test logs ---"
+	rm -f /tmp/bench*.log /tmp/bench-*.log
+	@echo "--- removing parquet files from k3s pod ---"
+	@POD=$$(kubectl get pod -n data-capture -l app=parquet-writer \
+	        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null); \
+	if [ -n "$$POD" ]; then \
+	  kubectl exec -n data-capture $$POD -- \
+	    sh -c 'find /data -name "*.parquet" -delete && echo "pod data cleared"'; \
+	else \
+	  echo "no writer pod found — skipping"; \
+	fi
+	@echo "done"
+
+# --------------------------------------------------------------------------
+# Deployment — k3s / local
+# --------------------------------------------------------------------------
+# If DEPLOY_HOST is set, syncs source to that host and runs redeploy.sh there.
+# If DEPLOY_HOST is not set, assumes we are already on the build host and
+# runs the docker build + k3s import + kubectl rollout directly.
+#
+# Examples:
+#   make deploy                                     # local build host
+#   make deploy DEPLOY_HOST=phil@192.168.86.51      # remote k3s node
+
+DEPLOY_HOST ?=
+DEPLOY_DIR  ?= /home/phil/build/parquet-writer
+
+.PHONY: configmap image deploy
+
+# Regenerate and apply the k3s ConfigMap from site.yaml
+# Usage: make configmap [SITE=site.yaml]
+SITE ?= site.yaml
+
+configmap:
+	@echo '--- generating manifests from $(SITE) ---'
+	python3 generate_eks_manifests.py $(SITE) manifests
+	@echo '--- applying configmap to k3s ---'
+	kubectl apply -f manifests/configmap.yaml
+	@echo '--- restarting writer pod ---'
+	kubectl rollout restart deployment/parquet-writer-long -n data-capture
+	kubectl rollout status  deployment/parquet-writer-long -n data-capture --timeout=60s
+
+
+image:
+	@echo '--- building Docker image (GIT_HASH=$(GIT_HASH)) ---'
+	docker build --build-arg GIT_HASH=$(GIT_HASH) -t parquet-writer:latest .
+	@docker images parquet-writer
+
+.PHONY: deploy
+
+deploy:
+ifeq ($(DEPLOY_HOST),)
+	@echo '--- building Docker image from repo (GIT_HASH=$(GIT_HASH)) ---'
+	docker build --build-arg GIT_HASH=$(GIT_HASH) -t parquet-writer:latest .
+	@echo '--- importing into k3s ---'
+	docker save parquet-writer:latest | sudo k3s ctr images import -
+	@echo '--- bouncing pod ---'
+	kubectl rollout restart deployment/parquet-writer-long -n data-capture
+	kubectl rollout status  deployment/parquet-writer-long -n data-capture --timeout=90s
+else
+	@echo '--- syncing repo files to $(DEPLOY_HOST):$(DEPLOY_DIR) ---'
+	scp parquet_writer.cpp mqtt_ring.h Makefile Dockerfile entrypoint.sh $(DEPLOY_HOST):$(DEPLOY_DIR)/
+	@echo '--- running redeploy.sh on $(DEPLOY_HOST) ---'
+	ssh -t $(DEPLOY_HOST) "GIT_HASH=$(GIT_HASH) bash $(DEPLOY_DIR)/redeploy.sh"
+endif

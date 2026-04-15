@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Writer Topics — MQTT Parsing, Config &amp; site_id</title>
+<style>
+:root {
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#c9d1d9; --muted:#8b949e; --accent:#58a6ff;
+  --green:#3fb950; --yellow:#d29922; --red:#f85149;
+  --orange:#e3b341; --purple:#bc8cff; --teal:#39d353; --pink:#ff7b72;
+  --code-bg:#21262d;
+}
+body.light {
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --muted:#636c76; --accent:#0969da;
+  --green:#1a7f37; --yellow:#9a6700; --red:#cf222e;
+  --orange:#953800; --purple:#8250df; --teal:#116329; --pink:#a40e26;
+  --code-bg:#f6f8fa;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:var(--bg); color:var(--text);
+       font-family:'Segoe UI',system-ui,sans-serif;
+       padding:20px; max-width:1100px; margin:0 auto; }
+.nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+.nav a { color:var(--muted); text-decoration:none; font-size:.82rem;
+         padding:3px 8px; border:1px solid var(--border); border-radius:4px; }
+.nav a:hover { color:var(--accent); border-color:var(--accent); }
+h1 { color:var(--accent); font-size:1.2rem; margin-bottom:4px; }
+.subtitle { color:var(--muted); font-size:.85rem; margin-bottom:28px; }
+h2 { color:var(--orange); font-size:1rem; margin:32px 0 12px;
+     padding-bottom:5px; border-bottom:1px solid var(--border); }
+h3 { color:var(--accent); font-size:.9rem; margin:18px 0 8px; }
+h4 { color:var(--text); font-size:.85rem; margin:14px 0 6px; font-weight:600; }
+p  { font-size:.85rem; line-height:1.65; margin-bottom:10px; color:var(--text); }
+ul, ol { padding-left:1.4em; margin-bottom:10px; }
+li { font-size:.85rem; line-height:1.6; margin-bottom:3px; }
+pre, code { background:var(--code-bg); border-radius:4px;
+            font-family:'Cascadia Code','Fira Code',monospace; }
+pre { border:1px solid var(--border); padding:12px 14px; font-size:.78rem;
+      line-height:1.6; overflow-x:auto; margin:8px 0; }
+code { padding:1px 5px; font-size:.82rem; }
+.kw  { color:var(--pink); }
+.cm  { color:var(--muted); }
+.st  { color:var(--green); }
+.val { color:var(--teal); }
+.nm  { color:var(--orange); }
+.dim { color:var(--muted); }
+.tag { display:inline-block; padding:1px 7px; border-radius:3px; font-size:.72rem;
+       border:1px solid var(--border); color:var(--muted); vertical-align:middle; margin-left:4px; }
+.tag-bench   { border-color:var(--accent);  color:var(--accent); }
+.tag-fractal { border-color:var(--orange);  color:var(--orange); }
+.tag-drop    { border-color:var(--red);     color:var(--red); }
+.tag-key     { border-color:var(--green);   color:var(--green); }
+.tag-col     { border-color:var(--purple);  color:var(--purple); }
+.note { background:var(--surface); border-left:3px solid var(--accent);
+        padding:10px 14px; border-radius:0 4px 4px 0; margin:10px 0;
+        font-size:.83rem; line-height:1.6; }
+.warn { background:var(--surface); border-left:3px solid var(--yellow);
+        padding:10px 14px; border-radius:0 4px 4px 0; margin:10px 0;
+        font-size:.83rem; line-height:1.6; }
+.two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:12px 0; }
+@media(max-width:700px) { .two-col { grid-template-columns:1fr; } }
+.panel { background:var(--surface); border:1px solid var(--border); border-radius:6px;
+         padding:14px 16px; }
+.panel-title { font-size:.72rem; text-transform:uppercase; letter-spacing:.08em;
+               color:var(--muted); margin-bottom:8px; }
+table { width:100%; border-collapse:collapse; font-size:.82rem; margin:10px 0; }
+th { background:var(--surface2); color:var(--muted); font-size:.72rem;
+     text-transform:uppercase; letter-spacing:.06em; padding:7px 12px;
+     border-bottom:1px solid var(--border); text-align:left; }
+td { padding:7px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+tr:last-child td { border-bottom:none; }
+.seg-row { display:flex; gap:0; margin:8px 0; font-family:monospace; font-size:.82rem; flex-wrap:wrap; }
+.seg { padding:4px 8px; border:1px solid var(--border); margin-right:-1px; }
+.seg-drop { background:rgba(248,81,73,.1);  border-color:var(--red);    color:var(--red); }
+.seg-key  { background:rgba(63,185,80,.1);  border-color:var(--green);  color:var(--green); }
+.seg-col  { background:rgba(188,140,255,.1);border-color:var(--purple); color:var(--purple); }
+.seg-site { background:rgba(88,166,255,.1); border-color:var(--accent); color:var(--accent); }
+.seg-hint { background:rgba(139,148,158,.1);border-color:var(--muted);  color:var(--muted); }
+.seg-sep  { padding:4px 0; color:var(--muted); margin-right:-1px; align-self:center; }
+.arrow { color:var(--muted); margin:0 6px; }
+</style>
+<script>
+function toggleTheme(){
+  document.body.classList.toggle('light');
+  document.getElementById('theme-toggle').textContent =
+    document.body.classList.contains('light') ? '☀ dark' : '☀ light';
+}
+</script>
+</head>
+<body>
+
+<div class="nav">
+  <a href="../projects.html">&#8592; projects</a>
+  <a href="#" id="theme-toggle" onclick="toggleTheme();return false;">&#9788; light</a>
+  <a href="writer_design.html">writer design</a>
+  <a href="writer_query_design.html">query design</a>
+  <a href="writer_site_capture.html">site capture</a>
+  <a href="writer_commercial_options.html">commercial options</a>
+  <a href="#overview">&#9654; overview</a>
+  <a href="#parser">&#9654; positional parser</a>
+  <a href="#bench">&#9654; bench format</a>
+  <a href="#fractal">&#9654; fractal format</a>
+  <a href="#topic-to-dir">&#9654; topic→dir</a>
+  <a href="#site-id">&#9654; site_id</a>
+  <a href="#subscription">&#9654; subscription</a>
+  <a href="#config-ref">&#9654; config reference</a>
+  <a href="#manifests">&#9654; manifests</a>
+</div>
+
+<h1>Writer Topics &#8212; MQTT Parsing, Config &amp; site_id</h1>
+<p class="subtitle">How the parquet_writer maps MQTT topics to parquet columns &#8212; bench and Fractal EMS formats</p>
+
+<!-- ═══════════════════════════════════════════════════════════ OVERVIEW -->
+<h2 id="overview">Overview</h2>
+
+<p>The writer reads raw MQTT messages and turns them into parquet rows.
+The <strong>topic string</strong> carries all the metadata that describes a measurement —
+device, point name, data type, and which site/unit it belongs to.
+There is no separate metadata bus; the topic <em>is</em> the schema.</p>
+
+<p>The writer supports two topic formats, selected by <code>mqtt.topic_format</code> in <code>site.yaml</code>:</p>
+
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-title">bench <span class="tag tag-bench">topic_format: bench</span></div>
+    <p>Flat, single-depth topic tree used on bench BESS units and simple sites.
+    One <code>topic_segments</code> list maps every topic to the same set of columns.
+    The site identifier is a fixed value set in the config/secret.</p>
+    <pre>bench/0215D1D8/bms/bms_1/SysSOC/float</pre>
+    <p>Subscribes to: <code>bench/#</code> (or your <code>topic_root</code>)</p>
+  </div>
+  <div class="panel">
+    <div class="panel-title">fractal <span class="tag tag-fractal">topic_format: fractal</span></div>
+    <p>Fractal EMS variable-depth topics. Four patterns at 6–9 segments cover
+    unit signals, unit-root signals, site-device signals, and site-root signals.
+    The site identifier is <em>extracted from the topic itself</em> — one writer
+    can capture multiple sites from a single broker.</p>
+    <pre>ems/site/SITE_A/unit/0215D1D8/bms/bms_1/SysSOC/float</pre>
+    <p>Subscribes to: <code>ems/#</code></p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ POSITIONAL PARSER -->
+<h2 id="parser">The Positional Parser</h2>
+
+<p>Both formats use <code>topic_parser: positional</code>.
+The topic string is split on <code>/</code> and each segment is assigned a field name
+from the <code>segments</code> list.  The writer then uses those field names to build
+the parquet row.</p>
+
+<h3>Segment name conventions</h3>
+
+<table>
+  <tr><th>Name</th><th>Effect</th><th>Example value</th></tr>
+  <tr><td><code>_</code></td>
+      <td><span class="tag tag-drop">dropped</span> &mdash; segment is read and discarded, never stored</td>
+      <td><code>ems</code>, <code>site</code>, <code>unit</code></td></tr>
+  <tr><td><code>site_id</code></td>
+      <td><span class="tag tag-key">partition key</span> (fractal) &mdash; drives directory partitioning, stamped on every row</td>
+      <td><code>SITE_A</code></td></tr>
+  <tr><td><code>unit_id</code></td>
+      <td><span class="tag tag-key">partition key</span> (bench) &mdash; drives directory partitioning, stamped on every row</td>
+      <td><code>0215D1D8</code></td></tr>
+  <tr><td><code>device</code>, <code>instance</code></td>
+      <td><span class="tag tag-col">column</span> in long format; part of compound column name in wide format</td>
+      <td><code>bms</code>, <code>bms_1</code></td></tr>
+  <tr><td><code>point_name</code></td>
+      <td><span class="tag tag-col">column</span> &mdash; the signal name; in wide format becomes the column header</td>
+      <td><code>SysSOC</code>, <code>kW</code></td></tr>
+  <tr><td><code>dtype_hint</code></td>
+      <td><span class="tag tag-drop">dropped</span> &mdash; hints at payload type (<code>float</code>, <code>string</code>), not stored</td>
+      <td><code>float</code>, <code>string</code></td></tr>
+  <tr><td><code>source_type</code></td>
+      <td><span class="tag tag-drop">dropped</span> (bench) &mdash; the topic root word; no information value</td>
+      <td><code>bench</code></td></tr>
+</table>
+
+<p>After segment assignment, any field listed in <code>drop_columns</code> is discarded.
+For fractal format, dropping is handled entirely by the <code>_</code> sentinel — no
+<code>drop_columns</code> list is needed.</p>
+
+<!-- ═══════════════════════════════════════════════════════ BENCH FORMAT -->
+<h2 id="bench">Bench Format</h2>
+
+<h3>Topic structure</h3>
+<p>One fixed-depth topic tree.  Every topic has exactly the same number of segments
+in the same order.  A single <code>topic_segments</code> list describes all of them.</p>
+
+<pre>bench / 0215D1D8 / bms / bms_1 / SysSOC / float
+  0         1       2      3        4        5</pre>
+
+<div class="seg-row">
+  <span class="seg seg-drop">bench</span><span class="seg-sep">/</span>
+  <span class="seg seg-key">0215D1D8</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">bms</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">bms_1</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">SysSOC</span><span class="seg-sep">/</span>
+  <span class="seg seg-hint">float</span>
+</div>
+<p style="margin-top:8px; font-size:.8rem; color:var(--muted);">
+  <span class="seg seg-drop" style="font-size:.75rem;">dropped</span>&nbsp;
+  <span class="seg seg-key" style="font-size:.75rem;">partition key (unit_id)</span>&nbsp;
+  <span class="seg seg-col" style="font-size:.75rem;">column fields</span>&nbsp;
+  <span class="seg seg-hint" style="font-size:.75rem;">dtype hint — dropped</span>
+</p>
+
+<h3>Config (site.yaml / continuous_wide.yaml)</h3>
+
+<pre><span class="kw">mqtt:</span>
+  <span class="kw">topic:</span>           <span class="st">bench/#</span>          <span class="cm"># single wildcard subscription</span>
+  <span class="kw">topic_parser:</span>    <span class="val">positional</span>
+  <span class="kw">topic_segments:</span>  <span class="val">[source_type, unit_id, device, instance, point_name, dtype_hint]</span>
+  <span class="kw">drop_columns:</span>    <span class="val">[source_type, dtype_hint]</span>
+  <span class="kw">partition_field:</span> <span class="val">unit_id</span>
+
+<span class="kw">output:</span>
+  <span class="kw">base_path:</span>     <span class="st">/data/site-capture</span>
+  <span class="kw">site_id:</span>       <span class="st">SITE_A</span>            <span class="cm"># fixed — injected from secret at pod start</span>
+  <span class="kw">partitions:</span>    <span class="val">['{year}', '{month}', '{day}']</span>
+  <span class="kw">wide_point_name:</span> <span class="val">false</span>           <span class="cm"># true → one col per signal (bench wide-pivot)</span></pre>
+
+<h3>Resulting parquet columns (long format)</h3>
+
+<table>
+  <tr><th>Column</th><th>Source</th><th>Example</th></tr>
+  <tr><td><code>ts</code></td><td>payload field</td><td><code>2026-04-14T10:00:00.000Z</code></td></tr>
+  <tr><td><code>unit_id</code></td><td>topic segment 1</td><td><code>0215D1D8</code></td></tr>
+  <tr><td><code>device</code></td><td>topic segment 2</td><td><code>bms</code></td></tr>
+  <tr><td><code>instance</code></td><td>topic segment 3</td><td><code>bms_1</code></td></tr>
+  <tr><td><code>point_name</code></td><td>topic segment 4</td><td><code>SysSOC</code></td></tr>
+  <tr><td><code>value</code></td><td>payload field</td><td><code>88.0</code></td></tr>
+  <tr><td><code>site_id</code></td><td>config / secret</td><td><code>SITE_A</code></td></tr>
+</table>
+
+<h3>Output path</h3>
+<pre>/data/site-capture/bench/2026/04/14/0215D1D8_20260414T100000Z.parquet</pre>
+<p class="note">The <code>source_type</code> word (<code>bench</code>) is auto-prepended to the partitions
+because it comes from the topic root.  The partition key is <code>unit_id</code>
+so all rows for a unit land in the same directory.</p>
+
+<!-- ═══════════════════════════════════════════════════════ FRACTAL FORMAT -->
+<h2 id="fractal">Fractal Format</h2>
+
+<h3>Topic structure — 4 depths</h3>
+
+<p>Fractal publishes signals at different depths depending on whether the signal
+belongs to a unit (BMS, PCS), a site-level device (meter, RTAC), or the site itself
+(alarms, modes).  The writer uses <code>topic_patterns</code> — an ordered list of
+match/segments pairs.  <strong>First match wins</strong>, so more specific (longer)
+patterns are listed first.</p>
+
+<table>
+  <tr><th>Depth</th><th>Pattern</th><th>Example topic</th><th>% of traffic</th></tr>
+  <tr>
+    <td><strong>9-seg</strong></td>
+    <td><code>ems/site/+/unit/+/+/+/+/+</code></td>
+    <td><code>ems/site/SITE_A/unit/0215D1D8/bms/bms_1/SysSOC/float</code></td>
+    <td>~95%</td>
+  </tr>
+  <tr>
+    <td><strong>8-seg</strong></td>
+    <td><code>ems/site/+/unit/+/+/+/+</code></td>
+    <td><code>ems/site/SITE_A/unit/0215D1D8/root/SystemMode/string</code></td>
+    <td>rare</td>
+  </tr>
+  <tr>
+    <td><strong>7-seg</strong></td>
+    <td><code>ems/site/+/+/+/+/+</code></td>
+    <td><code>ems/site/SITE_A/meter/meter_1/kWh_import/float</code></td>
+    <td>occasional</td>
+  </tr>
+  <tr>
+    <td><strong>6-seg</strong></td>
+    <td><code>ems/site/+/+/+/+</code></td>
+    <td><code>ems/site/SITE_A/root/SiteAlarm/string</code></td>
+    <td>occasional</td>
+  </tr>
+</table>
+
+<h4>9-seg — unit device signal</h4>
+<div class="seg-row">
+  <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+  <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+  <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+  <span class="seg seg-drop">unit</span><span class="seg-sep">/</span>
+  <span class="seg seg-key">0215D1D8</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">bms</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">bms_1</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">SysSOC</span><span class="seg-sep">/</span>
+  <span class="seg seg-hint">float</span>
+</div>
+<p style="margin-top:8px; font-size:.8rem; color:var(--muted);">
+  <span class="seg seg-drop" style="font-size:.75rem;">_ (dropped)</span>&nbsp;
+  <span class="seg seg-site" style="font-size:.75rem;">site_id (partition)</span>&nbsp;
+  <span class="seg seg-key" style="font-size:.75rem;">unit_id (column)</span>&nbsp;
+  <span class="seg seg-col" style="font-size:.75rem;">column fields</span>&nbsp;
+  <span class="seg seg-hint" style="font-size:.75rem;">dtype hint — dropped</span>
+</p>
+
+<h4>8-seg — unit root signal (no instance level)</h4>
+<div class="seg-row">
+  <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+  <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+  <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+  <span class="seg seg-drop">unit</span><span class="seg-sep">/</span>
+  <span class="seg seg-key">0215D1D8</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">root</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">SystemMode</span><span class="seg-sep">/</span>
+  <span class="seg seg-hint">string</span>
+</div>
+<p style="margin-top:6px; font-size:.8rem; color:var(--muted);">Segments: <code>["_","_","site_id","_","unit_id","device","point_name","dtype_hint"]</code> — no <code>instance</code></p>
+
+<h4>7-seg — site-device signal (no unit)</h4>
+<div class="seg-row">
+  <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+  <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+  <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">meter</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">meter_1</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">kWh_import</span><span class="seg-sep">/</span>
+  <span class="seg seg-hint">float</span>
+</div>
+<p style="margin-top:6px; font-size:.8rem; color:var(--muted);">Segments: <code>["_","_","site_id","device","instance","point_name","dtype_hint"]</code> — no <code>unit_id</code></p>
+
+<h4>6-seg — site root signal (no unit or instance)</h4>
+<div class="seg-row">
+  <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+  <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+  <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">root</span><span class="seg-sep">/</span>
+  <span class="seg seg-col">SiteAlarm</span><span class="seg-sep">/</span>
+  <span class="seg seg-hint">string</span>
+</div>
+<p style="margin-top:6px; font-size:.8rem; color:var(--muted);">Segments: <code>["_","_","site_id","device","point_name","dtype_hint"]</code> — no <code>unit_id</code> or <code>instance</code></p>
+
+<h3>Config (config.longbow.yaml)</h3>
+
+<pre><span class="kw">mqtt:</span>
+  <span class="kw">topic:</span>           <span class="st">"ems/#"</span>          <span class="cm"># single wildcard — all 4 depths</span>
+  <span class="kw">topic_parser:</span>    <span class="val">positional</span>
+  <span class="kw">partition_field:</span> <span class="val">site_id</span>          <span class="cm"># extracted from topic, used for filename prefix</span>
+  <span class="kw">drop_columns:</span>    <span class="val">["dtype_hint"]</span>  <span class="cm"># dtype_hint dropped; site_id kept for filename prefix</span>
+
+  <span class="cm"># First matching pattern wins — longer patterns listed first</span>
+  <span class="kw">topic_patterns:</span>
+
+    <span class="cm"># 9-seg: unit device signal</span>
+    - <span class="kw">match:</span> <span class="st">"ems/site/+/unit/+/+/+/+/+"</span>
+      <span class="kw">segments:</span> <span class="val">["_","_","site_id","_","unit_id","device","instance","point_name","dtype_hint"]</span>
+
+    <span class="cm"># 8-seg: unit root signal</span>
+    - <span class="kw">match:</span> <span class="st">"ems/site/+/unit/+/+/+/+"</span>
+      <span class="kw">segments:</span> <span class="val">["_","_","site_id","_","unit_id","device","point_name","dtype_hint"]</span>
+
+    <span class="cm"># 7-seg: site device signal (meter, RTAC)</span>
+    - <span class="kw">match:</span> <span class="st">"ems/site/+/+/+/+/+"</span>
+      <span class="kw">segments:</span> <span class="val">["_","_","site_id","device","instance","point_name","dtype_hint"]</span>
+
+    <span class="cm"># 6-seg: site root signal</span>
+    - <span class="kw">match:</span> <span class="st">"ems/site/+/+/+/+"</span>
+      <span class="kw">segments:</span> <span class="val">["_","_","site_id","device","point_name","dtype_hint"]</span>
+
+<span class="kw">output:</span>
+  <span class="kw">base_path:</span>                    <span class="st">/data/site-capture</span>
+  <span class="kw">partitions:</span>                   <span class="val">['{year}', '{month}', '{day}']</span>
+  <span class="kw">partition_as_filename_prefix:</span> <span class="val">true</span>   <span class="cm"># SITE_A_20260414T....parquet</span>
+  <span class="kw">flush_interval_seconds:</span>       <span class="val">30</span>     <span class="cm"># set in site.yaml capture.flush_interval_seconds</span></pre>
+
+<h3>Resulting parquet columns (long format)</h3>
+<p>All four depths land in the same parquet files.  Columns absent for a given
+depth (<code>unit_id</code>, <code>instance</code>) are stored as <code>null</code> for those rows.
+<code>site_id</code> and <code>dtype_hint</code> are extracted at parse time and used for
+routing/partitioning, then <strong>dropped</strong> — they are not stored as columns.</p>
+
+<table>
+  <tr><th>Column</th><th>9-seg</th><th>8-seg</th><th>7-seg</th><th>6-seg</th></tr>
+  <tr><td><code>ts</code></td>
+      <td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td></tr>
+  <tr><td><code>unit_id</code></td>
+      <td>0215D1D8</td><td>0215D1D8</td><td><em>null</em></td><td><em>null</em></td></tr>
+  <tr><td><code>device</code></td>
+      <td>bms</td><td>root</td><td>meter</td><td>root</td></tr>
+  <tr><td><code>instance</code></td>
+      <td>bms_1</td><td><em>null</em></td><td>meter_1</td><td><em>null</em></td></tr>
+  <tr><td><code>point_name</code></td>
+      <td>SysSOC</td><td>SystemMode</td><td>kWh_import</td><td>SiteAlarm</td></tr>
+  <tr><td><code>value</code></td>
+      <td>88.0</td><td>&#10003;</td><td>1234.5</td><td>&#10003;</td></tr>
+  <tr><td><code>value_str</code></td>
+      <td><em>null</em></td><td>ok</td><td><em>null</em></td><td>ok</td></tr>
+</table>
+
+<h3>Output path</h3>
+<pre>/data/site-capture/2026/04/14/SITE_A_20260414T195903Z.parquet</pre>
+<p><code>site_id</code> is extracted from the topic and used as the filename prefix
+(via <code>partition_as_filename_prefix: true</code> + <code>partition_field: site_id</code>),
+then dropped from stored columns.  A broker serving multiple sites produces
+separate files automatically:</p>
+<pre>/data/site-capture/2026/04/14/
+  SITE_A_20260414T....parquet
+  SITE_B_20260414T....parquet
+  SITE_C_20260414T....parquet</pre>
+
+<!-- ══════════════════════════════════════════════════════ TOPIC → DIR -->
+<h2 id="topic-to-dir">Topic &#8594; Directory Mapping</h2>
+
+<p>Every incoming MQTT message has its topic parsed into fields.
+Those fields drive the output path — the coloured segments below map directly
+to the coloured path components on the right.</p>
+
+<h3>Bench</h3>
+
+<p>One topic depth. <code>unit_id</code> (segment 1) becomes the filename prefix.
+<code>source_type</code> (segment 0) is auto-prepended as the first directory.</p>
+
+<div style="overflow-x:auto; margin:12px 0;">
+<table style="width:auto; border:none;">
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">topic</strong>
+  </td>
+  <td style="border:none; padding:4px 0;">
+    <div class="seg-row" style="margin:0; flex-wrap:nowrap;">
+      <span class="seg seg-drop">bench</span><span class="seg-sep">/</span>
+      <span class="seg seg-key">0215D1D8</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">bms</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">bms_1</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">SysSOC</span><span class="seg-sep">/</span>
+      <span class="seg seg-hint">float</span>
+    </div>
+  </td>
+</tr>
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">path</strong>
+  </td>
+  <td style="border:none; padding:4px 0; font-family:monospace; font-size:.82rem;">
+    /data/site-capture/<span style="color:var(--red); font-weight:600;">bench</span>/2026/04/14/<span style="color:var(--green); font-weight:600;">0215D1D8</span>_20260414T100000Z.parquet
+  </td>
+</tr>
+</table>
+</div>
+
+<div style="font-size:.78rem; color:var(--muted); margin:4px 0 16px 0; line-height:1.8;">
+  <span class="seg seg-drop" style="font-size:.72rem;">bench</span> → first directory &nbsp;
+  <span class="seg seg-key" style="font-size:.72rem;">0215D1D8</span> → filename prefix &nbsp;
+  <span class="seg seg-col" style="font-size:.72rem;">bms / bms_1 / SysSOC</span> → row columns &nbsp;
+  <span class="seg seg-hint" style="font-size:.72rem;">float</span> → dropped
+</div>
+
+<h3>Fractal — 9-seg (unit device signal, ~95% of traffic)</h3>
+
+<div style="overflow-x:auto; margin:12px 0;">
+<table style="width:auto; border:none;">
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">topic</strong>
+  </td>
+  <td style="border:none; padding:4px 0;">
+    <div class="seg-row" style="margin:0; flex-wrap:nowrap;">
+      <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+      <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">unit</span><span class="seg-sep">/</span>
+      <span class="seg seg-key">0215D1D8</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">bms</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">bms_1</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">SysSOC</span><span class="seg-sep">/</span>
+      <span class="seg seg-hint">float</span>
+    </div>
+  </td>
+</tr>
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">path</strong>
+  </td>
+  <td style="border:none; padding:4px 0; font-family:monospace; font-size:.82rem;">
+    /data/site-capture/<span style="color:var(--accent); font-weight:600;">SITE_A</span>/2026/04/14/20260414T100000Z.parquet
+  </td>
+</tr>
+</table>
+</div>
+
+<div style="font-size:.78rem; color:var(--muted); margin:4px 0 16px 0; line-height:1.8;">
+  <span class="seg seg-drop" style="font-size:.72rem;">ems / site / unit</span> → dropped &nbsp;
+  <span class="seg seg-site" style="font-size:.72rem;">SITE_A</span> → first directory &nbsp;
+  <span class="seg seg-key" style="font-size:.72rem;">0215D1D8</span> → row column (unit_id) &nbsp;
+  <span class="seg seg-col" style="font-size:.72rem;">bms / bms_1 / SysSOC</span> → row columns &nbsp;
+  <span class="seg seg-hint" style="font-size:.72rem;">float</span> → dropped
+</div>
+
+<h3>Fractal — 8-seg (unit root, no instance)</h3>
+
+<div style="overflow-x:auto; margin:12px 0;">
+<table style="width:auto; border:none;">
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">topic</strong>
+  </td>
+  <td style="border:none; padding:4px 0;">
+    <div class="seg-row" style="margin:0; flex-wrap:nowrap;">
+      <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+      <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">unit</span><span class="seg-sep">/</span>
+      <span class="seg seg-key">0215D1D8</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">root</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">SystemMode</span><span class="seg-sep">/</span>
+      <span class="seg seg-hint">string</span>
+    </div>
+  </td>
+</tr>
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">path</strong>
+  </td>
+  <td style="border:none; padding:4px 0; font-family:monospace; font-size:.82rem;">
+    /data/site-capture/<span style="color:var(--accent); font-weight:600;">SITE_A</span>/2026/04/14/20260414T100000Z.parquet
+    <span style="color:var(--muted);"> ← same file as 9-seg, instance is null</span>
+  </td>
+</tr>
+</table>
+</div>
+
+<h3>Fractal — 7-seg (site device, no unit)</h3>
+
+<div style="overflow-x:auto; margin:12px 0;">
+<table style="width:auto; border:none;">
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">topic</strong>
+  </td>
+  <td style="border:none; padding:4px 0;">
+    <div class="seg-row" style="margin:0; flex-wrap:nowrap;">
+      <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+      <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">meter</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">meter_1</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">kWh_import</span><span class="seg-sep">/</span>
+      <span class="seg seg-hint">float</span>
+    </div>
+  </td>
+</tr>
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">path</strong>
+  </td>
+  <td style="border:none; padding:4px 0; font-family:monospace; font-size:.82rem;">
+    /data/site-capture/<span style="color:var(--accent); font-weight:600;">SITE_A</span>/2026/04/14/20260414T100000Z.parquet
+    <span style="color:var(--muted);"> ← same file, unit_id is null</span>
+  </td>
+</tr>
+</table>
+</div>
+
+<h3>Fractal — 6-seg (site root, no unit or instance)</h3>
+
+<div style="overflow-x:auto; margin:12px 0;">
+<table style="width:auto; border:none;">
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">topic</strong>
+  </td>
+  <td style="border:none; padding:4px 0;">
+    <div class="seg-row" style="margin:0; flex-wrap:nowrap;">
+      <span class="seg seg-drop">ems</span><span class="seg-sep">/</span>
+      <span class="seg seg-drop">site</span><span class="seg-sep">/</span>
+      <span class="seg seg-site">SITE_A</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">root</span><span class="seg-sep">/</span>
+      <span class="seg seg-col">SiteAlarm</span><span class="seg-sep">/</span>
+      <span class="seg seg-hint">string</span>
+    </div>
+  </td>
+</tr>
+<tr>
+  <td style="padding:4px 12px 4px 0; white-space:nowrap; vertical-align:middle; border:none;">
+    <strong style="font-size:.8rem; color:var(--muted);">path</strong>
+  </td>
+  <td style="border:none; padding:4px 0; font-family:monospace; font-size:.82rem;">
+    /data/site-capture/<span style="color:var(--accent); font-weight:600;">SITE_A</span>/2026/04/14/20260414T100000Z.parquet
+    <span style="color:var(--muted);"> ← same file, unit_id + instance are null</span>
+  </td>
+</tr>
+</table>
+</div>
+
+<div class="note">All four fractal depths land in the <strong>same parquet file</strong> for a given site and day.
+The partition is <code>site_id</code> only — depth differences show up as null columns in individual rows,
+not as separate files or directories.</div>
+
+<!-- ════════════════════════════════════════════════════════════ SITE_ID -->
+<h2 id="site-id">What Happens to site_id</h2>
+
+<p>This is the key difference between the two formats.</p>
+
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-title">bench — site_id is a config value</div>
+    <p>In <code>output.site_id</code> the writer holds a literal string
+    (<code>SITE_A</code>).  Every row written gets that value stamped on it.
+    The value comes from the Kubernetes secret at pod start — the
+    <code>entrypoint.sh</code> replaces <code>SITE_ID_PLACEHOLDER</code>
+    in <code>config.yaml</code> with the <code>SITE_ID</code> env var.</p>
+    <pre><span class="cm"># entrypoint.sh</span>
+sed -i "s/SITE_ID_PLACEHOLDER/$SITE_ID/" /etc/writer/config.yaml</pre>
+    <p>One broker → one site.  If you need two sites, deploy two pods with
+    different <code>SITE_ID</code> secrets pointing at different brokers.</p>
+    <pre><span class="kw">output:</span>
+  <span class="kw">site_id:</span> <span class="st">SITE_A</span>        <span class="cm"># set at runtime</span>
+  <span class="kw">partitions:</span> <span class="val">['{year}', '{month}', '{day}']</span></pre>
+  </div>
+  <div class="panel">
+    <div class="panel-title">fractal — site_id is in the topic</div>
+    <p>The writer extracts <code>site_id</code> from segment 2 of every incoming topic
+    (<code>ems/site/<strong>SITE_A</strong>/...</code>) at parse time.
+    It uses it as the <code>partition_field</code> to build the output filename prefix,
+    then <strong>drops it</strong> from the stored parquet columns.</p>
+    <pre><span class="cm"># site_id extracted from topic segment 2</span>
+ems/site/<span class="st">SITE_A</span>/unit/0215D1D8/bms/...
+         &#8593; extracted here, used for filename, then dropped</pre>
+    <p>No <code>SITE_ID</code> secret needed — the secret only carries <code>MQTT_HOST</code>.
+    <code>entrypoint.sh</code> no longer injects a site_id placeholder.</p>
+    <pre><span class="kw">mqtt:</span>
+  <span class="kw">partition_field:</span> <span class="val">site_id</span>        <span class="cm"># &#8594; filename prefix SITE_A_...</span>
+  <span class="kw">drop_columns:</span>    <span class="val">["dtype_hint"]</span>  <span class="cm"># only dtype_hint dropped; site_id kept for filename prefix</span>
+<span class="kw">output:</span>
+  <span class="kw">partitions:</span> <span class="val">['{year}', '{month}', '{day}']</span>
+  <span class="kw">partition_as_filename_prefix:</span> <span class="val">true</span></pre>
+    <p>One broker &#8594; <em>many sites</em>.  Messages from SITE_A, SITE_B, SITE_C
+    all flow through the same pod and are automatically separated by filename prefix.</p>
+  </div>
+</div>
+
+<div class="warn">
+  <strong>Fractal + multi-site broker:</strong> if the EMS broker at a site publishes
+  data for multiple logical sites (SITE_A and SITE_B), a single writer pod captures all
+  of them.  The <code>partition_field: site_id</code> ensures each site's data lands in
+  its own directory.  Buffer memory and file handles scale with the number of active sites,
+  not with the number of signals.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ SUBSCRIPTION -->
+<h2 id="subscription">What We Subscribe To</h2>
+
+<table>
+  <tr><th>Format</th><th>MQTT subscription</th><th>Why</th></tr>
+  <tr>
+    <td><span class="tag tag-bench">bench</span></td>
+    <td><code>bench/#</code></td>
+    <td>Single root wildcard captures the flat bench tree.
+        <code>bench</code> comes from <code>mqtt.topic_root</code> in site.yaml —
+        change it to match the site's actual root word.</td>
+  </tr>
+  <tr>
+    <td><span class="tag tag-fractal">fractal</span></td>
+    <td><code>ems/#</code></td>
+    <td>Single root wildcard captures all 4 depths simultaneously.
+        The broker delivers every topic under <code>ems/</code>; the writer's pattern
+        list decides which ones to parse and which to ignore.</td>
+  </tr>
+  <tr>
+    <td><span class="tag tag-bench">bench</span> <span class="tag tag-fractal">fractal</span></td>
+    <td><code>#</code></td>
+    <td>Subscribe to everything. Unmatched topics are silently dropped by the
+        writer. Safe on a dedicated site broker where all traffic is yours.
+        Avoids needing to update the subscription if the topic root ever changes.</td>
+  </tr>
+</table>
+
+<p>The MQTT broker delivers <em>all</em> messages matching the subscription.
+The writer applies the pattern list to each message.  If no pattern matches,
+the message is silently dropped — filtering happens at parse time, not at
+subscribe time.</p>
+
+<h3>Choosing your subscription</h3>
+
+<table>
+  <tr><th>Broker type</th><th>Recommended subscription</th><th>Reason</th></tr>
+  <tr>
+    <td>Dedicated site broker<br><span style="font-size:.75rem;color:var(--muted);">all traffic is yours</span></td>
+    <td><code>#</code></td>
+    <td>Zero config when topic structure evolves. New topic roots are captured
+        automatically once you add the matching pattern.</td>
+  </tr>
+  <tr>
+    <td>Shared / multi-tenant broker<br><span style="font-size:.75rem;color:var(--muted);">other systems publishing</span></td>
+    <td><code>ems/#</code> or <code>bench/#</code></td>
+    <td>Unrelated high-volume topics would still be delivered to the writer pod
+        and discarded — wasted network and CPU. A specific prefix keeps load down.</td>
+  </tr>
+</table>
+
+<div class="note">
+  <strong>seen_topics in /health:</strong> the <code>/health</code> endpoint exposes
+  a <code>seen_topics</code> array showing every distinct topic (up to point_name,
+  dtype_hint stripped) that has been parsed successfully.  Use this to verify the
+  writer is receiving all expected signal paths after deployment.
+  <pre>curl -s http://&lt;host&gt;:8771/health | python3 -m json.tool | grep seen_topics -A 20</pre>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ CONFIG REF -->
+<h2 id="config-ref">Config Reference — Side by Side</h2>
+
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-title">bench config (site.yaml → configmap)</div>
+    <pre><span class="kw">mqtt:</span>
+  <span class="kw">host:</span>            <span class="st">MQTT_HOST_PLACEHOLDER</span>
+  <span class="kw">port:</span>            <span class="val">1883</span>
+  <span class="kw">client_id:</span>       <span class="st">parquet-writer-site-a</span>
+  <span class="kw">qos:</span>             <span class="val">0</span>
+  <span class="kw">topic:</span>           <span class="st">bench/#</span>
+  <span class="kw">topic_parser:</span>    <span class="val">positional</span>
+  <span class="kw">topic_segments:</span>  <span class="val">[source_type, unit_id,
+    device, instance, point_name, dtype_hint]</span>
+  <span class="kw">drop_columns:</span>    <span class="val">[source_type, dtype_hint]</span>
+  <span class="kw">partition_field:</span> <span class="val">unit_id</span>
+
+<span class="kw">output:</span>
+  <span class="kw">base_path:</span>    <span class="st">/data/site-capture</span>
+  <span class="kw">site_id:</span>      <span class="st">SITE_ID_PLACEHOLDER</span>
+  <span class="kw">partitions:</span>   <span class="val">['{year}','{month}','{day}']</span>
+  <span class="kw">partition_as_filename_prefix:</span> <span class="val">true</span>
+  <span class="kw">wide_point_name:</span> <span class="val">false</span>
+  <span class="kw">flush_interval_seconds:</span> <span class="val">600</span>
+  <span class="kw">compression:</span>  <span class="st">snappy</span></pre>
+  </div>
+  <div class="panel">
+    <div class="panel-title">fractal config (auto-generated from site.yaml)</div>
+    <pre><span class="kw">mqtt:</span>
+  <span class="kw">host:</span>            <span class="st">MQTT_HOST_PLACEHOLDER</span>
+  <span class="kw">port:</span>            <span class="val">1883</span>
+  <span class="kw">client_id:</span>       <span class="st">parquet-writer-site-a</span>
+  <span class="kw">qos:</span>             <span class="val">0</span>
+  <span class="kw">topic:</span>           <span class="st">ems/#</span>
+  <span class="kw">topic_parser:</span>    <span class="val">positional</span>
+  <span class="kw">partition_field:</span> <span class="val">site_id</span>
+  <span class="kw">topic_patterns:</span>
+    - <span class="kw">match:</span> <span class="st">"ems/site/+/unit/+/+/+/+/+"</span>
+      <span class="kw">segments:</span> <span class="val">["_","_","site_id","_",
+        "unit_id","device","instance",
+        "point_name","dtype_hint"]</span>
+    - <span class="kw">match:</span> <span class="st">"ems/site/+/unit/+/+/+/+"</span>
+      <span class="kw">segments:</span> <span class="val">["_","_","site_id","_",
+        "unit_id","device",
+        "point_name","dtype_hint"]</span>
+    - <span class="kw">match:</span> <span class="st">"ems/site/+/+/+/+/+"</span>
+      <span class="kw">segments:</span> <span class="val">["_","_","site_id",
+        "device","instance",
+        "point_name","dtype_hint"]</span>
+    - <span class="kw">match:</span> <span class="st">"ems/site/+/+/+/+"</span>
+      <span class="kw">segments:</span> <span class="val">["_","_","site_id",
+        "device","point_name","dtype_hint"]</span>
+
+<span class="kw">output:</span>
+  <span class="kw">base_path:</span>    <span class="st">/data/site-capture</span>
+  <span class="kw">site_id:</span>      <span class="st">""</span>
+  <span class="kw">partitions:</span>
+    - <span class="st">"{site_id}"</span>
+    - <span class="st">"{year}"</span>
+    - <span class="st">"{month}"</span>
+    - <span class="st">"{day}"</span>
+  <span class="kw">flush_interval_seconds:</span> <span class="val">600</span>
+  <span class="kw">compression:</span>  <span class="st">snappy</span></pre>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ MANIFESTS -->
+<h2 id="manifests">Manifest Generation — generate_eks_manifests.py</h2>
+
+<p><code>generate_eks_manifests.py</code> reads <code>site.yaml</code> and writes the four
+Kubernetes YAMLs.  The <code>mqtt.topic_format</code> field controls which config block
+is embedded in the ConfigMap.</p>
+
+<pre><span class="cm"># in site.yaml</span>
+<span class="kw">mqtt:</span>
+  <span class="kw">topic_format:</span> <span class="st">fractal</span>   <span class="cm"># bench → topic_segments block</span>
+                            <span class="cm"># fractal → topic_patterns block (all 4 auto-generated)</span></pre>
+
+<table>
+  <tr><th>topic_format</th><th>ConfigMap mqtt block</th><th>output.site_id</th><th>partitions</th></tr>
+  <tr>
+    <td><code>bench</code></td>
+    <td><code>topic: bench/#</code><br><code>topic_segments: [...]</code><br><code>drop_columns: [...]</code></td>
+    <td><code>SITE_ID_PLACEHOLDER</code> → replaced by secret</td>
+    <td><code>[year, month, day]</code></td>
+  </tr>
+  <tr>
+    <td><code>fractal</code></td>
+    <td><code>topic: ems/#</code><br><code>topic_patterns: [4 patterns]</code><br><code>drop_columns: [dtype_hint, site_id]</code></td>
+    <td>not stored — extracted from topic, used as filename prefix, then dropped</td>
+    <td><code>[year, month, day]</code> + filename prefix <code>SITE_A_</code></td>
+  </tr>
+</table>
+
+<pre><span class="cm"># generate manifests for a Fractal site</span>
+python3 generate_eks_manifests.py site-fractal.yaml manifests-fractal/
+
+<span class="cm"># output:</span>
+Generating manifests for site=SITE_A  topic_format=fractal
+  image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/parquet-writer:latest
+  wrote manifests-fractal/pvc.yaml
+  wrote manifests-fractal/configmap.yaml
+  wrote manifests-fractal/deployment.yaml
+  wrote manifests-fractal/kustomization.yaml</pre>
+
+<h3>make configmap — edit site.yaml and apply</h3>
+
+<p>The recommended workflow for changing the writer config on k3s:</p>
+<ol>
+  <li>Edit <code>site.yaml</code> — change <code>flush_interval_seconds</code>, <code>mqtt.host</code>, <code>topic_format</code>, etc.</li>
+  <li>Run <code>make configmap</code> — regenerates all manifests from <code>site.yaml</code>, applies the ConfigMap, and restarts the pod.</li>
+</ol>
+
+<pre><span class="cm"># edit site.yaml then:</span>
+make configmap
+
+<span class="cm"># or for a different site descriptor:</span>
+make configmap SITE=site.production.yaml</pre>
+
+<p>Key fields to tune in <code>site.yaml</code>:</p>
+<table>
+  <tr><th>Field</th><th>Current</th><th>Notes</th></tr>
+  <tr><td><code>mqtt.topic_format</code></td><td><code>fractal</code></td><td><code>bench</code> or <code>fractal</code></td></tr>
+  <tr><td><code>mqtt.host</code></td><td><code>192.168.86.51</code></td><td>MQTT broker IP</td></tr>
+  <tr><td><code>capture.flush_interval_seconds</code></td><td><code>30</code></td><td>30 for testing, 600 for production</td></tr>
+  <tr><td><code>eks.account_id</code></td><td><code>local</code></td><td><code>local</code> = use local docker image; set to AWS account ID for ECR</td></tr>
+</table>
+
+<h3>Testing with test_multi_publish.py</h3>
+
+<p>The test publisher supports both formats.  Run the fractal variant against a writer
+started with <code>config.longbow.yaml</code>:</p>
+
+<pre><span class="cm"># default — bench format (flat topic tree)</span>
+python3 test_multi_publish.py localhost localhost 0215D1D8
+
+<span class="cm"># fractal format — publishes all 4 topic depths across 3 phases</span>
+python3 test_multi_publish.py localhost localhost 0215D1D8 --format fractal</pre>
+
+<p>After each phase the script queries <code>/health</code> and prints the newly seen topics,
+demonstrating that the writer picks up all four depths without restart.</p>
+
+<pre><span class="cm">--- Phase 1 — BMS unit signals (9-seg) (3 signals, 8 sweeps) ---
+  seen_topics total : 3
+  newly seen (3):
+    + ems/site/SITE_A/unit/0215D1D8/bms/bms_1/SysSOC
+    + ems/site/SITE_A/unit/0215D1D8/bms/bms_1/SysSOH
+    + ems/site/SITE_A/unit/0215D1D8/bms/bms_1/SysVoltage
+
+--- Phase 2 — PCS added (9-seg) + unit root signal (8-seg) (7 signals, 8 sweeps) ---
+  seen_topics total : 10
+  newly seen (7):
+    + ems/site/SITE_A/unit/0215D1D8/pcs/pcs_1/kW
+    + ems/site/SITE_A/unit/0215D1D8/pcs/pcs_1/kVar
+    + ems/site/SITE_A/unit/0215D1D8/pcs/pcs_1/GridFreq
+    + ems/site/SITE_A/unit/0215D1D8/root/SystemMode
+
+--- Phase 3 — site meter (7-seg) + site root signal (6-seg) (10 signals, 8 sweeps) ---
+  seen_topics total : 12
+  newly seen (2):
+    + ems/site/SITE_A/meter/meter_1/kWh_import
+    + ems/site/SITE_A/root/SiteAlarm</span></pre>
+
+<script>
+// persist theme across page loads
+if(localStorage.getItem('theme')==='light'){
+  document.body.classList.add('light');
+  document.getElementById('theme-toggle').textContent='☀ dark';
+}
+document.getElementById('theme-toggle').addEventListener('click',function(){
+  localStorage.setItem('theme', document.body.classList.contains('light')?'light':'dark');
+});
+</script>
+</body>
+</html>
