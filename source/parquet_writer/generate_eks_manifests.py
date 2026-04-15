@@ -118,6 +118,7 @@ def _mqtt_block_fractal(mqtt):
       topic:        ems/#
       topic_parser: positional
       partition_field: site_id
+      drop_columns:    ["dtype_hint", "site_id"]
 {FRACTAL_TOPIC_PATTERNS}"""
 
 def _output_block_bench(cap, wide):
@@ -131,7 +132,6 @@ def _output_block_bench(cap, wide):
       compression:  {cap["compression"]}
       store_mqtt_topic:   false
       store_sample_count: false
-      site_id:      SITE_ID_PLACEHOLDER
       max_messages_per_part: {cap["max_messages_per_part"]}
       max_total_buffer_rows: {cap["max_total_buffer_rows"]}"""
 
@@ -146,7 +146,6 @@ def _output_block_fractal(cap):
       compression:  {cap["compression"]}
       store_mqtt_topic:   false
       store_sample_count: false
-      site_id:      SITE_ID_PLACEHOLDER
       max_messages_per_part: {cap["max_messages_per_part"]}
       max_total_buffer_rows: {cap["max_total_buffer_rows"]}"""
 
@@ -236,11 +235,6 @@ spec:
                 secretKeyRef:
                   name: parquet-writer-secrets
                   key: MQTT_HOST
-            - name: SITE_ID
-              valueFrom:
-                secretKeyRef:
-                  name: parquet-writer-secrets
-                  key: SITE_ID
           volumeMounts:
             - name: config
               mountPath: /etc/writer
@@ -310,12 +304,8 @@ if __name__ == "__main__":
     print(f"  docker push {image}")
     print(f"\nCreate namespace + secret:")
     print(f"  kubectl create namespace {ns}")
-    if topic_fmt == "fractal":
-        print(f"  # For fractal format, SITE_ID is derived from the MQTT topic.")
-        print(f"  # Set SITE_ID to a placeholder value (e.g. the site name).")
     print(f"  kubectl create secret generic parquet-writer-secrets \\")
     print(f"    --from-literal=MQTT_HOST={host} \\")
-    print(f"    --from-literal=SITE_ID={sid} \\")
     print(f"    -n {ns}")
     print(f"\nApply manifests:")
     print(f"  kubectl apply -f {output_dir}/ -n {ns}")

@@ -13,6 +13,7 @@ data:
       topic:        ems/#
       topic_parser: positional
       partition_field: site_id
+      drop_columns:    ["dtype_hint", "site_id"]
       topic_patterns:
 
         # 9-seg: unit signals with device + instance  (95% of traffic)
@@ -43,7 +44,6 @@ data:
       compression:  snappy
       store_mqtt_topic:   false
       store_sample_count: false
-      site_id:      SITE_ID_PLACEHOLDER
       max_messages_per_part: 5000000
       max_total_buffer_rows: 2000000
     compact:
