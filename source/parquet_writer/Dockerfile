@@ -14,5 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends       wget ca-c
 COPY --from=builder /build/parquet_writer /usr/local/bin/parquet_writer
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+# Default MQTT broker — overridden at runtime by the MQTT_HOST secret
+ARG DEFAULT_MQTT_HOST=localhost
+ENV DEFAULT_MQTT_HOST=${DEFAULT_MQTT_HOST}
 EXPOSE 8771
 ENTRYPOINT ["/entrypoint.sh"]

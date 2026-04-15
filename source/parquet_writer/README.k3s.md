@@ -71,8 +71,21 @@ kubectl create secret generic parquet-writer-secrets \
 ```
 
 Replace `<broker-ip>` with the IP or hostname of your MQTT broker.
-This is the only place the broker address is set — it is never stored in
-`site.yaml` or the Docker image.
+
+### Default MQTT host (compiled into image)
+
+The secret is **optional**.  When building the image you can bake in a default
+broker address that the pod uses if no secret is present:
+
+```bash
+make image DEFAULT_MQTT_HOST=192.168.86.51
+```
+
+Priority at startup: `MQTT_HOST` secret → `DEFAULT_MQTT_HOST` (image) → `localhost`.
+
+This lets you ship a pre-configured image to a site and skip the secret
+creation step entirely.  The secret can still be used later to override the
+broker address without rebuilding the image.
 
 ### Local FlashMQ demo (phil-dev / .46)
 

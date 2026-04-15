@@ -74,6 +74,10 @@ mqtt:
   host:        192.168.86.51 # [CHANGE] MQTT broker IP or hostname at the site
   client_id:   parquet-writer-site-a  # [CHANGE] must be unique per running pod
 
+  default_host: localhost  # [CHANGE] compiled into image (make image DEFAULT_MQTT_HOST=...)
+                           #          used if parquet-writer-secrets is not present
+                           #          override at runtime by creating the secret
+
   # [CHANGE] Topic parser mode — bench or fractal
   #   bench   → uses topic_root / topic_segments / drop_columns below
   #   fractal → uses topic_root as subscribe prefix; 4 depth patterns auto-generated

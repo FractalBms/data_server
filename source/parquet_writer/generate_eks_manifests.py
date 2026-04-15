@@ -246,6 +246,7 @@ spec:
                 secretKeyRef:
                   name: parquet-writer-secrets
                   key: MQTT_HOST
+                  optional: true   # falls back to DEFAULT_MQTT_HOST baked into image
           volumeMounts:
             - name: config
               mountPath: /etc/writer
@@ -377,10 +378,13 @@ if __name__ == "__main__":
     region  = eks["region"]
     is_local = str(eks.get("account_id", "")).lower() in ("local", "k3s", "")
 
+    default_host = s["mqtt"].get("default_host", "localhost")
     if is_local:
-        print(f"\nLocal k3s — no ECR push needed.")
+        print(f"\nLocal k3s — build image with default MQTT host baked in:")
+        print(f"  make image DEFAULT_MQTT_HOST={default_host}")
     else:
-        print(f"\nPush writer image to ECR:")
+        print(f"\nBuild and push writer image (default MQTT host: {default_host}):")
+        print(f"  make image DEFAULT_MQTT_HOST={default_host}")
         print(f"  aws ecr get-login-password --region {region} | \\")
         print(f"    docker login --username AWS --password-stdin {image.split('/')[0]}")
         print(f"  docker tag parquet-writer:latest {image}")

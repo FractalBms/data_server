@@ -21,8 +21,9 @@ SIMDJSON_LIBS   := $(shell pkg-config --libs   simdjson 2>/dev/null || echo "-ls
 ALL_CFLAGS := $(CXXFLAGS) $(ARROW_CFLAGS) $(MOSQ_CFLAGS) $(YAML_CFLAGS) $(SIMDJSON_CFLAGS)
 ALL_LIBS   := $(ARROW_LIBS) $(MOSQ_LIBS) $(YAML_LIBS) $(SIMDJSON_LIBS)
 WRITER_VERSION := 1.1.0
-GIT_HASH       := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-VERSION_FLAGS  := -DWRITER_VERSION=\"$(WRITER_VERSION)\" -DGIT_HASH=\"$(GIT_HASH)\"
+GIT_HASH           := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+VERSION_FLAGS      := -DWRITER_VERSION=\"$(WRITER_VERSION)\" -DGIT_HASH=\"$(GIT_HASH)\"
+DEFAULT_MQTT_HOST  ?= localhost
 
 TEST_PYTHON := $(shell \
   ls $(HOME)/data_server/.venv/bin/python3 2>/dev/null || \
@@ -265,8 +266,8 @@ configmap:
 	fi
 
 image:
-	@echo '--- building writer Docker image (GIT_HASH=$(GIT_HASH)) ---'
-	docker build --build-arg GIT_HASH=$(GIT_HASH) -t parquet-writer:latest .
+	@echo '--- building writer Docker image (GIT_HASH=$(GIT_HASH) DEFAULT_MQTT_HOST=$(DEFAULT_MQTT_HOST)) ---'
+	docker build --build-arg GIT_HASH=$(GIT_HASH) --build-arg DEFAULT_MQTT_HOST=$(DEFAULT_MQTT_HOST) -t parquet-writer:latest .
 	@docker images parquet-writer
 
 query-image:
