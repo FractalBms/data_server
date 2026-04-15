@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parquet-writer-long
+  namespace: data-capture
+  labels:
+    site: SITE_A
+    unit: 0215D1D8
+    topic-format: fractal
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+  selector:
+    matchLabels:
+      app: parquet-writer
+  template:
+    metadata:
+      labels:
+        app: parquet-writer
+        site: SITE_A
+        unit: 0215D1D8
+    spec:
+      containers:
+        - name: writer
+          image: parquet-writer:latest
+          command: ["/entrypoint.sh"]
+          env:
+            - name: MQTT_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: parquet-writer-secrets
+                  key: MQTT_HOST
+            - name: SITE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: parquet-writer-secrets
+                  key: SITE_ID
+          volumeMounts:
+            - name: config
+              mountPath: /etc/writer
+              readOnly: true
+            - name: data
+              mountPath: /data
+          ports:
+            - containerPort: 8771
+              hostPort: 8771
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8771
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8771
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: parquet-writer-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: parquet-capture-pvc

@@ -62,6 +62,11 @@ def resolve_image(eks):
     repo       = eks["repo"]
     tag        = eks.get("tag", "latest")
 
+    if account_id.lower() in ("local", "k3s", ""):
+        img = f"{repo}:{tag}"
+        print(f"  using local image: {img}")
+        return img
+
     if account_id.lower() == "auto":
         try:
             out = subprocess.check_output(
@@ -131,15 +136,17 @@ def _output_block_bench(cap, wide):
       max_total_buffer_rows: {cap["max_total_buffer_rows"]}"""
 
 def _output_block_fractal(cap):
-    """Output block for Fractal format — site_id comes from topic, not secret."""
+    """Output block for Fractal format."""
     return f"""\
       base_path:    /data/site-capture
-      site_id:      ""
-      partitions:   ['{{site_id}}', '{{year}}', '{{month}}', '{{day}}']
+      partitions:   ['{{year}}', '{{month}}', '{{day}}']
+      partition_as_filename_prefix: true
+      wide_point_name: false
       flush_interval_seconds: {cap["flush_interval_seconds"]}
       compression:  {cap["compression"]}
       store_mqtt_topic:   false
       store_sample_count: false
+      site_id:      SITE_ID_PLACEHOLDER
       max_messages_per_part: {cap["max_messages_per_part"]}
       max_total_buffer_rows: {cap["max_total_buffer_rows"]}"""
 

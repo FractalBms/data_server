@@ -116,6 +116,8 @@ help:
 	@echo '  kpi             build and run KPI/benchmark tests'
 	@echo ''
 	@echo 'Docker / Deploy:'
+	@echo '  configmap       regenerate ConfigMap from site.yaml + apply to k3s'
+	@echo '  configmap SITE=other.yaml  use a different site descriptor'
 	@echo '  image           build Docker image (tags parquet-writer:latest)'
 	@echo '  deploy          build image, import to k3s, bounce pod (local)'
 	@echo '  deploy DEPLOY_HOST=user@host  sync source + redeploy on remote host'
@@ -196,7 +198,21 @@ purge: clean
 DEPLOY_HOST ?=
 DEPLOY_DIR  ?= /home/phil/build/parquet-writer
 
-.PHONY: image deploy
+.PHONY: configmap image deploy
+
+# Regenerate and apply the k3s ConfigMap from site.yaml
+# Usage: make configmap [SITE=site.yaml]
+SITE ?= site.yaml
+
+configmap:
+	@echo '--- generating manifests from $(SITE) ---'
+	python3 generate_eks_manifests.py $(SITE) manifests
+	@echo '--- applying configmap to k3s ---'
+	kubectl apply -f manifests/configmap.yaml
+	@echo '--- restarting writer pod ---'
+	kubectl rollout restart deployment/parquet-writer-long -n data-capture
+	kubectl rollout status  deployment/parquet-writer-long -n data-capture --timeout=60s
+
 
 image:
 	@echo '--- building Docker image (GIT_HASH=$(GIT_HASH)) ---'
