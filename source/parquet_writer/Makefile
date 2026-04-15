@@ -98,7 +98,7 @@ check-deps:
 # Targets
 # --------------------------------------------------------------------------
 
-.PHONY: help clean purge deps test kpi
+.PHONY: help clean purge deps test kpi test_multi
 
 help:
 	@echo ''
@@ -113,6 +113,8 @@ help:
 	@echo ''
 	@echo 'Test:'
 	@echo '  test            build and run unit tests'
+	@echo '  test_multi      publish multi-phase MQTT test (fractal by default)'
+	@echo '  test_multi FORMAT=bench HOST=192.168.86.34  override format/host'
 	@echo '  kpi             build and run KPI/benchmark tests'
 	@echo ''
 	@echo 'Docker / Deploy:'
@@ -145,6 +147,15 @@ test: tests/test_parquet_writer
 
 kpi: tests/kpi_parquet_writer
 	./tests/kpi_parquet_writer
+
+# MQTT format: bench or fractal  (default: fractal)
+# HOST: MQTT + health host       (default: current machine)
+FORMAT ?= fractal
+HOST   ?= $(shell hostname)
+
+test_multi:
+	python3 test_multi_publish.py $(HOST) $(HOST) --format $(FORMAT)
+
 
 # Install missing dev packages (requires sudo)
 # Arrow/Parquet are not always in the default apt repo — this covers Ubuntu 22.04+.
