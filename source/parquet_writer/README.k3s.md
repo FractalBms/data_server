@@ -3,6 +3,12 @@
 Step-by-step guide to running the parquet-writer stack on a fresh machine
 using a local k3s cluster.  Tested on Ubuntu 22.04 with Docker installed.
 
+> **This file is bundled inside the Docker image at `/README.k3s.md`.**
+> To read it from a running pod:
+> ```bash
+> kubectl exec -n data-capture deployment/parquet-writer-long -- cat /README.k3s.md
+> ```
+
 ---
 
 ## Prerequisites
