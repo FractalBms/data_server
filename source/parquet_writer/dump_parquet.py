@@ -16,19 +16,29 @@ import pyarrow.parquet as pq
 import pyarrow.compute as pc
 
 
+def _kube_env():
+    """Pass KUBECONFIG through to kubectl subprocesses (k3s ignores ~/.kube/config otherwise)."""
+    env = os.environ.copy()
+    if 'KUBECONFIG' not in env:
+        kubeconfig = os.path.expanduser('~/.kube/config')
+        if os.path.exists(kubeconfig):
+            env['KUBECONFIG'] = kubeconfig
+    return env
+
 def fetch_from_pod(namespace):
+    env = _kube_env()
     result = subprocess.run(
         ['kubectl', 'get', 'pod', '-n', namespace,
          '-l', 'app=parquet-writer',
          '-o', 'jsonpath={.items[0].metadata.name}'],
-        capture_output=True, text=True
+        capture_output=True, text=True, env=env
     )
     pod = result.stdout.strip()
     if not pod:
         sys.exit(f'No parquet-writer pod found in namespace {namespace}')
     tmp = tempfile.mkdtemp()
     dest = os.path.join(tmp, 'data')
-    subprocess.run(['kubectl', 'cp', f'{namespace}/{pod}:/data', dest], check=True)
+    subprocess.run(['kubectl', 'cp', f'{namespace}/{pod}:/data', dest], check=True, env=env)
     return sorted(glob.glob(f'{dest}/**/*.parquet', recursive=True))
 
 
