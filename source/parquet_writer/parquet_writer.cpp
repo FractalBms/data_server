@@ -1216,9 +1216,9 @@ static void compact_thread_fn() {
             auto fname = p.filename().string();
             // Skip temp files
             if (fname.size() > 4 && fname.substr(fname.size() - 4) == ".tmp") continue;
-            // Only compact flush files (start with digit); compact_ files are final
-            bool is_flush = !fname.empty() && std::isdigit((unsigned char)fname[0]);
-            if (!is_flush) continue;
+            // Skip already-compacted files; accept flush files with or without site_id prefix
+            // (partition_as_filename_prefix produces "{site_id}_{ts}.parquet" — starts with letter)
+            if (fname.size() >= 8 && fname.substr(0, 8) == "compact_") continue;
 
             auto mtime = entry.last_write_time(ec);
             if (ec || mtime > cutoff) continue;
