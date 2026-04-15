@@ -294,6 +294,8 @@ ifeq ($(DEPLOY_HOST),)
 	docker build --build-arg GIT_HASH=$(GIT_HASH) -t parquet-writer:latest .
 	@echo '--- importing into k3s ---'
 	docker save parquet-writer:latest | sudo k3s ctr images import -
+	@echo '--- applying manifests (creates deployment on first run) ---'
+	kubectl apply -k manifests/
 	@echo '--- bouncing pod ---'
 	kubectl rollout restart deployment/parquet-writer-long -n $(NS)
 	kubectl rollout status  deployment/parquet-writer-long -n $(NS) --timeout=90s
@@ -310,6 +312,8 @@ query-demo:
 	docker build -f Dockerfile.query -t parquet-query:latest .
 	@echo '--- importing into k3s ---'
 	docker save parquet-query:latest | sudo k3s ctr images import -
+	@echo '--- applying manifests (creates query deployment on first run) ---'
+	kubectl apply -k manifests/
 	@echo '--- bouncing query pod ---'
 	kubectl rollout restart deployment/parquet-query -n $(NS)
 	kubectl rollout status  deployment/parquet-query -n $(NS) --timeout=90s
