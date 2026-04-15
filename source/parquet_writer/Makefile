@@ -256,9 +256,13 @@ configmap:
 	python3 generate_eks_manifests.py $(SITE) manifests
 	@echo '--- applying configmap to k3s ---'
 	kubectl apply -f manifests/configmap.yaml
-	@echo '--- restarting writer pod ---'
-	kubectl rollout restart deployment/parquet-writer-long -n $(NS)
-	kubectl rollout status  deployment/parquet-writer-long -n $(NS) --timeout=60s
+	@if kubectl get deployment/parquet-writer-long -n $(NS) >/dev/null 2>&1; then \
+	  echo '--- restarting writer pod ---'; \
+	  kubectl rollout restart deployment/parquet-writer-long -n $(NS); \
+	  kubectl rollout status  deployment/parquet-writer-long -n $(NS) --timeout=60s; \
+	else \
+	  echo '--- deployment not yet created, skipping restart (run make demo next) ---'; \
+	fi
 
 image:
 	@echo '--- building writer Docker image (GIT_HASH=$(GIT_HASH)) ---'
