@@ -123,9 +123,44 @@ Edit `site.yaml` for this deployment:
 
 All other fields can stay at their defaults for a demo.
 
-> **k3s storage class:** change `eks.storage_class` from `gp2` to `local-path`
-> — k3s ships with `local-path` as its default provisioner, not `gp2` (AWS EBS).
-> Check available classes with `kubectl get storageclass`.
+### Storage options
+
+Two modes — set in `site.yaml` under `capture:` and `eks:`.
+
+**Mode 1 — PVC (default, internal/managed storage)**
+
+Leave `capture.host_path` unset.  k3s allocates a volume on the node's
+root disk via the `local-path` provisioner:
+
+```yaml
+capture:
+  base_path: /data/site-capture   # path inside the container
+
+eks:
+  storage_gb:    20               # PVC size; 20 Gi ≈ 3 days at 63 signals/1 Hz
+  storage_class: local-path       # k3s default — use gp2 for AWS EBS
+```
+
+`pvc.yaml` is generated and included in `kustomization.yaml`.
+Check available storage classes with `kubectl get storageclass`.
+
+**Mode 2 — hostPath (external or named drive)**
+
+Set `capture.host_path` to the mount point of the drive on the host:
+
+```yaml
+capture:
+  base_path: /data/site-capture
+  host_path: /media/phil/08958e92-490f-45e4-9ccd-9c3a065f3d22
+```
+
+`pvc.yaml` is skipped entirely.  The deployment mounts the host directory
+directly into the container at `/data` with `type: DirectoryOrCreate`.
+`eks.storage_gb` and `eks.storage_class` are ignored in this mode.
+
+> **Note:** the drive must be mounted on the host before the pod starts.
+> If the path doesn't exist k3s creates an empty directory there — the pod
+> will start but data lands on the root disk, not the drive.
 
 ## 7 — Generate manifests and deploy
 
