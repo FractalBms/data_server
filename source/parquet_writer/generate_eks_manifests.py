@@ -197,10 +197,9 @@ def deployment_yaml(s, image):
     port     = eks["health_port"]
     delay    = eks["liveness_initial_delay_seconds"]
     topic_fmt = mqtt.get("topic_format", "bench")
+    is_local  = str(eks.get("account_id", "")).lower() in ("local", "k3s", "")
+    pull_policy = "Never" if is_local else "Always"
 
-    # For fractal format, SITE_ID comes from the MQTT topic — the secret only
-    # carries MQTT_HOST.  We still inject SITE_ID for parity; entrypoint.sh will
-    # only replace the placeholder if it exists in the config, so it's harmless.
     return f"""apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -223,6 +222,7 @@ spec:
       containers:
         - name: writer
           image: {image}
+          imagePullPolicy: {pull_policy}
           command: ["/entrypoint.sh"]
           env:
             - name: MQTT_HOST
@@ -266,6 +266,8 @@ def query_deployment_yaml(s, image):
     eks   = s["eks"]
     ns    = eks["namespace"]
     port  = eks["query_port"]
+    is_local    = str(eks.get("account_id", "")).lower() in ("local", "k3s", "")
+    pull_policy = "Never" if is_local else "Always"
     return f"""apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -284,6 +286,7 @@ spec:
       containers:
         - name: query
           image: {image}
+          imagePullPolicy: {pull_policy}
           env:
             - name: DATA_PATH
               value: /data/site-capture
