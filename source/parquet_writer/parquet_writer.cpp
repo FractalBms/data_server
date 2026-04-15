@@ -1074,9 +1074,25 @@ static int compact_directory(const fs::path& dir,
         null_count += merged->column(ci)->null_count();
     double null_pct = total_cells > 0 ? 100.0 * null_count / total_cells : 0.0;
 
+    // Mirror the flush filename prefix so compacted files sort alongside their sources.
+    // partition_as_filename_prefix: extract from first non-compact source (e.g. "0215D1D8_...")
+    // filename_prefix:              use static prefix from config
+    // neither:                      no prefix (unchanged behaviour)
+    std::string out_prefix;
+    if (cfg.partition_as_filename_prefix) {
+        for (const auto& f : files) {
+            std::string stem = f.stem().string();
+            if (stem.size() >= 7 && stem.substr(0, 7) == "compact") continue;
+            auto sep = stem.find('_');
+            if (sep != std::string::npos) { out_prefix = stem.substr(0, sep) + "_"; break; }
+        }
+    } else if (!cfg.filename_prefix.empty()) {
+        out_prefix = cfg.filename_prefix + "_";
+    }
+
     auto ts       = time_suffix();
-    auto tmp_path = (dir / ("compact_" + ts + ".parquet.tmp")).string();
-    auto out_path = (dir / ("compact_" + ts + ".parquet")).string();
+    auto tmp_path = (dir / (out_prefix + "compact_" + ts + ".parquet.tmp")).string();
+    auto out_path = (dir / (out_prefix + "compact_" + ts + ".parquet")).string();
 
     auto st = write_parquet_table(tmp_path, merged, cfg.compression);
     if (!st.ok()) {
