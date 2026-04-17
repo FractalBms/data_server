@@ -48,7 +48,16 @@ define CHECK_PKG  # (pkg, apt-pkg, extra-hint)
 	fi
 endef
 
-.PHONY: check-deps
+# Warn-only check for a command — prints suggestion but does NOT set missing flag.
+# Used for deploy tools (kubectl, k3s) that are not needed for image build.
+define CHECK_CMD_WARN  # (cmd, install-hint)
+	@if ! command -v $(1) >/dev/null 2>&1; then \
+	  echo "  WARN: $(1) not found — needed for deploy/demo targets"; \
+	  echo "    hint: $(2)"; \
+	fi
+endef
+
+.PHONY: check-deps check-deploy-deps
 check-deps:
 	@rm -f /tmp/.missing_deps
 	@echo "Checking build dependencies..."
@@ -94,6 +103,23 @@ check-deps:
 	  exit 1; \
 	fi
 	@echo "All dependencies found."
+
+# Check deploy-time tools: docker (hard), kubectl + k3s (warn only).
+check-deploy-deps:
+	@echo "Checking deploy dependencies..."
+	@if ! command -v docker >/dev/null 2>&1; then \
+	  echo ""; \
+	  echo "  MISSING: docker — required to build the image"; \
+	  echo "    hint:  https://docs.docker.com/engine/install/"; \
+	  echo ""; \
+	  exit 1; \
+	fi
+	$(call CHECK_CMD_WARN,kubectl,\
+	  curl -LO https://dl.k8s.io/release/$$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl && sudo install kubectl /usr/local/bin/)
+	$(call CHECK_CMD_WARN,k3s,\
+	  curl -sfL https://get.k3s.io | sh -)
+	@echo "  docker: ok"
+
 
 # --------------------------------------------------------------------------
 # Targets
@@ -265,7 +291,7 @@ configmap:
 	  echo '--- deployment not yet created, skipping restart (run make demo next) ---'; \
 	fi
 
-image:
+image: check-deploy-deps
 	@echo '--- building writer Docker image (GIT_HASH=$(GIT_HASH) DEFAULT_MQTT_HOST=$(DEFAULT_MQTT_HOST)) ---'
 	docker build --build-arg GIT_HASH=$(GIT_HASH) --build-arg DEFAULT_MQTT_HOST=$(DEFAULT_MQTT_HOST) -t parquet-writer:latest .
 	@docker images parquet-writer

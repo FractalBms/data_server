@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Parquet Capture Report — 2026-04-16</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --border: #2a2d3e;
+    --accent: #4f8ef7;
+    --accent2: #34d399;
+    --warn: #f59e0b;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --red: #f87171;
+  }
+  body.light {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --accent: #2563eb;
+    --accent2: #059669;
+    --warn: #d97706;
+    --text: #1e293b;
+    --muted: #64748b;
+    --red: #dc2626;
+  }
+  body.light table { box-shadow: 0 1px 3px rgba(0,0,0,0.07); }
+  body.light th { background: #f1f5f9; }
+  body.light tr:hover td { background: #f8fafc; }
+  body.light .note { background: #eff6ff; border-left-color: var(--accent); }
+  body.light .tag.blue { background: #dbeafe; }
+  body.light .tag.green { background: #d1fae5; }
+  body.light .tag.amber { background: #fef3c7; }
+  body.light .tag.red { background: #fee2e2; }
+  #themeToggle {
+    position: fixed; top: 14px; right: 20px; z-index: 100;
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--text); border-radius: 20px; padding: 5px 14px;
+    font-size: 0.8rem; cursor: pointer; font-family: inherit;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2); transition: background 0.2s, color 0.2s;
+  }
+  #themeToggle:hover { background: var(--border); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.6; }
+  h1 { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+  h2 { font-size: 1.1rem; font-weight: 600; color: var(--accent2); margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h3 { font-size: 0.95rem; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
+  .header { padding: 28px 32px 16px; border-bottom: 1px solid var(--border); }
+  .header p { color: var(--muted); margin-top: 4px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 24px 32px; }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .kpi .val { font-size: 1.8rem; font-weight: 700; color: var(--accent); line-height: 1; margin: 6px 0 4px; }
+  .kpi .val.green { color: var(--accent2); }
+  .kpi .val.amber { color: var(--warn); }
+  .kpi label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .kpi small { color: var(--muted); font-size: 0.8rem; }
+  .section { padding: 0 32px 32px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+  th { background: #12141e; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; padding: 10px 14px; text-align: left; }
+  td { padding: 9px 14px; border-top: 1px solid var(--border); font-size: 0.85rem; }
+  tr:hover td { background: #1f2235; }
+  .bar-wrap { background: var(--border); border-radius: 4px; height: 8px; min-width: 80px; overflow: hidden; }
+  .bar { height: 8px; border-radius: 4px; background: var(--accent); }
+  .bar.green { background: var(--accent2); }
+  .bar.amber { background: var(--warn); }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .tag.blue { background: #1e3a6e; color: var(--accent); }
+  .tag.green { background: #134e3a; color: var(--accent2); }
+  .tag.amber { background: #422006; color: var(--warn); }
+  .tag.red { background: #3b1212; color: var(--red); }
+  .mono { font-family: 'Courier New', monospace; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr 1fr; } }
+  .chart-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .hour-bars { display: flex; align-items: flex-end; gap: 3px; height: 80px; }
+  .hour-bar { flex: 1; border-radius: 3px 3px 0 0; min-height: 2px; }
+  .hour-labels { display: flex; gap: 3px; margin-top: 4px; }
+  .hour-label { flex: 1; font-size: 0.6rem; color: var(--muted); text-align: center; overflow: hidden; }
+  .note { background: #1e2235; border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; padding: 12px 16px; color: var(--muted); font-size: 0.85rem; margin-bottom: 16px; }
+  .sitesn-row td { color: var(--muted); font-style: italic; }
+  footer { padding: 24px 32px; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<button id="themeToggle" onclick="toggleTheme()">☀ Light</button>
+<div class="header">
+  <h1>Parquet Capture Report</h1>
+  <p>Archive: <span class="mono">parquet-safe-2026-04-16.tar.gz</span> &nbsp;|&nbsp; Generated: 2026-04-16 &nbsp;|&nbsp; Host: fractal-phil (192.168.86.51)</p>
+</div>
+
+<!-- KPI row -->
+<div class="grid">
+  <div class="kpi">
+    <label>Total Rows</label>
+    <div class="val">2.02 B</div>
+    <small>2,021,027,806 messages</small>
+  </div>
+  <div class="kpi">
+    <label>Archive Size (gz)</label>
+    <div class="val amber">4.3 GB</div>
+    <small>6.41 GB extracted</small>
+  </div>
+  <div class="kpi">
+    <label>Parquet Files</label>
+    <div class="val">2,549</div>
+    <small>2,547 × 02285AD0 + 2 × SiteSN</small>
+  </div>
+  <div class="kpi">
+    <label>Capture Window</label>
+    <div class="val green">~2.8 d</div>
+    <small>Apr 13 10:55 UTC → Apr 16 15:42 UTC</small>
+  </div>
+  <div class="kpi">
+    <label>Sustained Rate</label>
+    <div class="val">~86 M</div>
+    <small>rows/hour ≈ 23,900 msg/s</small>
+  </div>
+  <div class="kpi">
+    <label>Distinct Points</label>
+    <div class="val">3,894</div>
+    <small>across all devices</small>
+  </div>
+  <div class="kpi">
+    <label>BMS Units</label>
+    <div class="val green">12</div>
+    <small>+ site-level signals (no unit_id)</small>
+  </div>
+  <div class="kpi">
+    <label>Median File Size</label>
+    <div class="val">2.48 MB</div>
+    <small>range: 2.35 – 3.10 MB / ~792K rows</small>
+  </div>
+</div>
+
+<!-- Sites -->
+<div class="section">
+  <h2>Sites</h2>
+  <div class="note">
+    <strong>Note:</strong> <code>site_id</code> is not stored as a parquet column — it is encoded as the filename prefix before the timestamp (e.g. <code>02285AD0_20260416T045120Z.parquet</code>).
+    Site-level signals (meter, rtac, commstatus, site_controller_fault) have no <code>unit_id</code> column value.
+  </div>
+  <table>
+    <thead><tr><th>Site ID (filename prefix)</th><th>Files</th><th>Rows</th><th>Compressed Size</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="mono">02285AD0</td>
+        <td>2,547</td>
+        <td>2,021,027,800</td>
+        <td>6.41 GB</td>
+        <td><span class="tag blue">primary</span> Full EMS telemetry site</td>
+      </tr>
+      <tr class="sitesn-row">
+        <td class="mono">SiteSN</td>
+        <td>2</td>
+        <td>6</td>
+        <td>~3 KB</td>
+        <td><span class="tag amber">config</span> Startup/config rows — IP address, aws_init, ifconfig (IP: 10.0.54.10)</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Schema -->
+<div class="section">
+  <h2>Schema</h2>
+  <table>
+    <thead><tr><th>Column</th><th>Type</th><th>Notes</th><th>Compression Ratio (sample file)</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">project_id</td><td>BIGINT</td><td>Always 0 in current data</td><td>0.94× (constant, minimal gain)</td></tr>
+      <tr><td class="mono">ts</td><td>TIMESTAMP WITH TIME ZONE</td><td>America/New_York (EDT). Sub-ms precision</td><td>1.87×</td></tr>
+      <tr><td class="mono">value</td><td>FLOAT (32-bit)</td><td>Numeric signal value; NULL for string-only signals</td><td>1.61×</td></tr>
+      <tr><td class="mono">device</td><td>VARCHAR</td><td>bms / rack / pcs / meter / rtac / root / … (11 distinct)</td><td>1.45× (dict-encoded)</td></tr>
+      <tr><td class="mono">instance</td><td>VARCHAR</td><td>Sub-device instance (e.g. rack/string/cell id)</td><td>1.12×</td></tr>
+      <tr><td class="mono">point_name</td><td>VARCHAR</td><td>Signal name — 3,894 distinct; long fault strings dominate</td><td>1.16× (large cardinality)</td></tr>
+      <tr><td class="mono">unit_id</td><td>VARCHAR</td><td>Battery unit serial; NULL for site-level devices</td><td>1.09×</td></tr>
+      <tr><td class="mono">value_str</td><td>VARCHAR</td><td>String signals (IP addresses, mode strings, etc.)</td><td>1.06×</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:8px; color:var(--muted); font-size:0.8rem;">All columns use RLE + DICTIONARY encoding (PLAIN seed page + RLE_DICTIONARY for subsequent pages). Snappy compression.</p>
+</div>
+
+<!-- Devices -->
+<div class="section">
+  <h2>Device Breakdown (site 02285AD0)</h2>
+  <table>
+    <thead><tr><th>Device</th><th>Rows</th><th>% of total</th><th>Share</th><th>Units</th><th>Distinct Points</th><th>Value Range</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="mono">bms</td><td>1,700,160,957</td><td>84.1%</td>
+        <td><div class="bar-wrap"><div class="bar" style="width:84%"></div></div></td>
+        <td>12</td><td>2,392</td><td>−2,037 … 13,320</td>
+      </tr>
+      <tr>
+        <td class="mono">rack</td><td>214,730,574</td><td>10.6%</td>
+        <td><div class="bar-wrap"><div class="bar" style="width:10.6%"></div></div></td>
+        <td>12</td><td>104</td><td>−301.9 … 13,320</td>
+      </tr>
+      <tr>
+        <td class="mono">pcs</td><td>44,086,575</td><td>2.2%</td>
+        <td><div class="bar-wrap"><div class="bar" style="width:2.2%"></div></div></td>
+        <td>12</td><td>1,031</td><td>−4,213 … 4.3×10⁹ <span class="tag amber">outlier?</span></td>
+      </tr>
+      <tr>
+        <td class="mono">unitcomms</td><td>29,951,252</td><td>1.5%</td>
+        <td><div class="bar-wrap"><div class="bar" style="width:1.5%"></div></div></td>
+        <td>12</td><td>5</td><td>0 … 1 (boolean)</td>
+      </tr>
+      <tr>
+        <td class="mono">root</td><td>25,481,872</td><td>1.3%</td>
+        <td><div class="bar-wrap"><div class="bar" style="width:1.3%"></div></div></td>
+        <td>12</td><td>180</td><td>−38,571 … 142,942</td>
+      </tr>
+      <tr>
+        <td class="mono">meter</td><td>3,914,886</td><td>0.19%</td>
+        <td><div class="bar-wrap"><div class="bar green" style="width:0.4%"></div></div></td>
+        <td>—</td><td>134</td><td>−10,233 … 11,287</td>
+      </tr>
+      <tr>
+        <td class="mono">unit_controller_fault</td><td>1,937,368</td><td>0.10%</td>
+        <td><div class="bar-wrap"><div class="bar green" style="width:0.2%"></div></div></td>
+        <td>12</td><td>2</td><td>0 (all zero)</td>
+      </tr>
+      <tr>
+        <td class="mono">rtac</td><td>390,871</td><td>0.02%</td>
+        <td><div class="bar-wrap"><div class="bar green" style="width:0.1%"></div></div></td>
+        <td>—</td><td>36</td><td>−30,000 … 30,000</td>
+      </tr>
+      <tr>
+        <td class="mono">commstatus</td><td>338,105</td><td>0.02%</td>
+        <td><div class="bar-wrap"><div class="bar green" style="width:0.1%"></div></div></td>
+        <td>—</td><td>4</td><td>1.0 (constant)</td>
+      </tr>
+      <tr>
+        <td class="mono">site_controller_fault</td><td>35,112</td><td>&lt;0.01%</td>
+        <td><div class="bar-wrap"><div class="bar green" style="width:0.05%"></div></div></td>
+        <td>—</td><td>4</td><td>NULL (string-only)</td>
+      </tr>
+      <tr>
+        <td class="mono">Config</td><td>228</td><td>&lt;0.01%</td>
+        <td><div class="bar-wrap"><div class="bar green" style="width:0.01%"></div></div></td>
+        <td>13</td><td>26</td><td>string values</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Units -->
+<div class="section">
+  <h2>Battery Units (site 02285AD0)</h2>
+  <table>
+    <thead><tr><th>unit_id</th><th>Rows</th><th>Share</th><th>First Seen (UTC)</th><th>Last Seen (UTC)</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">0215F6BD</td><td>160,392,466</td><td><div class="bar-wrap"><div class="bar" style="width:87%"></div></div></td><td>2026-04-13 20:59:28</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">0215F8D0</td><td>160,935,370</td><td><div class="bar-wrap"><div class="bar" style="width:87%"></div></div></td><td>2026-04-13 20:59:19</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">0215F909</td><td>160,692,855</td><td><div class="bar-wrap"><div class="bar" style="width:87%"></div></div></td><td>2026-04-13 20:59:38</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">02285B10</td><td>184,700,855</td><td><div class="bar-wrap"><div class="bar" style="width:100%"></div></div></td><td>2026-04-13 20:59:51</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">0232A206</td><td>160,677,561</td><td><div class="bar-wrap"><div class="bar" style="width:87%"></div></div></td><td>2026-04-13 10:55:33</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">0232A209</td><td>160,707,355</td><td><div class="bar-wrap"><div class="bar" style="width:87%"></div></div></td><td>2026-04-13 20:59:24</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">0232A255</td><td>185,019,193</td><td><div class="bar-wrap"><div class="bar" style="width:100%"></div></div></td><td>2026-04-13 21:00:10</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">0232A26B</td><td>160,525,517</td><td><div class="bar-wrap"><div class="bar" style="width:87%"></div></div></td><td>2026-04-13 20:59:55</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">0232A26D</td><td>160,657,262</td><td><div class="bar-wrap"><div class="bar" style="width:87%"></div></div></td><td>2026-04-13 21:01:37</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">0232A277</td><td>184,614,919</td><td><div class="bar-wrap"><div class="bar" style="width:100%"></div></div></td><td>2026-04-13 12:16:28</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">0232A27B</td><td>161,013,121</td><td><div class="bar-wrap"><div class="bar" style="width:87%"></div></div></td><td>2026-04-13 20:59:23</td><td>2026-04-16 15:42:06</td></tr>
+      <tr><td class="mono">0232A27C</td><td>160,841,129</td><td><div class="bar-wrap"><div class="bar" style="width:87%"></div></div></td><td>2026-04-13 21:01:33</td><td>2026-04-16 15:42:06</td></tr>
+      <tr style="color:var(--muted)"><td class="mono">(none — site-level)</td><td>20,250,115</td><td><div class="bar-wrap"><div class="bar amber" style="width:11%"></div></div></td><td colspan="2">meter / rtac / commstatus / site_controller_fault</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Message rate chart -->
+<div class="section">
+  <h2>Message Rate Profile (UTC hours)</h2>
+  <div class="chart-wrap">
+    <h3>Rows per hour — sparse start then full capture rate from Apr 15 20:00 UTC</h3>
+    <div class="hour-bars" id="hourBars"></div>
+    <div class="hour-labels" id="hourLabels"></div>
+    <p style="color:var(--muted);font-size:0.78rem;margin-top:10px;">
+      Capture began Apr 13 (sparse config rows) — full rate commenced Apr 15 ~20:00 UTC.
+      Steady state: <strong>~86 M rows/hour</strong> (23,900 msg/s). Rate increase Apr 16 17:00–18:00 UTC may indicate an additional data source or reduced flush interval.
+    </p>
+  </div>
+</div>
+
+<!-- Top points -->
+<div class="section">
+  <h2>Top 20 BMS Point Names by Volume</h2>
+  <table>
+    <thead><tr><th>#</th><th>Point Name</th><th>Rows</th><th>Share of BMS</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td class="mono">SysHB</td><td>3,746,408</td><td><div class="bar-wrap"><div class="bar" style="width:100%"></div></div></td></tr>
+      <tr><td>2</td><td class="mono">Battery3_MBMS_System_warning_and_fault_SBMU_Distributed_TMS_warning</td><td>2,030,766</td><td><div class="bar-wrap"><div class="bar" style="width:54%"></div></div></td></tr>
+      <tr><td>3</td><td class="mono">Battery1_MBMS_System_warning_and_fault_SBMU_Distributed_TMS_warning</td><td>2,030,764</td><td><div class="bar-wrap"><div class="bar" style="width:54%"></div></div></td></tr>
+      <tr><td>4</td><td class="mono">Battery2_MBMS_System_warning_and_fault_SBMU_Distributed_TMS_warning</td><td>2,030,764</td><td><div class="bar-wrap"><div class="bar" style="width:54%"></div></div></td></tr>
+      <tr><td>5</td><td class="mono">MaxCellV</td><td>1,178,559</td><td><div class="bar-wrap"><div class="bar" style="width:31%"></div></div></td></tr>
+      <tr><td>6</td><td class="mono">MinCellV</td><td>1,164,527</td><td><div class="bar-wrap"><div class="bar" style="width:31%"></div></div></td></tr>
+      <tr><td>7</td><td class="mono">SysVoltage</td><td>1,020,295</td><td><div class="bar-wrap"><div class="bar" style="width:27%"></div></div></td></tr>
+      <tr><td>8–20</td><td class="mono">Battery[1-3]_SBMU[4-5]_warning_and_Fault__*</td><td>~1,015,383 each</td><td><div class="bar-wrap"><div class="bar" style="width:27%"></div></div></td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:8px; color:var(--muted); font-size:0.8rem;">The dominant pattern is fault/warning flags with near-identical row counts — consistent polling of all 2,392 BMS point names at a fixed interval across 12 units. SysHB (heartbeat) appears at ~2× the rate of fault flags, suggesting it is published separately.</p>
+</div>
+
+<!-- SiteSN -->
+<div class="section">
+  <h2>SiteSN Files (Config / Init Data)</h2>
+  <table>
+    <thead><tr><th>ts (UTC)</th><th>device</th><th>point_name</th><th>unit_id</th><th>value_str</th></tr></thead>
+    <tbody>
+      <tr><td>—</td><td class="mono">root</td><td class="mono">aws_init</td><td class="mono">02285AD0</td><td>—</td></tr>
+      <tr><td>2026-04-13 23:19:03</td><td class="mono">root</td><td class="mono">IP_address</td><td class="mono">02285AD0</td><td><strong>10.0.54.10</strong></td></tr>
+      <tr><td>—</td><td class="mono">root</td><td class="mono">ifconfig</td><td class="mono">02285AD0</td><td>—</td></tr>
+      <tr><td>—</td><td class="mono">root</td><td class="mono">ifconfig</td><td class="mono">02285AD0</td><td>—</td></tr>
+      <tr><td>2026-04-16 13:09:10</td><td class="mono">root</td><td class="mono">IP_address</td><td class="mono">02285AD0</td><td><strong>10.0.54.10</strong></td></tr>
+      <tr><td>—</td><td class="mono">root</td><td class="mono">aws_init</td><td class="mono">02285AD0</td><td>—</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:8px; color:var(--muted); font-size:0.8rem;">
+    Two init events logged (Apr 13 and Apr 16). Site IP is <strong>10.0.54.10</strong> — consistent with an AWS VPC private subnet. The <code>SiteSN</code> prefix appears to be a placeholder site name rather than a real serial, written before the actual site ID is registered.
+  </p>
+</div>
+
+<!-- Encoding -->
+<div class="section">
+  <h2>Encoding &amp; Compression (Sample File: 02285AD0_20260416T045120Z.parquet)</h2>
+  <table>
+    <thead><tr><th>Column</th><th>Encodings</th><th>Compressed</th><th>Uncompressed</th><th>Ratio</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">project_id</td><td>PLAIN + RLE_DICTIONARY</td><td>1 KB</td><td>~1 KB</td><td>0.94×</td><td>Constant 0 — no benefit</td></tr>
+      <tr><td class="mono">ts</td><td>PLAIN + RLE_DICTIONARY</td><td>454 KB</td><td>849 KB</td><td><strong>1.87×</strong></td><td>Best compression — monotonic timestamps RLE well</td></tr>
+      <tr><td class="mono">value</td><td>PLAIN + RLE_DICTIONARY</td><td>170 KB</td><td>274 KB</td><td><strong>1.61×</strong></td><td>Float32 — repeated values compress via dictionary</td></tr>
+      <tr><td class="mono">device</td><td>PLAIN + RLE_DICTIONARY</td><td>95 KB</td><td>138 KB</td><td>1.45×</td><td>11 distinct values — highly dict-compressible</td></tr>
+      <tr><td class="mono">instance</td><td>PLAIN + RLE_DICTIONARY</td><td>278 KB</td><td>311 KB</td><td>1.12×</td><td>Moderate cardinality (rack/cell instances)</td></tr>
+      <tr><td class="mono">point_name</td><td>PLAIN + RLE_DICTIONARY</td><td>1,168 KB</td><td>1,355 KB</td><td>1.16×</td><td>3,894 distinct — largest column, low dict ratio</td></tr>
+      <tr><td class="mono">unit_id</td><td>PLAIN + RLE_DICTIONARY</td><td>240 KB</td><td>262 KB</td><td>1.09×</td><td>12 units + nulls</td></tr>
+      <tr><td class="mono">value_str</td><td>PLAIN + RLE_DICTIONARY</td><td>6 KB</td><td>6 KB</td><td>1.06×</td><td>Mostly NULL — string signals are rare</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:8px; color:var(--muted); font-size:0.8rem;">
+    Total: 2,413 KB compressed / 3,196 KB uncompressed = <strong>1.32× overall</strong> for this file's row group (791,944 rows).
+    The 3.28 MB uncompressed data fits in 2.48 MB on disk. <code>point_name</code> is the dominant column — encoding could improve with ZSTD or better dictionary settings given the long fault-string names.
+  </p>
+</div>
+
+<!-- Observations -->
+<div class="section">
+  <h2>Observations &amp; Replay Notes</h2>
+  <div class="note">
+    <strong>site_id not in columns.</strong> The site ID <code>02285AD0</code> is embedded in the filename prefix only. Any SQL query over the parquet glob must use a filename-scoped glob (e.g. <code>02285AD0_*.parquet</code>) rather than a <code>WHERE site_id = ...</code> clause.
+  </div>
+  <div class="note">
+    <strong>PCS outlier value.</strong> <code>pcs</code> device has <code>MAX(value) = 4,294,967,296</code> (= 2³², likely an unhandled overflow/sentinel). Check these rows before replay to avoid corrupting target systems.
+  </div>
+  <div class="note">
+    <strong>Replay feasibility.</strong> At ~86M rows/hour = 23,900 msg/s, real-time replay requires a broker (FlashMQ) and subscriber stack capable of sustaining that throughput. 
+    The data has full topic reconstruction columns available: <code>unit_id</code>, <code>device</code>, <code>instance</code>, <code>point_name</code>. No <code>mqtt_topic</code> column is present — topics must be reconstructed. Root pattern: <code>ems/site/{site_id}/unit/{unit_id}/{device}/{instance}/{point_name}/float</code>.
+  </div>
+  <div class="note">
+    <strong>Project ID.</strong> All rows carry <code>project_id = 0</code>. This column is currently unused for partitioning. It could be repurposed as a tenant ID in multi-project deployments.
+  </div>
+  <div class="note">
+    <strong>BMS dominant load.</strong> bms signals account for 84.1% of total rows. The ~2,392 distinct bms point names per unit (× 12 units) suggest a full polling sweep at fixed intervals. Fault/warning flags dominate by name count but not by unique value — high deduplication potential for COV filtering.
+  </div>
+  <div class="note">
+    <strong>Wide-format compaction RAM requirement.</strong>
+    A 3-hour window contains ~258M long rows. Pivoting to wide format creates ~3.1M rows × 3,894 columns.
+    DuckDB materialises the full pivot hash table in memory before writing:
+    estimated peak usage <strong>20–40 GB RAM per window</strong> (sparse float32 matrix + hash overhead).
+    Machines with less than 32 GB available RAM should process one window at a time and close the connection between windows.
+    The 8 full windows would require sequential processing; do not attempt parallel wide compaction unless &gt;64 GB RAM is free.
+  </div>
+  <div class="note">
+    <strong>MQTT topic reconstruction — confidence assessment.</strong>
+    <table style="margin-top:8px; width:100%; border-collapse:collapse;">
+      <thead><tr><th style="text-align:left;padding:4px 8px;color:var(--muted);font-size:0.75rem;">Topic segment</th><th style="text-align:left;padding:4px 8px;color:var(--muted);font-size:0.75rem;">Source</th><th style="padding:4px 8px;color:var(--muted);font-size:0.75rem;">Confidence</th></tr></thead>
+      <tbody>
+        <tr><td style="padding:4px 8px" class="mono">ems</td><td style="padding:4px 8px">Topic root — <strong>NOT stored</strong>. Must be supplied externally or guessed.</td><td style="padding:4px 8px;text-align:center"><span class="tag amber">~70%</span></td></tr>
+        <tr><td style="padding:4px 8px" class="mono">site/{site_id}</td><td style="padding:4px 8px">Extracted from filename prefix (<code>02285AD0_*.parquet</code>). Reliable but requires filename parsing, not SQL.</td><td style="padding:4px 8px;text-align:center"><span class="tag green">95%</span></td></tr>
+        <tr><td style="padding:4px 8px" class="mono">unit/{unit_id}</td><td style="padding:4px 8px"><code>unit_id</code> column stored directly. Present for 12 units; NULL for site-level devices (meter, rtac, commstatus).</td><td style="padding:4px 8px;text-align:center"><span class="tag green">99%</span></td></tr>
+        <tr><td style="padding:4px 8px" class="mono">{device}</td><td style="padding:4px 8px"><code>device</code> column stored directly.</td><td style="padding:4px 8px;text-align:center"><span class="tag green">99%</span></td></tr>
+        <tr><td style="padding:4px 8px" class="mono">{instance}</td><td style="padding:4px 8px"><code>instance</code> column stored. NULL rows correctly map to the 6/8-seg pattern (no instance level).</td><td style="padding:4px 8px;text-align:center"><span class="tag green">99%</span></td></tr>
+        <tr><td style="padding:4px 8px" class="mono">{point_name}</td><td style="padding:4px 8px"><code>point_name</code> column stored directly.</td><td style="padding:4px 8px;text-align:center"><span class="tag green">99%</span></td></tr>
+        <tr><td style="padding:4px 8px" class="mono">{dtype}</td><td style="padding:4px 8px"><strong>NOT stored</strong> — <code>dtype_hint</code> was in <code>drop_columns</code>. Can only infer <code>float</code> (value populated) vs <code>string</code> (value_str populated). <code>boolean_integer</code> and <code>integer</code> dtypes are indistinguishable from <code>float</code> in the stored data.</td><td style="padding:4px 8px;text-align:center"><span class="tag red">~60%</span></td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:10px">
+      <strong>Overall topic reconstruction confidence: ~80%.</strong>
+      The structural segments (site, unit, device, instance, point_name) are all recoverable with high confidence.
+      The two unknowns — <em>topic root</em> and <em>dtype suffix</em> — were intentionally dropped by the writer config (<code>drop_columns: ["dtype_hint", "site_id"]</code>).
+      For an exact replay, the DevOps team should re-capture a short session with <code>store_mqtt_topic: true</code> to record the full original topic per row, eliminating all ambiguity.
+    </p>
+  </div>
+</div>
+
+<!-- Long Compact Results -->
+<div class="section">
+  <h2>Long Format Compact Results</h2>
+  <div class="note">
+    Compacted 2,547 flush files (6.41 GB) into 8 × 3-hour parquet files (long format, ordered by <code>ts</code>).
+    Run on fractal-phil (.51) with DuckDB 1.5.2 — completed successfully 2026-04-16.
+    Wide-format pivot attempted on .51 but <strong>failed OOM</strong> (62 GB RAM insufficient); queued for .34 (256 GB).
+  </div>
+
+  <!-- compact KPI mini-row -->
+  <div class="grid" style="padding: 0 0 16px 0;">
+    <div class="kpi">
+      <label>Output Files</label>
+      <div class="val green">8</div>
+      <small>3-hour buckets, long format</small>
+    </div>
+    <div class="kpi">
+      <label>Total Size</label>
+      <div class="val green">3.38 GB</div>
+      <small>down from 6.41 GB extracted</small>
+    </div>
+    <div class="kpi">
+      <label>Compression Gain</label>
+      <div class="val green">1.90×</div>
+      <small>vs extracted flush files</small>
+    </div>
+    <div class="kpi">
+      <label>File Reduction</label>
+      <div class="val green">319×</div>
+      <small>2,547 files → 8 files</small>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Output File</th>
+        <th>Window (UTC)</th>
+        <th>Size</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="mono">02285AD0_20260415T1800Z.parquet</td>
+        <td>Apr 15 18:00 – 21:00</td>
+        <td>89 MB</td>
+        <td><span class="tag amber">sparse</span> Ramp-up — partial hour, low row count</td>
+      </tr>
+      <tr>
+        <td class="mono">02285AD0_20260415T2100Z.parquet</td>
+        <td>Apr 15 21:00 – Apr 16 00:00</td>
+        <td>464 MB</td>
+        <td><span class="tag green">full</span></td>
+      </tr>
+      <tr>
+        <td class="mono">02285AD0_20260416T0000Z.parquet</td>
+        <td>Apr 16 00:00 – 03:00</td>
+        <td>464 MB</td>
+        <td><span class="tag green">full</span></td>
+      </tr>
+      <tr>
+        <td class="mono">02285AD0_20260416T0300Z.parquet</td>
+        <td>Apr 16 03:00 – 06:00</td>
+        <td>466 MB</td>
+        <td><span class="tag green">full</span></td>
+      </tr>
+      <tr>
+        <td class="mono">02285AD0_20260416T0600Z.parquet</td>
+        <td>Apr 16 06:00 – 09:00</td>
+        <td>465 MB</td>
+        <td><span class="tag green">full</span></td>
+      </tr>
+      <tr>
+        <td class="mono">02285AD0_20260416T0900Z.parquet</td>
+        <td>Apr 16 09:00 – 12:00</td>
+        <td>463 MB</td>
+        <td><span class="tag green">full</span></td>
+      </tr>
+      <tr>
+        <td class="mono">02285AD0_20260416T1200Z.parquet</td>
+        <td>Apr 16 12:00 – 15:00</td>
+        <td>463 MB</td>
+        <td><span class="tag green">full</span></td>
+      </tr>
+      <tr>
+        <td class="mono">02285AD0_20260416T1500Z.parquet</td>
+        <td>Apr 16 15:00 – 18:00</td>
+        <td>502 MB</td>
+        <td><span class="tag green">full</span> Slightly larger — rate spike visible in Apr 16 17:00–18:00 UTC</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="margin-top:8px; color:var(--muted); font-size:0.8rem;">
+    Schema unchanged from source (long format). Files sorted by <code>ts</code> within each window.
+    Output path: <code>/tmp/compact-long/</code> on fractal-phil (.51).
+  </p>
+</div>
+
+<!-- compact-long-dtype section -->
+<div class="section">
+  <h2>Typed Compact (compact-long-dtype)</h2>
+  <div class="note">
+    Re-compacted from compact-long with dtype_hint + typed value columns added. Old <code>value FLOAT32</code> dropped and replaced by
+    <code>value_float</code>, <code>value_int</code>, <code>value_bool</code>. Processed on fractal-phil (.51) in 7.3 min.
+  </div>
+  <table>
+    <thead><tr><th>File</th><th>Rows</th><th>boolean_integer</th><th>integer</th><th>float</th><th>string</th><th>Size</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">02285AD0_20260415T1800Z</td><td>48,911,412</td><td>85.9%</td><td>7.6%</td><td>6.1%</td><td>0.4%</td><td>96.7 MB</td></tr>
+      <tr><td class="mono">02285AD0_20260415T2100Z</td><td>258,537,377</td><td>85.9%</td><td>7.5%</td><td>6.1%</td><td>0.4%</td><td>513.1 MB</td></tr>
+      <tr><td class="mono">02285AD0_20260416T0000Z</td><td>258,601,504</td><td>85.9%</td><td>7.6%</td><td>6.1%</td><td>0.4%</td><td>513.1 MB</td></tr>
+      <tr><td class="mono">02285AD0_20260416T0300Z</td><td>258,678,731</td><td>85.9%</td><td>7.6%</td><td>6.1%</td><td>0.4%</td><td>514.6 MB</td></tr>
+      <tr><td class="mono">02285AD0_20260416T0600Z</td><td>258,475,267</td><td>85.9%</td><td>7.5%</td><td>6.1%</td><td>0.4%</td><td>512.2 MB</td></tr>
+      <tr><td class="mono">02285AD0_20260416T0900Z</td><td>258,325,594</td><td>86.0%</td><td>7.5%</td><td>6.1%</td><td>0.4%</td><td>509.6 MB</td></tr>
+      <tr><td class="mono">02285AD0_20260416T1200Z</td><td>258,119,589</td><td>86.0%</td><td>7.5%</td><td>6.1%</td><td>0.4%</td><td>509.9 MB</td></tr>
+      <tr><td class="mono">02285AD0_20260416T1500Z</td><td>264,033,232</td><td>84.1%</td><td>7.9%</td><td>7.6%</td><td>0.4%</td><td>552.9 MB</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:8px; color:var(--muted); font-size:0.8rem;">
+    Total: 1,863,682,706 rows &nbsp;|&nbsp; 3.72 GB (5% larger than compact-long — NULL definition levels for 3 extra columns outweigh BOOLEAN compression gain)
+    &nbsp;|&nbsp; Path: <code>/home/phil/work/parquet/compact-long-dtype/</code>
+  </p>
+</div>
+
+<!-- dtype_hint section -->
+<div class="section">
+  <h2>dtype_hint Scan &amp; Editor</h2>
+  <div class="note">
+    dtype_hint was the last segment of the MQTT topic (e.g. <code>float</code>, <code>integer</code>, <code>boolean_integer</code>, <code>string</code>) but was dropped by the parquet writer config.
+    Inferred from data patterns across compact-long: null-only rows → string; distinct values {0,1} only → boolean_integer; no fractional part → integer; otherwise → float.
+    Confidence: ~99% for boolean/string signals, ~95% for float vs integer boundary cases.
+  </div>
+  <div class="grid" style="padding:0 0 16px;">
+    <div class="kpi"><label>Total Points</label><div class="val">3,769</div><small>distinct point_name values</small></div>
+    <div class="kpi"><label>boolean_integer</label><div class="val green">2,669</div><small>70.8% — {0,1} only</small></div>
+    <div class="kpi"><label>integer</label><div class="val">752</div><small>19.9% — whole numbers</small></div>
+    <div class="kpi"><label>float</label><div class="val amber">338</div><small>9.0% — fractional values</small></div>
+    <div class="kpi"><label>string</label><div class="val">10</div><small>0.3% — value_str only</small></div>
+  </div>
+  <p style="color:var(--muted); font-size:0.85rem;">
+    Hints stored in <code>/home/phil/work/parquet/dtype_hints.csv</code> &nbsp;|&nbsp;
+    Live editor: <a href="http://phil-dev:8085/" style="color:var(--accent);">http://phil-dev:8085/</a>
+  </p>
+</div>
+
+<!-- Wide compact status -->
+<div class="section">
+  <h2>Wide Compact (compact-wide) — In Progress</h2>
+  <div class="note">
+    DuckDB PIVOT over 3,894 point_name columns. Requires 256 GB RAM — OOM on fractal-phil (62 GB).
+    Running on .34 (256 GB) after rsync. Phil-mini (92 GB) running as parallel smoke test.
+  </div>
+  <table>
+    <thead><tr><th>Host</th><th>RAM</th><th>Status</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">.34 (192.168.86.34)</td><td>256 GB</td><td><span class="tag amber">syncing</span></td><td>rsync from .51 was ~77% complete; watcher script will auto-launch compact_wide.py on completion</td></tr>
+      <tr><td class="mono">phil-mini (.30)</td><td>92 GB</td><td><span class="tag amber">running</span></td><td>Bucket 2 of 8 in progress; parallel smoke test — slower machine (3× cost)</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:8px; color:var(--muted); font-size:0.8rem;">
+    Output path: <code>/home/phil/work/parquet/parquet-safe-2026-04-16/compact-wide/</code> &nbsp;|&nbsp;
+    Schema: one row per (ts, unit_id), one column per point_name (~3,894 float columns)
+  </p>
+</div>
+
+<!-- 1-day compact plan -->
+<div class="section">
+  <h2>1-Day Compact (compact-long-1day) — Planned</h2>
+  <div class="note">
+    Re-compact compact-long-dtype into daily files (one file per calendar day UTC).
+    Window: Apr 13–16; expected output: 4 files (~900 MB each). Same schema as compact-long-dtype.
+  </div>
+</div>
+
+<footer>
+  Report updated 2026-04-17 | Archive: parquet-safe-2026-04-16.tar.gz (4.3 GB gz / 6.0 GB extracted) |
+  Analysis: DuckDB 1.5.2 + PyArrow 23.0.1 on fractal-phil | Site: 02285AD0 | Device: EMS Battery Storage System
+</footer>
+
+<script>
+// Theme toggle
+function toggleTheme() {
+  const light = document.body.classList.toggle('light');
+  document.getElementById('themeToggle').textContent = light ? '🌙 Dark' : '☀ Light';
+  localStorage.setItem('theme', light ? 'light' : 'dark');
+}
+if (localStorage.getItem('theme') === 'light') {
+  document.body.classList.add('light');
+  document.getElementById('themeToggle').textContent = '🌙 Dark';
+}
+
+// Hourly bar chart
+const data = [
+  ['13T14',5],['13T16',5],['14T00',61],['14T01',41],['14T02',88],
+  ['15T20',48911412],['15T21',86137977],['15T22',86184658],['15T23',86214742],
+  ['16T00',86130825],['16T01',86215448],['16T02',86255231],['16T03',86255647],
+  ['16T04',86215228],['16T05',86207856],['16T06',86173852],['16T07',86175648],
+  ['16T08',86125767],['16T09',86129182],['16T10',86109577],['16T11',86086835],
+  ['16T12',86072815],['16T13',86018451],['16T14',86028323],['16T15',86060598],
+  ['16T16',86727962],['16T17',91244672],['16T18',91533614],['16T19',63873646]
+];
+const maxVal = Math.max(...data.map(d => d[1]));
+const barsEl = document.getElementById('hourBars');
+const labsEl = document.getElementById('hourLabels');
+data.forEach(([label, val]) => {
+  const pct = Math.max(2, Math.round((val / maxVal) * 100));
+  const isSparse = val < 1e6;
+  const b = document.createElement('div');
+  b.className = 'hour-bar';
+  b.style.height = pct + '%';
+  b.style.background = isSparse ? '#f87171' : (val > 89e6 ? '#34d399' : '#4f8ef7');
+  b.title = label + ': ' + val.toLocaleString() + ' rows';
+  barsEl.appendChild(b);
+  const l = document.createElement('div');
+  l.className = 'hour-label';
+  l.textContent = label;
+  labsEl.appendChild(l);
+});
+</script>
+
+</body>
+</html>
